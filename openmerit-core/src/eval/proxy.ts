@@ -88,13 +88,23 @@ export async function withRetries(forward: () => Promise<Response | Error>, sign
 
 export class EvalProxy {
   private server: Server | null = null;
+  /** Requests being handled, and how to abort each one's upstream call. */
+  private readonly inFlight = new Map<Promise<unknown>, AbortController>();
   private readonly units = new Map<string, { unit: ProxyUnit; tally: UnitTally; ledger: Ledger }>();
   private readonly state: State;
   private readonly fetcher: typeof fetch;
   constructor(state: State, fetcher: typeof fetch = fetch) { this.state = state; this.fetcher = fetcher; }
 
   async start(): Promise<string> {
-    this.server = createServer((req, res) => { this.handle(req, res).catch(error => { if (!res.headersSent) send(res, 500, `OpenMerit proxy: ${error instanceof Error ? error.message : String(error)}`, "openmerit_proxy"); else res.end(); }); });
+    this.server = createServer((req, res) => {
+      // The upstream call lives only as long as the eval's request: an eval that gives up (its own
+      // timeout, a kill) aborts it, so it does not keep running, and billing, after the eval moved on.
+      const abort = new AbortController();
+      res.on("close", () => { if (!res.writableFinished) abort.abort(new Error("the eval closed its request")); });
+      const handled = this.handle(req, res, abort.signal).catch(error => { if (!res.headersSent) send(res, 500, `OpenMerit proxy: ${error instanceof Error ? error.message : String(error)}`, "openmerit_proxy"); else res.end(); })
+        .finally(() => this.inFlight.delete(handled));
+      this.inFlight.set(handled, abort);
+    });
     await new Promise<void>(resolve => this.server!.listen(0, "127.0.0.1", resolve));
     return `http://127.0.0.1:${(this.server.address() as AddressInfo).port}/v1`;
   }
@@ -103,6 +113,10 @@ export class EvalProxy {
     const server = this.server;
     this.server = null;
     if (!server) return;
+    // Every request still open is aborted and settled before the step that ran the eval ends, so no
+    // reservation is left open across a pause or a stop.
+    for (const abort of this.inFlight.values()) abort.abort(new Error("the eval step ended"));
+    await Promise.allSettled(this.inFlight.keys());
     const closed = new Promise<void>(resolve => server.close(() => resolve()));
     server.closeAllConnections();
     await closed;
@@ -118,7 +132,7 @@ export class EvalProxy {
 
   close(token: string) { this.units.delete(token); }
 
-  private async handle(req: IncomingMessage, res: ServerResponse) {
+  private async handle(req: IncomingMessage, res: ServerResponse, signal: AbortSignal) {
     const token = /^Bearer\s+(\S+)/i.exec(req.headers.authorization ?? "")?.[1] ?? (req.headers["x-api-key"] as string | undefined);
     const entry = token ? this.units.get(token) : undefined;
     if (!entry) return send(res, 401, "OpenMerit proxy: unknown or closed eval token.", "openmerit_auth");
@@ -132,7 +146,10 @@ export class EvalProxy {
     const raw = await body(req);
     let parsed: Record<string, unknown>;
     try { parsed = JSON.parse(raw.toString("utf8")) as Record<string, unknown>; } catch { return send(res, 400, "OpenMerit proxy: the request body is not JSON.", "openmerit_request"); }
-    const model = typeof parsed.model === "string" ? parsed.model : unit.model;
+    let model = typeof parsed.model === "string" ? parsed.model : unit.model;
+    // An SDK that strips the vendor prefix, as OpenAI's Agents SDK turns openai/gpt-4.1-mini into
+    // gpt-4.1-mini, still asks for the model under test: send it as the endpoint names it.
+    if (unit.allowed(model) === undefined && model === unit.model.split("/").at(-1)) { model = unit.model; parsed.model = model; }
     const catalogue = unit.allowed(model);
     if (catalogue === undefined) {
       tally.poolViolations.push(model);
@@ -157,11 +174,11 @@ export class EvalProxy {
     const settle = (cost: Settlement) => { settled = true; return ledger.settle(key, cost); };
     try {
       const forward = () => this.fetcher(`${unit.baseUrl.replace(/\/$/, "")}${path}`, {
-        method: "POST", body: forwarded, redirect: "manual", signal: AbortSignal.timeout(600_000),
+        method: "POST", body: forwarded, redirect: "manual", signal: AbortSignal.any([signal, AbortSignal.timeout(600_000)]),
         headers: { authorization: `Bearer ${unit.apiKey}`, "content-type": "application/json", accept: req.headers.accept ?? "application/json", ...(unit.baseUrl.includes("openrouter.ai") ? { "x-title": "OpenMerit Scout eval" } : {}) },
       }).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
       // A failed call that may pass is sent again, so the eval only sees failures that last; failed calls are not charged.
-      const upstream = await withRetries(forward);
+      const upstream = await withRetries(forward, signal).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
       if (upstream instanceof Error) {
         tally.upstreamErrors.push(502);
         await settle({ actualUsd: 0, estimatedUsd: null, latencyMs: Date.now() - started, failed: true });

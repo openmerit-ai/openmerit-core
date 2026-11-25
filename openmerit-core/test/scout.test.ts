@@ -764,6 +764,33 @@ test("the metering proxy estimates an answer without token usage by its size, no
   assert.ok(spend.estimatedUsd > 0 && spend.totalUsd < reserved / 1000, `estimated $${spend.totalUsd}, reserved $${reserved}`);
 });
 
+test("a model call the eval gives up on is aborted upstream and never counts more than its reservation", async () => {
+  const ctx = context(repo(), mkdtempSync(join(tmpdir(), "openmerit-home-")));
+  const runId = startRun(ctx);
+  const nano = loadCatalogue().models.find(model => model.id === "openai/gpt-5-nano")!;
+  // A model that streams without end and never reports usage, like a reasoning model the eval timed out on.
+  let upstreamAborted = false;
+  const endless = (async (_url: string, init: RequestInit) => {
+    const chunk = new TextEncoder().encode(`data: ${JSON.stringify({ choices: [{ delta: { reasoning: "x".repeat(300_000) } }] })}\n\n`);
+    init.signal!.addEventListener("abort", () => { upstreamAborted = true; });
+    return new Response(new ReadableStream({ async pull(controller) { await new Promise(resolve => setTimeout(resolve, 20)); if (init.signal!.aborted) controller.error(init.signal!.reason); else controller.enqueue(chunk); } }), { status: 200, headers: { "content-type": "text/event-stream" } });
+  }) as unknown as typeof fetch;
+  const proxy = new EvalProxy(ctx.state, endless);
+  const url = await proxy.start();
+  const { token } = proxy.open({ runId, unitId: "unit", endpointId: "openai", baseUrl, apiKey: "sk-fake-endpoint", model: "gpt-5-nano", allowed: () => nano });
+  const gaveUp = new AbortController();
+  const answer = await fetch(`${url}/chat/completions`, { method: "POST", signal: gaveUp.signal, headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ model: "gpt-5-nano", stream: true, max_completion_tokens: 1000, messages: [{ role: "user", content: "hi" }] }) });
+  const reader = answer.body!.getReader();
+  for (let i = 0; i < 10; i++) await reader.read();
+  gaveUp.abort();
+  await proxy.stop();
+  assert.ok(upstreamAborted, "the upstream call ends with the eval's request");
+  const spend = ctx.state.spend(runId);
+  const reserved = ctx.state.db.prepare("SELECT reserved_usd FROM usage WHERE run_id = ?").get(runId) as { reserved_usd: number };
+  assert.deepEqual([spend.inFlight, spend.requests], [0, 1], "the request is settled, not left reserved");
+  assert.ok(spend.totalUsd > 0 && spend.totalUsd <= reserved.reserved_usd + 1e-12, `counted $${spend.totalUsd} of a $${reserved.reserved_usd} reservation`);
+});
+
 test("the ledger refuses the first request that would pass the budget, exactly at the boundary", () => {
   const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
   const ctx = context(root, home);
@@ -838,6 +865,12 @@ test("the metering proxy refuses models outside the allowed pool without forward
   assert.deepEqual(requests, ["gpt-5-nano"]);
   assert.deepEqual(tally.poolViolations, ["gpt-4o"]);
   assert.equal((await fetch(`${url}/chat/completions`, { method: "POST", headers: { authorization: "Bearer wrong" }, body: "{}" })).status, 401);
+  // An SDK that drops the vendor prefix (OpenAI's Agents SDK) still gets the model under test, as the endpoint names it.
+  const prefixed = proxy.open({ runId, unitId: "unit-2", endpointId: "openrouter", baseUrl, apiKey: "sk-fake-endpoint", model: "openai/gpt-5-nano", allowed: model => (model === "openai/gpt-5-nano" ? nano : undefined) });
+  requests.length = 0;
+  const stripped = await fetch(`${url}/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${prefixed.token}` }, body: JSON.stringify({ model: "gpt-5-nano", max_tokens: 10, messages: [{ role: "user", content: "hi" }] }) });
+  assert.equal(stripped.status, 200);
+  assert.deepEqual([requests, prefixed.tally.poolViolations], [["openai/gpt-5-nano"], []]);
   await proxy.stop();
 });
 

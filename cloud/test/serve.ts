@@ -1,10 +1,11 @@
 // The app as the tests run it: a local Rivet engine, test sign-in, fake billing, and a catalogue
 // refresh that reports the version in TEST_CATALOGUE_VERSION (TEST_CATALOGUE=broken: a catalogue with no models, on which a
 // job's start fails after the account recorded the job), and a broken agent eval with TEST_AGENT_EVAL=broken. The tests start it as a child process
-// so they can SIGKILL it. It prints `ready <url>` once it answers.
+// so they can SIGKILL it. TEST_STRIPE_API_BASE swaps the fake billing for the real Stripe client
+// pointed at a local fake Stripe. It prints `ready <url>` once it answers.
 import { startApp } from "../src/app.ts";
 import { TestAuth } from "../src/auth.ts";
-import { FakeBilling } from "../src/billing.ts";
+import { FakeBilling, StripeBilling } from "../src/billing.ts";
 import { loadConfig } from "../src/config.ts";
 import { bundledCatalogue } from "../src/services.ts";
 
@@ -14,7 +15,9 @@ process.env.RIVET__AUTH__ADMIN_TOKEN = "test-token";
 const { url } = await startApp({
   config: loadConfig(env),
   auth: new TestAuth(),
-  billing: new FakeBilling("whsec_test"),
+  billing: env.TEST_STRIPE_API_BASE
+    ? new StripeBilling({ secretKey: "sk_test", webhookSecret: "whsec_test", priceId: "price_test", meterEvent: "openmerit_evaluation", apiBase: env.TEST_STRIPE_API_BASE })
+    : new FakeBilling("whsec_test"),
   local: { port: Number(env.TEST_ENGINE_PORT), token: "test-token" },
   services: {
     refreshCatalogue: async () => env.TEST_CATALOGUE === "broken"

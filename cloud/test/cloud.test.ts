@@ -2,6 +2,8 @@
 // billing webhooks, endpoints, guardrails and watches. Sign-in, Stripe and every model are local
 // fakes, and the app runs in a child process so a test can SIGKILL it mid-job.
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { after, before, describe, test } from "node:test";
 import { createClient } from "rivetkit/client";
 import { NO_ORGANIZATION } from "../src/auth.ts";
@@ -205,6 +207,9 @@ test("a job waits on its label check across a restart, then measures on OpenRout
     const share = await agent().api<{ url: string }>(`/api/runs/${jobId}/share`, { method: "POST" });
     const publicPath = new URL(share.body.url).pathname;
     assert.equal((await fetch(`${app.url}${publicPath}`)).status, 200);
+    assert.ok(!publicPath.includes(Buffer.from("org_run").toString("base64url")), "the link does not show the organization's ID");
+    const secret = publicPath.split(".").at(-2)!;
+    assert.equal((await fetch(`${app.url}/api/share/${Buffer.from("org_run").toString("base64url")}.${secret}.md`)).status, 404, "a link naming the account in the clear is refused");
     const me = await agent().api<{ plan: { usedEvals: number } }>("/api/me");
     assert.equal(me.body.plan.usedEvals, 1);
 
@@ -432,6 +437,47 @@ test("a challenger the budget refuses ends the challengers, and the job still re
     const progress = done.data.progress as { measured: number; planned: number };
     assert.ok(progress.planned >= progress.measured && progress.planned <= progress.measured + 4, JSON.stringify(progress));
   } finally { await stop(app); await models.close(); }
+});
+
+test("an evaluation beyond the plan that Stripe failed to record is reported with the account's next job, once, and a retried recommend with the same key starts no job", async () => {
+  const models = await fakeModels();
+  // A fake Stripe for the real client: the first meter event fails, as an outage would.
+  const meterCalls: string[] = [], recorded: string[] = [];
+  const stripe = createServer((req, res) => {
+    let raw = "";
+    req.on("data", chunk => { raw += chunk; });
+    req.on("end", () => {
+      const identifier = new URLSearchParams(raw).get("identifier") ?? "";
+      meterCalls.push(identifier);
+      res.writeHead(meterCalls.length === 1 ? 500 : 200, { "content-type": "application/json" });
+      if (meterCalls.length > 1 && !recorded.includes(identifier)) recorded.push(identifier);
+      res.end(meterCalls.length === 1 ? JSON.stringify({ error: { message: "Stripe is down" } }) : "{}");
+    });
+  });
+  await new Promise<void>(resolve => stripe.listen(0, "127.0.0.1", resolve));
+  const app = await startApp({ models, env: { ...CLERK, TEST_STRIPE_API_BASE: `http://127.0.0.1:${(stripe.address() as AddressInfo).port}` } });
+  try {
+    await subscribe(app, "org_overage", { includedEvals: 0, overage: "metered" });
+    const agent = caller(app, "test:user_o:org_overage:admin");
+    const run = async (task: string) => {
+      const started = await agent.tool("openmerit_recommend", { bundle: bundle(task, false), environment: "acme/overage", idempotency_key: `key-${task}` });
+      const jobId = started.data.job_id as string;
+      await waitFor(() => agent.tool("openmerit_result", { job_id: jobId }), value => value.data.status === "needs_input");
+      await agent.tool("openmerit_answer", { job_id: jobId, answers: { label_check: ["written-1", "written-2"] } });
+      assert.equal((await untilDone(agent, jobId)).data.status, "done");
+      return jobId;
+    };
+    const first = await run("overage classifier");
+    // A retried call with the same idempotency key returns the job it started and starts no other.
+    const retried = await agent.tool("openmerit_recommend", { bundle: bundle("overage classifier", false), environment: "acme/overage", idempotency_key: "key-overage classifier" });
+    assert.deepEqual([retried.isError, retried.data.job_id, retried.data.repeated], [false, first, true], retried.text);
+    assert.equal((await agent.api<unknown[]>("/api/runs")).body.length, 1);
+    assert.deepEqual([meterCalls, recorded], [[first], []], "the first report failed");
+    const second = await run("second overage classifier");
+    await waitFor(async () => recorded.length, count => count === 2);
+    assert.deepEqual(recorded.toSorted(), [first, second].toSorted(), "both evaluations are billed, the failed one with the next job");
+    assert.equal(meterCalls.filter(id => id === first).length, 2, "the failed report was sent again once");
+  } finally { await stop(app); await models.close(); await new Promise(resolve => stripe.close(resolve)); }
 });
 
 test("a job whose current model fails more than a fifth of its own eval recommends nothing, asks no approval and lists why its cases failed", async () => {

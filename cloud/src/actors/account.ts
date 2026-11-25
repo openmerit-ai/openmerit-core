@@ -50,6 +50,8 @@ const SCHEMA = [
     sealed_token TEXT, token_last4 TEXT, added_at INTEGER NOT NULL, checked_at INTEGER NOT NULL,
     review_status TEXT NOT NULL, review_requested_at INTEGER NOT NULL, review_finished_at INTEGER, review_error TEXT, review TEXT)`,
   `CREATE TABLE IF NOT EXISTS repo_reviews (repo_id TEXT NOT NULL, requested_at INTEGER NOT NULL)`,
+  // openmerit_recommend's idempotency keys, kept a day: the job each started, or null while it is starting.
+  `CREATE TABLE IF NOT EXISTS recommend_keys (key TEXT PRIMARY KEY, job_id TEXT, created_at INTEGER NOT NULL)`,
   // A task's eval: the accepted one runs, unchanged, until the task changes or someone revises it. version counts acceptances;
   // shape is the prompt, tools and output it was accepted for. The draft_ columns hold the eval under review, edited in place;
   // draft_bundle is the changed task's bundle, which replaces the task's on acceptance. bar is `criteria` once a person grading
@@ -283,7 +285,7 @@ export const account = actor({
     }, { name: "apply_stripe" }),
 
     /** Checks the plan and the account's job limits, then records the job. */
-    startJob: async (c, input: { jobId: string; projectId: string; taskId: string; kind: "run" | "watch"; askedBy?: string | null }): Promise<Started> => c.db.transaction(async tx => {
+    startJob: async (c, input: { jobId: string; projectId: string; taskId: string; kind: "run" | "watch"; askedBy?: string | null }): Promise<Started> => c.db.transaction(async (tx): Promise<Started> => {
       const { limits, appUrl } = services().config;
       const current = await plan(tx);
       if (!current || !ACTIVE_PLAN.has(current.status)) return { ok: false, error: planRefusal(current)! };
@@ -295,7 +297,26 @@ export const account = actor({
       if (Number(running?.n) >= limits.concurrentJobs) return { ok: false, error: `This account has ${limits.concurrentJobs} jobs running, its limit. Try again when one finishes.` };
       await tx.execute(`INSERT INTO jobs (id, project_id, task_id, kind, status, started_at, asked_by) VALUES (?, ?, ?, ?, 'queued', ?, ?)`, input.jobId, input.projectId, input.taskId, input.kind, now, input.askedBy ?? null);
       return { ok: true };
-    }, { name: "start_job" }),
+    }, { name: "start_job" }).then(async started => { await meterOverage(c.db); return started; }),
+
+    /**
+     * Claims an openmerit_recommend idempotency key for a day. A key already claimed returns the job it
+     * started, or null while that call is still starting it.
+     */
+    claimRecommendKey: async (c, key: string): Promise<{ claimed: true } | { claimed: false; jobId: string | null }> => c.db.transaction(async tx => {
+      const now = Date.now();
+      await tx.execute(`DELETE FROM recommend_keys WHERE created_at < ?`, now - 86_400_000);
+      const [row] = await tx.execute(`SELECT job_id FROM recommend_keys WHERE key = ?`, key);
+      if (row) return { claimed: false as const, jobId: (row.job_id as string | null) ?? null };
+      await tx.execute(`INSERT INTO recommend_keys (key, job_id, created_at) VALUES (?, NULL, ?)`, key, now);
+      return { claimed: true as const };
+    }, { name: "claim_recommend_key" }),
+
+    /** Records the job a claimed key started, or frees the key when the call started none. */
+    settleRecommendKey: async (c, input: { key: string; jobId: string | null }): Promise<void> => {
+      if (input.jobId) await c.db.execute(`UPDATE recommend_keys SET job_id = ? WHERE key = ?`, input.jobId, input.key);
+      else await c.db.execute(`DELETE FROM recommend_keys WHERE key = ?`, input.key);
+    },
 
     /** A job's status and, once it knows them, its spend limits. Its first final status counts one evaluation. */
     jobUpdate: async (c, input: { jobId: string; status: string; budgetUsd?: number; capOpenmeritUsd?: number | null; capCustomerUsd?: number | null; measured?: boolean }): Promise<void> => {
@@ -310,7 +331,7 @@ export const account = actor({
         input.status, final ? 1 : 0, Date.now(), input.budgetUsd ?? null, input.capOpenmeritUsd ?? null, input.capCustomerUsd ?? null, final && input.measured ? 1 : 0, input.jobId);
         return final && input.measured === true;
       }, { name: "job_update" });
-      if (count) await meter(c.db, input.jobId);
+      if (count) await meterOverage(c.db);
     },
 
     job: async (c, jobId: string): Promise<JobRow | null> => {
@@ -361,7 +382,8 @@ export const account = actor({
       const [row] = await tx.execute(`SELECT status FROM ledger WHERE key = ?`, input.key);
       if (!row) throw new Error(`No reservation ${input.key} to settle`);
       if (row.status !== "reserved") return;
-      await tx.execute(`UPDATE ledger SET status = 'settled', actual_usd = ?, estimated_usd = ?, failed = ? WHERE key = ?`,
+      // An estimate is kept at most at the reservation, the call's maximum possible cost.
+      await tx.execute(`UPDATE ledger SET status = 'settled', actual_usd = ?, estimated_usd = MIN(?, reserved_usd), failed = ? WHERE key = ?`,
         input.cost.actualUsd, input.cost.estimatedUsd, input.cost.failed ? 1 : 0, input.key);
     }, { name: "ledger_settle" }),
 
@@ -816,15 +838,29 @@ async function periodStart(database: Database): Promise<number> {
   return typeof row?.period_start === "number" ? row.period_start * 1000 : startOfMonth(Date.now());
 }
 
-/** Reports an evaluation beyond the plan to Stripe, once per job. */
-async function meter(database: Database, jobId: string): Promise<void> {
-  const current = await plan(database);
-  const billing = services().billing;
-  if (!current?.customerId || current.overage !== "metered" || current.usedEvals <= current.includedEvals || !billing) return;
-  const [job] = await database.execute(`SELECT metered FROM jobs WHERE id = ?`, jobId);
-  if (!job || job.metered === 1) return;
-  await billing.reportUsage({ customerId: current.customerId, identifier: jobId, quantity: 1 });
-  await database.execute(`UPDATE jobs SET metered = 1 WHERE id = ?`, jobId);
+/**
+ * Reports this period's evaluations beyond the plan that Stripe has not recorded yet, newest first.
+ * It runs whenever a job starts or counts, so a report that failed (Stripe down, a timeout) is sent
+ * with the account's next job instead of being lost. Stripe counts each job's identifier once, so a
+ * report sent twice bills once. A failure is logged, never thrown: billing must not fail a job.
+ */
+async function meterOverage(database: Database): Promise<void> {
+  try {
+    const current = await plan(database);
+    const billing = services().billing;
+    if (!current?.customerId || current.overage !== "metered" || !billing) return;
+    const start = await periodStart(database);
+    const [done] = await database.execute(`SELECT count(*) AS n FROM jobs WHERE counted > 0 AND metered = 1 AND finished_at >= ?`, start);
+    const owed = current.usedEvals - current.includedEvals - Number(done?.n ?? 0);
+    if (owed <= 0) return;
+    const pending = await database.execute(`SELECT id FROM jobs WHERE counted > 0 AND metered = 0 AND finished_at >= ? ORDER BY finished_at DESC LIMIT ?`, start, owed);
+    for (const job of pending) {
+      await billing.reportUsage({ customerId: current.customerId, identifier: String(job.id), quantity: 1 });
+      await database.execute(`UPDATE jobs SET metered = 1 WHERE id = ?`, job.id);
+    }
+  } catch (error) {
+    console.error(`Metering overage failed; the account's next job retries it: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 async function levelSettings(database: Database, projectId: string, level: Level, scope: string): Promise<Guardrails> {
