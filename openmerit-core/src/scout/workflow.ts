@@ -761,7 +761,10 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
     const result: UnitResult = { items: results, passes, total, source: "eval", requests: tally.requests, durationMs: outcome.durationMs, cutOff: tally.cutOff, ...(outcome.reasons && Object.keys(outcome.reasons).length ? { reasons: outcome.reasons } : {}), ...(outcome.checks && Object.keys(outcome.checks).length ? { checks: outcome.checks } : {}), ...(outcome.answers?.length ? { answers: outcome.answers } : {}) };
     // An eval that sends no request through the proxy did not use the model under test, and its spend was neither metered nor capped.
     if (!tally.requests) {
-      const unmetered = `the eval made no model requests through OpenMerit's proxy (OPENAI_BASE_URL), so ${entry.endpointModel} was not what it ran, and any spend was not metered or capped by the budget`;
+      const violations = [...new Set(tally.poolViolations)];
+      const unmetered = violations.length
+        ? `OpenMerit's proxy refused every model request the eval sent (${tally.poolViolations.length}, HTTP 403), because it asked for ${violations.join(", ")}, which ${violations.length === 1 ? "is" : "are"} not ${entry.endpointModel} or another model this repository allows on ${entry.endpoint}. Make the eval send the model in $OPENMERIT_MODEL as it is, so ${entry.endpointModel} is what it runs`
+        : `the eval made no model requests through OpenMerit's proxy (OPENAI_BASE_URL), so ${entry.endpointModel} was not what it ran, and any spend was not metered or capped by the budget`;
       state.setUnit(id, kind === "baseline" ? { status: "done", result: result as unknown as Record<string, unknown> } : { status: "unavailable", error: unmetered });
       save();
       if (kind !== "baseline") throw new CandidateUnavailable(unmetered);

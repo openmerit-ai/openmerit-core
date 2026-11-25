@@ -50,13 +50,14 @@ const BUNDLE_SCHEMA = {
 export const TOOLS = [
   {
     name: "openmerit_recommend", title: "OpenMerit: recommend a model",
-    description: "Starts measuring cheaper models for one model call in the user's code. Send a task bundle: the task, the current model, the prompt, tools, output shape, examples and where the code names the model. Or, to run a past job's task again on the bundle OpenMerit saved, as a result's Fix line says, send its job_id instead, with budget_usd to raise the task's budget per job first. Returns a provisional pick from the catalogue at once, and a job_id; call openmerit_result with it later for the measured pick. A task whose prompt, tools or output changed since its eval was accepted is refused until the user reviews the eval in the app; tell them. Measuring makes paid model calls within the account's plan and budget: ask the user before a rerun or a higher budget.",
+    description: "Starts measuring cheaper models for one model call in the user's code. Send an idempotency_key, and the same one on a retry, so a retried call does not start a second paid job. Send a task bundle: the task, the current model, the prompt, tools, output shape, examples and where the code names the model. Or, to run a past job's task again on the bundle OpenMerit saved, as a result's Fix line says, send its job_id instead, with budget_usd to raise the task's budget per job first. Returns a provisional pick from the catalogue at once, and a job_id; call openmerit_result with it later for the measured pick. A task whose prompt, tools or output changed since its eval was accepted is refused until the user reviews the eval in the app; tell them. Measuring makes paid model calls within the account's plan and budget: ask the user before a rerun or a higher budget.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       bundle: BUNDLE_SCHEMA, environment: { type: "string", description: "The repository or workspace, such as owner/repo. Default: default" },
       project: { type: "string", description: "The OpenMerit project, by name, when the user names one. Default: the project whose GitHub repository the environment names, else the default project" }, agent: { type: "string", description: "The agent this task belongs to, when the code groups calls into agents" },
       job_id: { type: "string", description: "Instead of a bundle: a past job whose task runs again on its saved bundle, environment and agent" },
       task_id: { type: "string", description: "Instead of a bundle: a task to run on its saved bundle and eval, such as one approved in the app that has not run yet" },
       budget_usd: { type: "number", description: "With job_id: the task's new budget per job in US dollars, set before the run starts" },
+      idempotency_key: { type: "string", description: "A new random string for each recommendation you mean to start, such as a UUID. Send the same key when you retry this call after a timeout or lost connection: within a day, a key that already started a job returns that job instead of starting and charging another" },
     } },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
@@ -204,9 +205,20 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
     return client.job.get([row.id]).status();
   };
   if (name === "openmerit_recommend") {
-    const unknown = Object.keys(args).filter(key => !["bundle", "environment", "agent", "project", "job_id", "task_id", "budget_usd"].includes(key));
+    const unknown = Object.keys(args).filter(key => !["bundle", "environment", "agent", "project", "job_id", "task_id", "budget_usd", "idempotency_key"].includes(key));
     if (unknown.length) return { text: `Unknown argument ${unknown.join(", ")}. No tool takes keys: the user adds endpoint keys at ${deps.config.appUrl}.`, data: {}, isError: true };
+    if (args.idempotency_key !== undefined && (typeof args.idempotency_key !== "string" || !args.idempotency_key.trim() || args.idempotency_key.length > 200)) return { text: "idempotency_key must be a non-empty string of at most 200 characters.", data: {}, isError: true };
+    const key = typeof args.idempotency_key === "string" ? args.idempotency_key.trim() : null;
+    if (key) {
+      const claim = await account.claimRecommendKey(key);
+      if (!claim.claimed) {
+        if (!claim.jobId) return { text: "A call with this idempotency_key is still starting its job. Call openmerit_recommend again with the same key in a few seconds.", data: { status: "starting" }, isError: true };
+        const view = await client.job.get([claim.jobId]).status();
+        return { text: `This idempotency_key already started job ${claim.jobId} (${view.status}); no new job started. Call openmerit_result with job_id "${claim.jobId}".`, data: { job_id: claim.jobId, status: view.status, repeated: true } };
+      }
+    }
     let started;
+    try {
     if (args.task_id !== undefined) {
       if (args.bundle !== undefined || args.job_id !== undefined || args.environment !== undefined || args.agent !== undefined || args.project !== undefined) return { text: "Send task_id on its own: the task keeps its project, environment, agent and bundle.", data: {}, isError: true };
       started = await runTask(client, { accountId: identity.accountId, userId: identity.userId, taskId: String(args.task_id), budgetUsd: typeof args.budget_usd === "number" ? args.budget_usd : null, trigger: "mcp", askedBy });
@@ -229,6 +241,9 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
         projectId = found.id;
       }
       started = await startJob(client, { accountId: identity.accountId, projectId, environment, agent, bundle: args.bundle as TaskBundle, kind: "run", trigger: "mcp", userId: identity.userId, askedBy });
+    }
+    } finally {
+      if (key) await account.settleRecommendKey({ key, jobId: started?.ok ? started.jobId : null });
     }
     if (!started.ok) return { text: started.error, data: { status: "refused" }, isError: true };
     const { provisional } = started;

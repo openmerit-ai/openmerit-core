@@ -42,8 +42,12 @@ export interface Ledger {
   spent(): Promise<{ openmeritUsd: number; customerUsd: number }>;
 }
 
-/** What a settled call counts: the provider's cost, else the list-price estimate, else its reservation. */
-export const settledUsd = (reservedUsd: number, cost: Settlement) => cost.actualUsd ?? cost.estimatedUsd ?? reservedUsd;
+/**
+ * What a settled call counts: the provider's cost, else the list-price estimate, else its reservation.
+ * An estimate never counts more than the reservation, which priced the request's whole prompt and its
+ * maximum output: a call cannot cost more, however many bytes a stream sent.
+ */
+export const settledUsd = (reservedUsd: number, cost: Settlement) => cost.actualUsd ?? Math.min(cost.estimatedUsd ?? reservedUsd, reservedUsd);
 
 const label: Record<Funding, string> = { openmerit: "OpenMerit-paid", customer: "customer-paid" };
 
@@ -73,7 +77,7 @@ export class MemoryLedger implements Ledger {
   async settle(key: string, cost: Settlement) {
     const entry = this.entries.get(key);
     if (!entry) { if (this.released.has(key)) return; throw new Error(`No reservation ${key} to settle`); }
-    entry.cost ??= { ...cost };
+    entry.cost ??= { ...cost, estimatedUsd: cost.estimatedUsd === null ? null : Math.min(cost.estimatedUsd, entry.reservedUsd) };
   }
 
   async release(key: string) {

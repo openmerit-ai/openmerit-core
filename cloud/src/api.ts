@@ -3,6 +3,7 @@
 // repositories and guardrails belong to a project, which the X-OpenMerit-Project header names (the
 // default project without it); the plan, members and billing are the organization's. Changing endpoints, GitHub
 // repositories, environment guardrails, billing and the account itself needs the organization's admin role.
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import type { AppDeps } from "./app.ts";
 import type { AuthResult, Identity } from "./auth.ts";
 import { LEVELS, type Guardrails, type Level } from "./engine.ts";
@@ -29,13 +30,29 @@ const reverify = (who: Identity) => who.firstFactorAgeMinutes !== null && who.fi
   : json(403, { clerk_error: { type: "forbidden", reason: "reverification-error", metadata: { reverification: { level: "first_factor", afterMinutes: REVERIFY_MINUTES } } } });
 const markdown = (text: string) => new Response(text, { status: 200, headers: { "content-type": "text/markdown; charset=utf-8", "cache-control": "no-store" } });
 
-/** A public report link names its account, so the app finds the report without a global index. */
-const shareToken = (accountId: string, secret: string) => `${Buffer.from(accountId).toString("base64url")}.${secret}`;
-function parseShare(token: string): { accountId: string; secret: string } | null {
-  const [account, secret] = token.split(".");
-  if (!account || !secret) return null;
-  const accountId = Buffer.from(account, "base64url").toString("utf8");
-  return /^[\w-]+$/.test(accountId) ? { accountId, secret } : null;
+/**
+ * A public report link carries its account sealed with the key-encryption key (AES-256-GCM), so the
+ * app finds the report without a global index, the link does not show the organization's ID, and a
+ * forged link opens no account actor.
+ */
+function shareToken(key: Buffer, accountId: string, secret: string): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  cipher.setAAD(Buffer.from("share"));
+  const body = Buffer.concat([cipher.update(accountId, "utf8"), cipher.final()]);
+  return `${Buffer.concat([iv, cipher.getAuthTag(), body]).toString("base64url")}.${secret}`;
+}
+function parseShare(key: Buffer | null, token: string): { accountId: string; secret: string } | null {
+  const [sealed, secret] = token.split(".");
+  if (!key || !sealed || !secret) return null;
+  const raw = Buffer.from(sealed, "base64url");
+  if (raw.length <= 28) return null;
+  try {
+    const decipher = createDecipheriv("aes-256-gcm", key, raw.subarray(0, 12));
+    decipher.setAAD(Buffer.from("share"));
+    decipher.setAuthTag(raw.subarray(12, 28));
+    return { accountId: Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]).toString("utf8"), secret };
+  } catch { return null; }
 }
 
 export function cors(request: Request, deps: AppDeps): Record<string, string> {
@@ -293,9 +310,10 @@ export function apiRoutes(deps: AppDeps) {
       return started.ok ? json(201, { jobId: started.jobId, taskId: started.taskId }) : error(/^No run /.test(started.error) ? 404 : 409, started.error);
     }
     if ((match = /^\/api\/runs\/([\w-]+)\/share$/.exec(path)) && method === "POST") {
+      if (!config.keyEncryptionKey) return error(503, "Share links are not available yet: the app has no key-encryption key.");
       const secret = await account.share(match[1]!);
       if (!secret) return error(404, "This run has no report yet.");
-      return json(200, { url: `${config.publicUrl}/api/share/${shareToken(who.accountId, secret)}.md` });
+      return json(200, { url: `${config.publicUrl}/api/share/${shareToken(config.keyEncryptionKey, who.accountId, secret)}.md` });
     }
 
     if (path === "/api/endpoints" && method === "GET") return json(200, await account.endpoints(projectId));
@@ -412,8 +430,8 @@ export function apiRoutes(deps: AppDeps) {
       return new Response(null, { status: 204, headers: { ...headers, "access-control-allow-methods": "GET, POST, PUT, DELETE", "access-control-allow-headers": "authorization, content-type, x-openmerit-project", "access-control-max-age": "600" } });
     }
     if (share && request.method === "GET") {
-      const parsed = parseShare(share[1]!);
-      const found = parsed ? await client.account.getOrCreate([parsed.accountId]).report({ shareToken: parsed.secret }) : null;
+      const parsed = parseShare(deps.config.keyEncryptionKey, share[1]!);
+      const found = parsed ? await client.account.get([parsed.accountId]).report({ shareToken: parsed.secret }).catch(() => null) : null;
       return found ? markdown(found.markdown) : new Response("No such report.\n", { status: 404 });
     }
     const auth = await authenticate(request, report !== null);

@@ -256,9 +256,12 @@ export class State {
     });
   }
 
-  /** Records what a reserved request cost: provider-reported (`actualUsd`), list-price estimate, or unknown (both null). */
+  /**
+   * Records what a reserved request cost: provider-reported (`actualUsd`), list-price estimate, or unknown (both null).
+   * An estimate is kept at most at the reservation, the request's maximum possible cost.
+   */
   settle(id: number, cost: { actualUsd: number | null; estimatedUsd: number | null; latencyMs: number; failed?: boolean }) {
-    this.db.prepare("UPDATE usage SET status = ?, actual_usd = ?, estimated_usd = ?, latency_ms = ?, settled_at = ? WHERE id = ?")
+    this.db.prepare("UPDATE usage SET status = ?, actual_usd = ?, estimated_usd = MIN(?, reserved_usd), latency_ms = ?, settled_at = ? WHERE id = ?")
       .run(cost.failed ? "failed" : "settled", cost.actualUsd, cost.estimatedUsd, cost.latencyMs, now(), id);
   }
 
