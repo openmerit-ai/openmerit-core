@@ -165,6 +165,7 @@ export interface JudgeOptions {
 export const JUDGE_SYSTEM = [
   "You grade one answer a model gave for a task in an application.",
   "Apply the rubric and every check strictly. A reference answer, when given, shows what a right answer contains; the answer may word it differently.",
+  "When the answer is an agent's run, it lists each step in order: what the model said, each tool it called and what that tool returned, then its final answer. Facts that come from a tool's result are grounded, wherever they appear; judge the final answer against the tool results it had.",
   "Reply with JSON only: {\"checks\": [{\"id\": \"C1\", \"pass\": true or false, \"reason\": \"one short sentence\"}], \"pass\": true or false, \"reason\": \"one short sentence\"}. \"checks\" has one entry per listed check; \"pass\" is true only when the answer meets the rubric and passes every check, and \"reason\" says why not when it does not.",
 ].join("\n");
 
@@ -209,7 +210,7 @@ export const oneSentence = (text: string) => { const line = redact(text).replace
  */
 export function judge(options: JudgeOptions): Grader {
   return {
-    async grade({ bundle, caseItem, output, toolCalls, ledger, key, signal }) {
+    async grade({ bundle, caseItem, output, toolCalls, transcript, ledger, key, signal }) {
       const expected = options.only ? undefined : isAssistantMessage(caseItem.expected) ? describeAnswer(contentText(caseItem.expected.content), toolCallsOf(caseItem.expected)) : caseItem.expected;
       const input = caseItem.origin === "trace" ? caseItem.input.messages ?? "" : JSON.stringify(caseItem.input, null, 2);
       const checks = checksFor(bundle, options.only);
@@ -219,7 +220,7 @@ export function judge(options: JudgeOptions): Grader {
         ...(checks.length ? [`Checks:\n${checks.map(check => `${check.id}. ${check.text}`).join("\n")}`] : []),
         `Input:\n${input}`,
         ...(expected === undefined ? [] : [`Reference answer:\n${typeof expected === "string" ? expected : JSON.stringify(expected)}`]),
-        `Answer to grade:\n${describeAnswer(output, toolCalls ?? [])}`,
+        `Answer to grade:\n${caseItem.origin !== "trace" && toolCalls?.length && transcript?.length ? describeRun(transcript, output) : describeAnswer(output, toolCalls ?? [])}`,
       ].join("\n\n");
       const answer = await options.client.complete({
         endpoint: options.endpoint, model: options.model, system: JUDGE_SYSTEM, messages: [{ role: "user", content: prompt }], maxTokens: options.maxTokens ?? 2048,
@@ -237,6 +238,32 @@ const toolCallsOf = (message: AssistantMessage): ToolCall[] =>
 /** An answer as the judge reads it: its text, then any tool calls. */
 const describeAnswer = (text: string, toolCalls: readonly ToolCall[]) =>
   [text, ...toolCalls.map(call => `Calls tool ${call.name} with ${call.arguments}`)].filter(Boolean).join("\n");
+
+/** At most this much of one tool result goes to the judge. */
+const TOOL_RESULT_CHARS = 2000;
+const partsText = (content: unknown) => (Array.isArray(content) ? content.flatMap(part => (part && typeof part === "object" && (part as { type?: unknown }).type === "text" ? [String((part as { text?: unknown }).text ?? "")] : [])).join("") : typeof content === "string" ? content : "");
+
+/**
+ * An agent's run as the judge reads it: after the prompt, each turn in order, with what it said, the
+ * tools it called and what each returned, then its final answer. Without the tool results the judge
+ * cannot tell an answer grounded in them from an invented one, and fails right answers.
+ */
+function describeRun(transcript: readonly PiMessage[], output: string): string {
+  const lastPrompt = transcript.reduce((at, item, index) => (item.role === "user" ? index : at), -1);
+  const lines: string[] = [];
+  for (const item of transcript.slice(lastPrompt + 1)) {
+    if (item.role === "assistant") {
+      for (const part of item.content) {
+        if (part.type === "text" && part.text.trim()) lines.push(`Says: ${part.text.trim()}`);
+        if (part.type === "toolCall") lines.push(`Calls tool ${part.name} with ${JSON.stringify(part.arguments)}`);
+      }
+    } else if (item.role === "toolResult") {
+      const text = partsText(item.content);
+      lines.push(`Tool ${item.toolName} ${item.isError ? "failed" : "returned"}: ${text.length > TOOL_RESULT_CHARS ? `${text.slice(0, TOOL_RESULT_CHARS - 1)}…` : text}`);
+    }
+  }
+  return [...lines, `Final answer: ${output.trim() || "(none)"}`].join("\n");
+}
 
 const sameArguments = (a: string, b: string) => {
   try { return deepEqual(JSON.parse(a || "{}"), JSON.parse(b || "{}")); } catch { return a.trim() === b.trim(); }

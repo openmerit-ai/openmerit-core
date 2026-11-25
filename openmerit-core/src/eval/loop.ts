@@ -49,6 +49,8 @@ export interface LoopState {
   /** The version a person accepted and the host saves, or 0 while none is. */
   savedVersion: number;
   bar: "current" | "criteria";
+  /** The cases whose current-model answer a person graded Doesn't look right, which made the criteria the bar, and the round they did. */
+  barSet?: { round: number; cases: string[] };
   status: "searching" | "grading" | "regenerating" | "accepted";
   artifact: RunArtifact | null;
   /** Each graded round, oldest first. */
@@ -119,12 +121,15 @@ export function advanceLoop(state: LoopState, event: LoopEvent): LoopState {
       if (unknown.length) throw new Error(`Not a sample of this round: ${unknown.map(grade => grade.sampleId).join(", ")}.`);
       const graded = samples.map(sample => grades.get(sample.id)!);
       // A current model whose own answer does not look right is no longer the bar.
-      const bar = state.bar === "criteria" || samples.some(sample => sample.role === "current" && grades.get(sample.id)!.verdict === "bad") ? "criteria" : "current";
+      const wrong = samples.filter(sample => sample.role === "current" && grades.get(sample.id)!.verdict === "bad").map(sample => sample.caseId);
+      const bar = state.bar === "criteria" || wrong.length ? "criteria" : "current";
+      const barSet = state.barSet ?? (wrong.length ? { round: state.round, cases: wrong } : undefined);
       const history = [...state.history, { round: state.round, evalVersion: state.evalVersion, bar: state.bar, grades: graded }];
-      if (samples.some(sample => disagrees(sample, grades.get(sample.id)!))) return { ...state, bar, status: "regenerating", history };
+      const next = { ...state, bar, history, ...(barSet ? { barSet } : {}) } as const;
+      if (samples.some(sample => disagrees(sample, grades.get(sample.id)!))) return { ...next, status: "regenerating" };
       // Agreement on every sample accepts this eval; a new bar still needs the search run against it.
-      if (bar !== state.bar) return { ...state, bar, status: "searching", round: state.round + 1, artifact: null, history, savedVersion: state.evalVersion };
-      return { ...state, status: "accepted", history, savedVersion: state.evalVersion };
+      if (bar !== state.bar) return { ...next, status: "searching", round: state.round + 1, artifact: null, savedVersion: state.evalVersion };
+      return { ...next, status: "accepted", savedVersion: state.evalVersion };
     }
     case "regenerated":
       if (state.status !== "regenerating") throw new Error(`The loop is ${state.status}, not regenerating.`);

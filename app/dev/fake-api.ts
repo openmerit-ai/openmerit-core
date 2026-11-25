@@ -147,7 +147,7 @@ function populated(): State {
   const report: Report = {
     jobId: "k7m2q9", task: "Ticket router", createdAt: "2026-11-18T10:03:00Z",
     status: "picked",
-    pick: { model: haiku.model, endpoint: "openrouter", endpointModel: "anthropic/claude-haiku-5-5", passes: 40, total: 40, costPerCallUsd: 0.00007, savingPerCallUsd: 0.00468 },
+    pick: { model: haiku.model, endpoint: "openrouter", endpointModel: "anthropic/claude-haiku-5-5", passes: 40, total: 40, costPerCallUsd: 0.00007, savingPerCallUsd: 0.00468, paybackCalls: 412 },
     top: [haiku], baseline,
     nearMisses: [{ ...measured("openai/gpt-5-mini", "ep_openai", { funding: "customer", endpointModel: "gpt-5-mini", passes: 38, costPerCallUsd: 0.00065, latencyMs: 1800, note: "1 case below the current model" }), cheaperThanCurrent: true }],
     candidates: [

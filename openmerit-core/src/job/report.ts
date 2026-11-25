@@ -52,7 +52,8 @@ export interface JobResult {
   invalidCases?: { caseId: string; reason: string }[];
   /** The current model's passes per kind of case: typical, edge, guardrail, example. Absent from older reports. */
   baselineByKind?: { kind: string; passes: number; total: number }[];
-  pick: { model: string; endpoint: string; endpointModel: string; passes: number; total: number; costPerCallUsd: number | null; savingPerCallUsd: number | null } | null;
+  /** `paybackCalls`: how many calls of the task the saving takes to repay what this run cost, or null when either is unknown or nothing is saved. */
+  pick: { model: string; endpoint: string; endpointModel: string; passes: number; total: number; costPerCallUsd: number | null; savingPerCallUsd: number | null; paybackCalls: number | null } | null;
   /** Up to three qualified models, cheapest measured cost first. */
   top: MeasuredModel[];
   /** Measured models that missed the current model's pass rate by at most one case per run. Absent from reports saved before it was added. */
@@ -78,9 +79,9 @@ export interface JobResult {
    * The grading loop, when a person graded the run's answers: how many rounds it took, whether they
    * accepted the eval, and the bar the result was measured against. With the `criteria` bar the pick is
    * the cheapest model that meets the eval's checks, even when it costs more, and `summary` says so in
-   * one sentence. Absent when nobody graded, as for watch jobs and evals OpenMerit wrote no case of.
+   * one sentence. `barSet` names the cases whose current-model answer a person graded as wrong, which set that bar. Absent when nobody graded, as for watch jobs and evals OpenMerit wrote no case of.
    */
-  grading?: { rounds: number; accepted: boolean; bar: "current" | "criteria"; failedChecks: string[]; summary: string | null };
+  grading?: { rounds: number; accepted: boolean; bar: "current" | "criteria"; failedChecks: string[]; summary: string | null; barSet?: { round: number; cases: string[] } | null };
   /** The question that asks a person to approve the switch, as the CLI asks it; null with no pick. Absent from older reports. */
   approval?: { id: string; kind: "confirm"; default: false; prompt: string; detail: string } | null;
 }
@@ -106,12 +107,20 @@ export function nearMissLine(result: JobResult): string | null {
 }
 
 const usd = (value: number | null) => (value === null ? "unknown" : value < 0.01 ? `$${value.toFixed(5)}` : `$${value.toFixed(4)}`);
+/** Calls to repay a run: the run's cost over the saving per call. */
+export const paybackCalls = (runUsd: number, savingPerCallUsd: number | null) => savingPerCallUsd !== null && savingPerCallUsd > 0 && runUsd > 0 ? Math.ceil(runUsd / savingPerCallUsd) : null;
+/** What the run cost against the pick's saving, in one sentence; null without a saving. */
+export function paybackLine(result: Pick<JobResult, "pick" | "spend">): string | null {
+  const calls = result.pick?.paybackCalls;
+  return calls ? `This run cost ${usd(result.spend.openmeritUsd + result.spend.customerUsd)}, which the saving repays after about ${paybackText(calls)} calls.` : null;
+}
+const paybackText = (calls: number) => calls >= 1e6 ? `${(calls / 1e6).toPrecision(2)} million` : calls >= 1e4 ? `${Math.round(calls / 1e3).toLocaleString("en-US")} thousand` : calls.toLocaleString("en-US");
 const rate = (passes: number, total: number) => (total ? `${passes}/${total} (${Math.round((passes / total) * 100)}%)` : "none");
 
 /** One line saying what the run concluded and why, for the report and for the coding agent. */
 export function reasonFor(result: JobResult, current: string): string {
   const pick = result.pick;
-  if (pick) return `Switch from \`${current}\` to \`${pick.model}\` on ${pick.endpoint}: it passed ${rate(pick.passes, pick.total)} of the cases at ${usd(pick.costPerCallUsd)} a call${pick.savingPerCallUsd !== null ? pick.savingPerCallUsd < 0 ? `, ${usd(-pick.savingPerCallUsd)} more than now` : `, ${usd(pick.savingPerCallUsd)} less than now` : ""}.${result.grading?.summary ? ` ${result.grading.summary}` : ""}`;
+  if (pick) return `Switch from \`${current}\` to \`${pick.model}\` on ${pick.endpoint}: it passed ${rate(pick.passes, pick.total)} of the cases at ${usd(pick.costPerCallUsd)} a call${pick.savingPerCallUsd !== null ? pick.savingPerCallUsd < 0 ? `, ${usd(-pick.savingPerCallUsd)} more than now` : `, ${usd(pick.savingPerCallUsd)} less than now` : ""}.${paybackLine(result) ? ` ${paybackLine(result)}` : ""}${result.grading?.summary ? ` ${result.grading.summary}` : ""}`;
   if (result.status === "keep_current") {
     if (result.grading?.bar === "criteria" && result.grading.summary) return `Keep \`${current}\`: ${result.grading.summary}`;
     const best = result.top[0];

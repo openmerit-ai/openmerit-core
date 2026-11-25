@@ -105,8 +105,8 @@ test("a run in the grading loop shows each sampled answer to grade, and a report
 
   const base = await get<Report>("/api/runs/k7m2q9");
   const summary = "Your current model fails 1 of your checks (G3); the cheapest model that passes them is anthropic/claude-haiku-5-5, at $0.40 more per 1,000 calls.";
-  const criteria = text(runView.render({ ...base, grading: { rounds: 2, accepted: true, bar: "criteria", failedChecks: ["G3"], summary } }, page(me)));
-  assert.match(criteria, /You accepted the eval after 2 rounds of grading\. Since you marked answers of the model in use now wrong, every model was measured against the eval's checks/);
+  const criteria = text(runView.render({ ...base, grading: { rounds: 2, accepted: true, bar: "criteria", failedChecks: ["G3"], summary, barSet: { round: 1, cases: ["written-4"] } } }, page(me)));
+  assert.match(criteria, /You accepted the eval after 2 rounds of grading\. In round 1 you graded the answer of the model in use now to written-4 as not looking right, so every model was measured against the eval's checks/);
   assert.ok(criteria.includes(summary), "the pick card says what the current model misses");
   assert.doesNotMatch(text(runView.render(base, page(me))), /Your Grades/, "a run nobody graded has no grades section");
 });

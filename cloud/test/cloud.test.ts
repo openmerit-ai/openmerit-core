@@ -17,7 +17,7 @@ import { bundle, caller, costOf, crash, fakeCapture, fakeModels, startApp, stop,
 
 const CLERK = { CLERK_SECRET_KEY: "sk_test_fake", CLERK_PUBLISHABLE_KEY: `pk_test_${Buffer.from("clerk.openmerit.test$").toString("base64")}` };
 type Data = Record<string, unknown>;
-type Result = { status: string; pick: { model: string; passes: number; total: number } | null; edit: { edits: { before: string; after: string }[] }; reportUrl: string; spend: { openmeritUsd: number; customerUsd: number } };
+type Result = { status: string; pick: { model: string; passes: number; total: number; savingPerCallUsd: number | null; paybackCalls: number | null } | null; edit: { edits: { before: string; after: string }[] }; reportUrl: string; spend: { openmeritUsd: number; customerUsd: number } };
 const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
 /** What every call the fake answered cost, for a job none of whose steps ran twice. */
 const sentCost = (models: FakeModels) => sum(models.calls.map(call => costOf(call.model)));
@@ -153,6 +153,10 @@ test("a job waits on its label check across a restart, then measures on OpenRout
     const provisional = started.data.provisional as { model: string; reason: string };
     assert.notEqual(provisional.model, "openai/gpt-5.4");
     assert.match(provisional.reason, /Catalogue estimate, not yet measured/);
+    // Before anything is measured, the agent gets what the job will make, cost and take, capped at the budget per job.
+    const estimate = started.data.estimate as { caseRuns: number; usd: number | null; budgetUsd: number; minutes: { low: number; high: number } };
+    assert.ok(estimate.caseRuns > 0 && estimate.usd !== null && estimate.usd > 0 && estimate.usd <= estimate.budgetUsd && estimate.minutes.low <= estimate.minutes.high, JSON.stringify(estimate));
+    assert.match(started.text, /Measuring makes about [\d,]+ case runs, about \$[\d.]+, never more than the \$[\d.]+ budget per job, and takes about \d+ to \d+ minutes\./);
     // One mcp_tool_called per tool call, as the signed-in user, with no arguments or result.
     const [called, ...more] = (await waitFor(async () => events("mcp_tool_called"), found => found.length > 0, 10_000));
     assert.equal(more.length, 0);
@@ -185,6 +189,9 @@ test("a job waits on its label check across a restart, then measures on OpenRout
     // Every case, three times.
     assert.equal(measured.pick!.total, 24);
     assert.equal(measured.pick!.passes, 24);
+    // The pick says after how many calls its saving repays what the run cost.
+    assert.equal(measured.pick!.paybackCalls, Math.ceil((measured.spend.openmeritUsd + measured.spend.customerUsd) / measured.pick!.savingPerCallUsd!));
+    assert.match(done.text, /which the saving repays after about [\d,.]+( thousand| million)? calls/);
     assert.ok((catalogue.models.find(model => model.id === measured.pick!.model)?.eci ?? 200) >= WEAK_BELOW, `${measured.pick!.model} answers wrongly in the fake`);
     assert.deepEqual(measured.edit.edits.map(edit => [edit.before, edit.after]), [['const MODEL = "gpt-5.4";', `const MODEL = "${measured.pick!.model}";`]]);
     assert.ok(models.calls.some(call => call.ticket === "Where is my invoice for March?"), "the labelled case is measured");
@@ -665,7 +672,8 @@ test("when no measured model is cheaper per call than the current one, the job m
     const switched = await run("provisional classifier", (model, provisional) => model === "openai/gpt-5.4" || model === provisional);
     assert.equal(switched.result.status, "picked", switched.done.text);
     assert.equal(switched.result.pick!.model, switched.provisional);
-    assert.ok(switched.notices.some(notice => notice.includes(`the provisional pick ${switched.provisional} was measured on every case`)), switched.notices.join("\n"));
+    assert.ok(switched.notices.includes(`The provisional pick ${switched.provisional} was measured on every case too.`), switched.notices.join("\n"));
+    assert.ok(!switched.notices.some(notice => notice.includes("No measured model that qualified")), "the notice makes no claim the result contradicts");
     assert.match(switched.result.reason, new RegExp(`^Switch from \`openai/gpt-5.4\` to \`${switched.provisional}\``));
     assert.deepEqual([switched.result.baseline.passes, switched.result.baseline.total], [24, 24]);
     assert.ok(switched.result.baseline.costPerCallUsd > 0);
@@ -739,7 +747,7 @@ test("a measuring job shows the app the candidate under test, case by case, agai
     const started = await agent().tool("openmerit_recommend", { bundle: bundle("live classifier", false), environment: "acme/live" });
     const jobId = started.data.job_id as string;
     await waitFor(() => agent().tool("openmerit_result", { job_id: jobId }), value => value.data.status === "needs_input");
-    // Hold the thirtieth model call: the current model's three runs of 8 cases are done, and a candidate's screen of 5 is under way.
+    // Hold the thirtieth model call: the current model's three runs of 8 cases are done, and a candidate's screen of all 8 (a small eval) is under way.
     let held = false;
     const gate = new Promise<void>(resolve => { release = resolve; });
     models.onCall = async () => {
@@ -753,7 +761,7 @@ test("a measuring job shows the app the candidate under test, case by case, agai
     assert.equal(view.body.status, "running");
     assert.notEqual(live.model, "openai/gpt-5.4", "a candidate, not the current model");
     assert.deepEqual(live.baseline, { model: "openai/gpt-5.4", rate: 100 });
-    assert.equal(live.total, 5, "a screen runs the sample cases");
+    assert.equal(live.total, 8, "a small eval's screen runs every case");
     assert.ok(live.done < live.total, "the held case is not done");
     assert.equal(live.history.length, live.done);
     assert.equal(live.history.at(-1)!.rate, live.passes / live.done * 100);

@@ -8,7 +8,9 @@ import { modelKeyRefusal, services } from "./services.ts";
 import { writeCases, type TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 import type { Guardrails } from "./engine.ts";
 import type { AppClient } from "./registry.ts";
-import { redactBundle, taskIdFor, type JobTrigger } from "../../openmerit-core/src/job/workflow.ts";
+import { estimateJob, redactBundle, taskIdFor, type JobEstimate, type JobTrigger } from "../../openmerit-core/src/job/workflow.ts";
+import { callCost } from "../../openmerit-core/src/ranking/index.ts";
+import { catalogueIndex, DEFAULT_REPEATS } from "../../openmerit-core/src/engine/index.ts";
 
 export { redactBundle, taskIdFor };
 import { DEFAULT_PROJECT } from "./actors/account.ts";
@@ -50,7 +52,7 @@ export function bundleProblem(value: unknown): string | null {
 /** The highest budget per job a rerun sets; the spend caps still apply. */
 export const MAX_RERUN_BUDGET_USD = 1000;
 
-export type StartResult = { ok: true; jobId: string; taskId: string; provisional: Provisional } | { ok: false; error: string };
+export type StartResult = { ok: true; jobId: string; taskId: string; provisional: Provisional; estimate: JobEstimate } | { ok: false; error: string };
 
 /**
  * `trigger` is where the job was started: app.openmerit.ai, an MCP tool call or a task's watch.
@@ -116,12 +118,19 @@ async function launch(client: AppClient, input: { accountId: string; projectId: 
     account.resolveGuardrails({ projectId: input.projectId, environment: input.environment, agent: input.agent, taskId }), task.info(),
   ]);
   const measured = past.lastResult?.pick && past.lastResult.currentModel === input.bundle.current.model ? past.lastResult : null;
+  const pool = buildPool({ catalogue, endpoints, bundle: input.bundle, guardrails: guardrails.effective });
   const provisional: Provisional = measured
     ? { model: measured.pick!, endpoint: measured.endpoint ?? "openrouter", reason: `Measured for this task on ${measured.finishedAt.slice(0, 10)} (job ${measured.jobId}); this job measures it again.`, estCostPerCallUsd: null }
-    : provisionalPick(catalogue, buildPool({ catalogue, endpoints, bundle: input.bundle, guardrails: guardrails.effective }), input.bundle);
+    : provisionalPick(catalogue, pool, input.bundle);
+  const { config } = services();
+  const index = catalogueIndex(catalogue);
+  const estimate = estimateJob(pool, input.bundle, {
+    repeats: Math.max(1, guardrails.effective.repeats ?? DEFAULT_REPEATS), budgetUsd: guardrails.effective.budgetUsd ?? config.limits.defaultJobBudgetUsd,
+    costPerCall: model => callCost(index.find(model), input.bundle), judge: input.bundle.output.kind === "text" || input.bundle.guardrails?.length ? config.models.judge : null,
+  });
   await task.recordJob({ jobId, bundle: input.bundle, agent: input.agent, kind: input.kind });
   await client.job.create([jobId], { input: { accountId: input.accountId, projectId: input.projectId, taskId, environment: input.environment, agent: input.agent, bundle: input.bundle, kind: input.kind, trigger: input.trigger, userId: input.userId, provisional, createdAt: new Date().toISOString() } });
-  return { ok: true, jobId, taskId, provisional };
+  return { ok: true, jobId, taskId, provisional, estimate };
 }
 
 /**

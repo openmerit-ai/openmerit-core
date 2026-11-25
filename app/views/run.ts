@@ -120,7 +120,7 @@ function pickCard(report: Report): Html {
           <div class="stat"><b>${per1k(pick.costPerCallUsd)}</b><span>per 1,000 calls${vs(per1k(base?.costPerCallUsd ?? null))}</span></div>
           <div class="stat"><b>${seconds(measured?.latencyMs ?? null)}</b><span>mean latency${vs(seconds(base?.latencyMs ?? null))}</span></div>
         </div>
-        ${pick.savingPerCallUsd && pick.savingPerCallUsd > 0 ? html`<p class="note">It saves about ${per1k(pick.savingPerCallUsd)} per 1,000 calls.</p>` : ""}
+        ${pick.savingPerCallUsd && pick.savingPerCallUsd > 0 ? html`<p class="note">It saves about ${per1k(pick.savingPerCallUsd)} per 1,000 calls${pick.paybackCalls ? `, so this run's cost is repaid after about ${pick.paybackCalls.toLocaleString("en-US")} calls` : ""}.</p>` : ""}
         ${report.grading?.bar === "criteria" && report.grading.summary ? html`<p class="note">${report.grading.summary}</p>` : ""}
       </div>`;
 }
@@ -222,7 +222,7 @@ function report(data: Report, admin: boolean): Html {
 
     ${data.grading ? html`<section aria-labelledby="grading">
       <h2 id="grading">Your Grades</h2>
-      <div class="card"><p>${data.grading.accepted ? `You accepted the eval${data.grading.rounds ? ` after ${plural(data.grading.rounds, "round")} of grading` : ""}.` : "You did not accept the eval."}${data.grading.bar === "criteria" ? " Since you marked answers of the model in use now wrong, every model was measured against the eval's checks, and the cheapest that meets them is recommended, even when it costs more." : ""}</p>
+      <div class="card"><p>${data.grading.accepted ? `You accepted the eval${data.grading.rounds ? ` after ${plural(data.grading.rounds, "round")} of grading` : ""}.` : "You did not accept the eval."}${data.grading.bar === "criteria" ? ` ${data.grading.barSet ? `In round ${data.grading.barSet.round} you graded the answer${data.grading.barSet.cases.length === 1 ? "" : "s"} of the model in use now to ${data.grading.barSet.cases.join(", ")} as not looking right, so every` : "Every"} model was measured against the eval's checks, and the cheapest that meets them is recommended, even when it costs more.` : ""}</p>
         ${data.grading.bar === "criteria" && data.grading.summary && !data.pick ? html`<p class="note">${data.grading.summary}</p>` : ""}</div>
     </section>` : ""}
 

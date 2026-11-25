@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Screening, paired qualification, the 10% saving and cost estimates — unreleased, 25 November 2026
+
+Reviewed the homepage against small evals screening on every case, failed calls being run again before they count, models qualifying only when they lose no case the current model always passes, switches needing a 10% saving, `openmerit_recommend` returning a cost and time estimate, and results giving the calls a switch takes to repay its run. `site/index.html` makes no claim about screening, qualification, run cost or payback. No homepage change is needed.
+
 ## No Claude sign-in in the cloud app — unreleased, 25 November 2026
 
 Reviewed the homepage against the cloud app dropping its Claude sign-in, so a member's own ChatGPT plan is the only subscription that can write their runs' test cases. `site/index.html` makes no claim about subscriptions, sign-ins or who pays for writing cases. No homepage change is needed. The cloud README's Members' subscriptions section describes the behaviour.

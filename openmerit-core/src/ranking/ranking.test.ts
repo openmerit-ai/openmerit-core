@@ -73,6 +73,8 @@ function script(model: string, body: Record<string, unknown>, anthropic: boolean
       if (results.length < 2) return { tool: { name: "lookup_code", args: { code: results.length ? "Z99" : "M54.5" } }, cost: 0.001 };
       return { text: results.join(" | "), cost: 0.001 };
     }
+    // A judge that passes an answer only when it was shown each tool call followed by what the tool returned.
+    case "grounded": return { text: /Calls tool lookup_code with \{"code":"M54\.5"\}\nTool lookup_code returned: low back pain[\s\S]*Final answer: low back pain \| no such code/.test(user) ? "{\"pass\": true, \"reason\": \"matches the tool results\"}" : "{\"pass\": false, \"reason\": \"not backed by any tool result\"}", cost: 0.01 };
     case "json": return { text: "```json\n{\"queue\": \"billing\", \"urgent\": true, \"note\": \"anything\"}\n```", cost: 0.001 };
     // Says the right queue and, for the guardrail case, also promises what it must not.
     case "promiser": return { text: `${LABELS[user] ?? "billing"}. ${user.includes("refund") ? "I promise you a full refund today." : ""}`.trim(), cost: 0.001 };
@@ -500,6 +502,16 @@ test("a trace case is sent as its recorded messages in one call, and graded by p
   seen.length = 0;
   const textInsteadOfTool = await measure({ model: "good", endpoint: "openrouter" }, ["t-tool-call"]);
   assert.equal(textInsteadOfTool.results[0]!.pass, false, "text where the recorded answer called a tool");
+});
+
+test("the judge reads an agent's run in order, with what each tool returned, so an answer built from tool results passes", async () => {
+  const lookup = { name: "lookup_code", parameters: { type: "object", properties: { code: { type: "string" } }, required: ["code"] } };
+  const codes: TaskBundle = { ...bundle, output: { kind: "text" }, tools: [lookup], criteria: ["Reports what lookup_code returned for each code."] };
+  const caseItem: Case = { id: "c1", input: { ticket: "x" }, origin: "written", toolResults: { lookup_code: [{ when: { code: "M54.5" }, result: "low back pain" }, { result: "no such code" }] } };
+  seen.length = 0;
+  const measure = createMeasure({ bundle: codes, cases: [caseItem], client: client(), grader: graderFor(codes, { judge: { client: client(), endpoint: "openrouter", model: "grounded" } }), ledger: memoryLedger(), key: "job-1" });
+  assert.deepEqual((await measure({ model: "coder", endpoint: "openrouter" }, ["c1"])).results, [{ caseId: "c1", pass: true }]);
+  assert.match(lastUser(seen.find(item => item.body.model === "grounded")!.body), /Answer to grade:\nCalls tool lookup_code/);
 });
 
 const spec: TaskBundle = {
