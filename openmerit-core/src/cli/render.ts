@@ -34,6 +34,7 @@ export function renderSearch(search: SearchSummary): string[] {
   const pool = `${search.pool} ECI-ranked candidates${search.unranked ? ` (${search.unranked} without an ECI left out)` : ""}`;
   // A search that stopped on the current model never drew its screening items.
   const lines = [search.sampleIds.length ? `  Scout Model Binary Search over ${pool}, screening on ${search.sampleIds.length} items the current model passes:` : `  Scout Model Binary Search over ${pool}: stopped before screening any candidate.`];
+  if (search.anyPrice) lines.push("    Candidates at any price: you marked the current model's answer wrong, so models that cost more than it are searched too.");
   for (const trial of search.trials) lines.push(`    ${trial.stage.padEnd(10)} ${trial.model} (ECI ${trial.eci.toFixed(1)}): ${trial.passes}/${trial.total} ${trial.accepted ? "pass" : "fail"}`);
   for (const item of search.skipped) lines.push(`    skipped    ${item.model} at ${item.stage}: ${item.reason.split("\n")[0]}`);
   if (search.pick) lines.push(`    Weakest passing model: ${search.pick}. Finalists: ${search.finalists.join(", ") || "none"}${search.challengers.length ? `. Challengers: ${search.challengers.join(", ")}` : ""}.`);

@@ -49,7 +49,7 @@ const MAX_BYTES = 512_000;
 /** More model usages than this in one JSON, YAML or TOML file make it data rather than configuration. */
 export const MAX_DATA_FILE_MODELS = 20;
 
-const SUPPORT = /(^|\/)(tests?|specs?|__tests__|__mocks__|mocks?|fixtures?|testdata|cassettes|vcr_cassettes|snapshots?|__snapshots__|docs?|results|benchmark_results)\/|(^|\/)(test_[^/]+|[^/]+_test\.\w+|[^/]+\.(test|spec)\.\w+|[^/]+_spec\.rb|conftest\.py)$/i;
+const SUPPORT = /(^|\/)(tests?|specs?|__tests__|__mocks__|mocks?|fixtures?|testdata|cassettes|vcr_cassettes|snapshots?|__snapshots__|docs?|[\w.-]*results)\/|(^|\/)(test_[^/]+|[^/]+_test\.\w+|[^/]+\.(test|spec)\.\w+|[^/]+_spec\.rb|conftest\.py)$/i;
 /** Tests, fixtures, recorded responses, docs and saved results: they name models, but no production task runs there. */
 export const isSupportFile = (file: string) => SUPPORT.test(file);
 const EXAMPLE = /(^|\/)(examples?|samples?|demos?|cookbooks?|notebooks?|scripts|benchmarks?|playground|tutorials?)\//i;
