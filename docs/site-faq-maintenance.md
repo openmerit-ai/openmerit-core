@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Contact-sales form — unreleased, 26 November 2026
+
+The owner asked for a form like Profound's instead of a `mailto:` link. Every "contact us" link on the buyer-question pages and `/vs-routers/` now goes to `/contact-sales/`, which asks for name, work email, company, company size, what they want OpenMerit for and how they heard about it, and says the details are used only to reply. It says running OpenMerit yourself is free and gives no hosted price. The homepage has no FAQ block, so nothing else changed.
+
 ## Buyer-question pages, free self-hosting and hosted pricing — unreleased, 26 November 2026
 
 Added four public pages beside `/vs-routers/`: `/find-a-cheaper-llm/`, `/evals-from-your-code/`, `/claude-code-and-codex/` and `/run-locally/`, each answering one question buyers ask AI assistants, with a list linking all five. Their claims about Scout, the eval, the MCP server, data handling, telemetry, requirements and limits follow `openmerit-core/README.md`. With the owner's approval they say running OpenMerit yourself is free and that hosted pricing is on request, linking `mailto:lazim@openmerit.ai`; `/vs-routers/` now says the same. They name no price and make no licensing claim. Recheck them when the Scout workflow, data handling, telemetry, supported platforms, install size or default budget change. The homepage has no FAQ block, so nothing else changed.

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="OpenMerit can run model selection for you: it reviews your code, writes the evals and finds cheaper models that pass them. Tell us about your team and we will reply with pricing.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f8f7f4" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#171915" media="(prefers-color-scheme: dark)">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Talk to us about hosted OpenMerit">
+  <meta property="og:description" content="OpenMerit can run model selection for you: it reviews your code, writes the evals and finds cheaper models that pass them. Tell us about your team and we will reply with pricing.">
+  <meta property="og:url" content="https://openmerit.ai/contact-sales/">
+  <meta property="og:site_name" content="OpenMerit">
+  <meta property="og:image" content="https://openmerit.ai/assets/openmerit-og-v1.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <title>Talk to us about hosted OpenMerit · OpenMerit</title>
+  <link rel="canonical" href="https://openmerit.ai/contact-sales/">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="preload" href="/assets/geist-sans.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/styles.css?v=20261126-contact-v1">
+</head>
+<body class="landing-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="letter-header">
+    <a class="brand" href="/" aria-label="OpenMerit home">
+      <svg class="brand-mark" viewBox="0 0 28 30" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M3 27V13a11 11 0 0 1 22 0v14M8 27V13a6 6 0 0 1 12 0v14M14 16v11"/></svg>
+      <span>openmerit</span>
+    </a>
+    <nav aria-label="Primary navigation"><a href="/scout/">Scout</a><a href="/memo/">Memo</a></nav>
+  </header>
+  <main id="main" class="letter-main compare-page">
+    <h1>Talk to us about hosted OpenMerit</h1>
+    <p class="compare-lede">Running OpenMerit on your own machine is free. If you’d rather we run it for you, we review your code, write the evals and find cheaper models that pass them, outside your request path. Tell us about your team and we’ll reply with pricing.</p>
+
+    <form class="contact-form" method="post" action="/contact-sales/api">
+      <label><span>Full name<span class="contact-req" aria-hidden="true">*</span></span><input name="name" autocomplete="name" maxlength="120" required></label>
+      <label><span>Work email<span class="contact-req" aria-hidden="true">*</span></span><input name="email" type="email" autocomplete="email" maxlength="254" required></label>
+      <label><span>Company<span class="contact-req" aria-hidden="true">*</span></span><input name="company" autocomplete="organization" maxlength="160" required></label>
+      <label><span>Company size<span class="contact-req" aria-hidden="true">*</span></span><select name="size" required><option value="">Choose one</option><option>1–10</option><option>11–50</option><option>51–200</option><option>201–1,000</option><option>1,001+</option></select></label>
+      <label><span>What would you like OpenMerit to help with?</span><textarea name="use" rows="4" maxlength="4000"></textarea></label>
+      <label><span>How did you hear about us?</span><input name="heard" maxlength="500"></label>
+      <label class="contact-trap" aria-hidden="true">Leave this empty<input name="website" tabindex="-1" autocomplete="off"></label>
+      <button class="letter-cta" type="submit">Send</button>
+      <p class="contact-note">We use these details only to reply to you. Fields marked * are required.</p>
+    </form>
+
+    <h2 id="self-hosted">Prefer to run it yourself?</h2>
+    <p>Install the free CLI with <code>npm install -g openmerit</code>, or read <a href="/run-locally/">where your code and data go when you run it locally</a>.</p>
+  </main>
+</body>
+</html>

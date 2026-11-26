@@ -28,12 +28,14 @@ It runs the pinned Wrangler with `--strict`, which stops if someone changed the 
 | Key | Worker | Config | Serves |
 |---|---|---|---|
 | `domain-router` | `openmerit-domains` | `wrangler.domains.jsonc` | Every public host; redirects; `/memo` to `openmerit-site`; `/mcp`, `/.well-known/oauth-protected-resource` and `/api/*` to the cloud app |
-| `scout-serving` | `openmerit-scout-alpha` | `wrangler.scout-alpha.jsonc` | Landing page, the Clerk sign-in at `/scout/`, `/playground/scout/` |
+| `scout-serving` | `openmerit-scout-alpha` | `wrangler.scout-alpha.jsonc` | Landing page, the Clerk sign-in at `/scout/`, `/playground/scout/`, the buyer-question pages and the contact-sales form |
 | `playground-claims` | `playground-claims` | `playground/wrangler.jsonc` | Sahra Health's customer claims and enrollment workflows |
 | `site` | `openmerit-site` | `wrangler.jsonc` | Protected memo. Code-only release with asset-retention checks and no container rollout |
 | `app` | `openmerit-app` | `wrangler.app.jsonc` | `app.openmerit.ai`: the cloud plan's run, task and account pages, built from `app/` by `scripts/build-app.ts` and served by `app/worker.ts`. Clerk sign-in; data from the cloud app's `/api/*`. Its first deploy creates the `app.openmerit.ai` custom domain |
 
 Deploy `scout-serving` before `domain-router` when a change spans both, as the rebuild cutover did.
+
+**Contact-sales form — unreleased source, 26 November 2026.** `scout-serving` handles `POST /contact-sales/api` in `demo/contact.ts`. It validates the form, allows three submissions a minute per IP (`CONTACT_RATE`, rate-limit namespace `2026112601`) and emails each request through the `CONTACT_EMAIL` send binding from `CONTACT_FROM` (`memo@openmerit.ai`, the sender the memo already verified) to `CONTACT_TO` (`lazim@openmerit.ai`, the only allowed destination), with Reply-To set to the sender. It stores nothing. The deploy that first adds these bindings is an email change and needs the owner's approval like any deploy. After it, submit the form once with a real address and check the email arrives and Reply-To works; the form falls back to the `mailto:` address when sending fails.
 
 **Cloud app routes — unreleased source, 18 November 2026.** On `openmerit.ai`, the router proxies `/mcp`, `/.well-known/oauth-protected-resource` and `/api/*`, each with its subpaths, to the cloud app at the origin in the `CLOUD_APP_ORIGIN` variable of `wrangler.domains.jsonc`. It keeps the method, query, body and headers, drops the `Cookie` header, and sets `X-Forwarded-Host` and `X-Forwarded-Proto`. It is `https://openmeritdr2i.onrivet.dev`, the cloud app on Rivet Cloud. When the variable is empty, those paths return 503 with `Cache-Control: no-store`, and nothing else on the site changes; setting it to `""` and deploying is the way to take them offline without a rollback. After changing it, run `npm run types:workers`, land the change, and deploy `domain-router` with approval. No DNS change is needed. Deploy the router only once the cloud app answers at that origin: until then `/mcp` and `/api/*` return the origin's errors instead of 503.
 

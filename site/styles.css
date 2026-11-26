@@ -147,6 +147,16 @@ code { font-family: var(--mono); }
 .compare-page pre { margin: 12px 0; padding: 12px 14px; overflow-x: auto; border: 1px solid var(--code-line); border-radius: 8px; background: var(--code-bg); }
 .compare-page pre code { padding: 0; background: none; font-size: 13px; line-height: 1.6; }
 .compare-related { padding-left: 20px; }
+/* The contact-sales form at /contact-sales/. */
+.contact-form { display: grid; gap: 16px; max-width: 520px; margin-top: 32px; }
+.contact-form label { display: grid; gap: 6px; color: var(--ink); font-size: 14px; font-weight: 500; }
+.contact-form .contact-req { margin-left: 2px; color: var(--muted); }
+.contact-form input, .contact-form select, .contact-form textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--field-line); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; font-size: 15px; font-weight: 400; }
+.contact-form textarea { resize: vertical; }
+.contact-form input:focus-visible, .contact-form select:focus-visible, .contact-form textarea:focus-visible { outline: 2px solid var(--link); outline-offset: 1px; }
+.contact-form .letter-cta { justify-self: start; margin-top: 4px; cursor: pointer; }
+.contact-form .contact-trap { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+.contact-note { margin: 0; color: var(--muted); font-size: 13px; }
 @media (max-width: 580px) { .compare-page h1 { font-size: 28px; } .compare-table table { min-width: 560px; } }
 .intro-film { width: min(1040px, calc(100vw - 96px)); margin: 76px 0 0 50%; transform: translateX(-50%); }
 .intro-film > .thread-rule { margin-bottom: 36px; }
