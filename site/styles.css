@@ -124,10 +124,6 @@ code { font-family: var(--mono); }
 .letter-cta { display: inline-flex; align-items: center; justify-content: center; gap: 8px; margin-top: 25px; padding: 6px 12px; min-height: 32px; border: 0; border-radius: 8px; background: var(--soft); color: var(--ink); font-size: 12px; font-weight: 500; line-height: 20px; -webkit-user-select: none; user-select: none; transition: background 160ms ease, transform 160ms var(--ease-out); }
 .letter-cta img { flex-shrink: 0; }
 .letter-cta:active:not(:focus-visible) { transform: scale(.97); }
-/* The Clerk sign-in page at /scout/ reuses the homepage layout. */
-.letter-header nav #user-account { display: flex; align-items: center; }
-.letter-header nav #user-account[hidden] { display: none; }
-.sign-in-error { margin-top: 16px; color: var(--error); font-size: 13px; }
 /* The comparison page at /vs-routers/ reuses the homepage layout. */
 .compare-page { color: var(--prose); }
 .compare-page h1 { margin: 0 0 20px; color: var(--ink); font-family: var(--serif); font-size: 34px; font-weight: 400; line-height: 1.2; letter-spacing: -.02em; text-wrap: balance; }

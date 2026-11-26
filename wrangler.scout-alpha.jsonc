@@ -2,9 +2,9 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "openmerit-scout-alpha",
   "account_id": "1f505317550261331711b1274ec53c33",
-  // The web Worker: the landing page, the playground walkthrough and the Clerk
-  // sign-in at /scout/. It keeps the former Scout Worker's identity and its
-  // CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY secrets.
+  // The web Worker: the landing page, the playground walkthrough, the content
+  // pages and the contact-sales form; /scout redirects to /contact-sales/. It
+  // keeps the former Scout Worker's identity.
   "main": "demo/web.ts",
   "compatibility_date": "2026-10-15",
   "compatibility_flags": ["nodejs_compat"],

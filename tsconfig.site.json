@@ -6,5 +6,5 @@
     "allowJs": true,
     "types": ["node"]
   },
-  "include": ["demo/**/*.ts", "site/memo-access.ts", "site/scout/sign-in.ts", "site/video-player.ts", "site/thread-rule.ts", "site/speed-egg.ts", "app/**/*.ts"]
+  "include": ["demo/**/*.ts", "site/memo-access.ts", "site/video-player.ts", "site/thread-rule.ts", "site/speed-egg.ts", "app/**/*.ts"]
 }

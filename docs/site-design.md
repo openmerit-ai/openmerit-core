@@ -2,6 +2,10 @@
 
 Domain operations: see the [primary domain migration](site-domain-migration.md) for current routing, email, auth, and deployment constraints. Historical publication records below retain their original domains.
 
+## Get Demo instead of Scout — unreleased source, 26 November 2026
+
+At the owner's request, the homepage's **Try Scout** button is now **Get Demo** and goes to `/contact-sales/`, and the header nav on every page reads Memo, then Get Demo, in place of Scout. The hero's second paragraph still introduces Scout but no longer links it, the playground walkthrough's footer links the homepage, and `/scout/` (the Clerk sign-in page) is removed and redirects to `/contact-sales/`. Older notes below that mention Try Scout or `/scout/` describe earlier releases.
+
 ## Contact-sales form — unreleased source, 26 November 2026
 
 `/contact-sales/` follows the layout of Profound's contact-sales page: an intro column (eyebrow, heading, three checked points, then the self-hosting note) beside the form in a card, which moves under the intro on screens under 880px with the self-hosting note last. Its plain HTML form posts to `/contact-sales/api` and works without JavaScript. It asks for monthly LLM spend in eight bands from under $10K to $1M+, required like company size. Fields show their names as placeholders, with visually hidden labels for screen readers; the select draws its own chevron, inset 18px from the edge, and the message field doesn't show a resize handle. Fields use the browser's own required and length checks, and the server repeats them. A field hidden off-screen catches bots, which are sent to the confirmation page without an email being sent. A valid request redirects (303) to `/contact-sales/thanks/`, a static page that search engines don't index. Errors are small server-rendered pages in the same layout that offer the `mailto:` address instead. `.contact-form` styles live in `site/styles.css`.

@@ -1,5 +1,5 @@
 // Clerk sign-in for app.openmerit.ai. ClerkJS and its UI load from the Clerk
-// instance's frontend API, as on openmerit.ai/scout/; the cloud app verifies
+// instance's frontend API; the cloud app verifies
 // each session token it receives. A page that already defines clerkGlobals.Clerk,
 // as the local preview does, uses it instead.
 export interface ClerkSession {
