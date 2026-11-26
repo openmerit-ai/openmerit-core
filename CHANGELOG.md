@@ -3,9 +3,6 @@
 ## Unreleased
 
 - The README's opening now says the CLI is free and links openmerit.ai, where OpenMerit Cloud runs it for you.
-
-## Unreleased
-
 - The cloud app runs self-hosted: `OPENMERIT_MODE=self-hosted` starts it for one person on 127.0.0.1 with a local engine, signs in with a token written to `~/.openmerit/server/token` on first start, and needs no plan, Clerk, Stripe or PostHog; spend caps still apply. Not yet reachable from the `openmerit` CLI.
 
 ## 0.5.1 — 2026-11-26
