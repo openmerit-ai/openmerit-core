@@ -3,18 +3,27 @@
 // cloud/README.md.
 import { createServer } from "node:http";
 import { startApp } from "./app.ts";
-import { ClerkAuth } from "./auth.ts";
+import { ClerkAuth, LocalAuth, localToken } from "./auth.ts";
 import { StripeBilling } from "./billing.ts";
 import { loadConfig } from "./config.ts";
 
 const config = loadConfig();
+const selfHosted = config.mode === "self-hosted";
+// Self-hosted: one local token signs in, and a local engine keeps its state in the data directory.
+const local = selfHosted ? localToken(config.dataDir) : null;
+if (local) {
+  process.env.RIVETKIT_STORAGE_PATH ??= config.dataDir;
+  // The local engine's admin token is the server's token, so nothing without it reaches the engine either.
+  process.env.RIVET__AUTH__ADMIN_TOKEN = local.token;
+}
 const { registry } = await startApp({
   config,
-  auth: config.clerk ? new ClerkAuth(config.clerk) : null,
+  auth: local ? new LocalAuth(local.token, local.file) : config.clerk ? new ClerkAuth(config.clerk) : null,
   billing: config.stripe ? new StripeBilling(config.stripe) : null,
+  ...(local ? { local: { port: Number(process.env.OPENMERIT_ENGINE_PORT ?? config.port + 1), token: local.token } } : {}),
 });
-const missing = [!config.clerk && "Clerk", !config.stripe && "Stripe", !config.keyEncryptionKey && "the key-encryption key", !config.openrouter.apiKey && "OpenRouter"].filter(Boolean);
-console.log(`OpenMerit cloud on :${config.port} for ${config.publicUrl}${missing.length ? `; not configured: ${missing.join(", ")}` : ""}`);
+const missing = [!selfHosted && !config.clerk && "Clerk", !selfHosted && !config.stripe && "Stripe", !config.keyEncryptionKey && "the key-encryption key", !config.openrouter.apiKey && "OpenRouter"].filter(Boolean);
+console.log(`OpenMerit ${config.mode} on ${config.host ?? ""}:${config.port} for ${config.publicUrl}${local ? `; token in ${local.file}` : ""}${missing.length ? `; not configured: ${missing.join(", ")}` : ""}`);
 
 // Metrics, collected with the logs. Kept on localhost, as Rivet's actor-node guide does.
 createServer(async (_req, res) => {

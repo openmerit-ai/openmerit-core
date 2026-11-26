@@ -3,9 +3,12 @@
 // internal errors on /api, which the web app can only read with CORS headers.
 import assert from "node:assert/strict";
 import { createSign, generateKeyPairSync } from "node:crypto";
+import { mkdtempSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { createHandler } from "../src/app.ts";
-import { ClerkAuth, type Auth } from "../src/auth.ts";
+import { ClerkAuth, LocalAuth, localToken, type Auth } from "../src/auth.ts";
 import { loadConfig } from "../src/config.ts";
 import type { AppClient } from "../src/registry.ts";
 
@@ -51,4 +54,21 @@ test("an internal error on /api carries the web app's CORS headers", async () =>
   assert.equal(response.status, 500);
   assert.equal(response.headers.get("access-control-allow-origin"), APP);
   assert.deepEqual(await response.json(), { error: "OpenMerit hit an internal error. Try again." });
+});
+
+test("a self-hosted server writes its token once, owner-only, and LocalAuth accepts only that token as the local admin", async () => {
+  const dir = join(mkdtempSync(join(tmpdir(), "openmerit-local-")), "server");
+  const first = localToken(dir);
+  assert.match(first.token, /^omt_[\w-]{32}$/);
+  assert.equal(statSync(first.file).mode & 0o777, 0o600);
+  assert.deepEqual(localToken(dir), first, "a restart keeps the token");
+  const local = new LocalAuth(first.token, first.file);
+  const request = (token?: string) => new Request("http://localhost/mcp", { headers: token ? { authorization: `Bearer ${token}` } : {} });
+  const signedIn = await local.mcp(request(first.token));
+  assert.deepEqual(signedIn.ok && [signedIn.identity.userId, signedIn.identity.accountId, signedIn.identity.role], ["local", "local", "admin"]);
+  for (const token of [undefined, `${first.token}x`, first.token.slice(0, -1)]) {
+    const refused = await local.api(request(token));
+    assert.equal(refused.ok, false);
+    assert.ok(!refused.ok && refused.status === 401 && refused.error.includes(first.file), JSON.stringify(refused));
+  }
 });

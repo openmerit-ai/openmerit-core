@@ -168,7 +168,7 @@ export function apiRoutes(deps: AppDeps) {
       const info = await account.info();
       const plan = info.plan;
       return json(200, {
-        user: { id: who.userId }, account: { id: info.id, name: info.name ?? who.accountName }, role: who.role,
+        mode: deps.config.mode, user: { id: who.userId }, account: { id: info.id, name: info.name ?? who.accountName }, role: who.role,
         plan: plan
           ? { name: plan.name, status: plan.status, periodEnd: plan.periodEnd ? new Date(plan.periodEnd * 1000).toISOString() : null, includedEvals: plan.includedEvals, usedEvals: plan.usedEvals }
           : { name: null, status: "none", periodEnd: null, includedEvals: 0, usedEvals: 0 },

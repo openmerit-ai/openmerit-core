@@ -96,6 +96,17 @@ Running the customer's own eval in the cloud, which needs a VM, comes later.
 
 To run it by hand against a local engine: `TEST_STORAGE=$(mktemp -d) TEST_ENGINE_PORT=23400 node test/serve.ts`.
 
+## Self-hosted mode
+
+`OPENMERIT_MODE=self-hosted npm start` runs the same app for one person on their own machine, with no Clerk, Stripe, PostHog or Rivet Cloud:
+
+- It listens on `127.0.0.1` (`OPENMERIT_HOST` changes it) and starts a local Rivet engine on the next port (`OPENMERIT_ENGINE_PORT`), which keeps its state in the data directory, `~/.openmerit/server` (`OPENMERIT_DATA_DIR`, or `server` under `OPENMERIT_HOME`).
+- Sign-in is one token: the first start writes a random token to `<data directory>/token`, readable only by its owner. `/mcp` and `/api` take it as `Authorization: Bearer <token>`, and every request with it is the admin of the one account, `local`; the local engine's admin token is the same. A request without it gets a 401 that names the token file.
+- No plan is needed; the jobs-per-hour, concurrent-job, per-job and monthly spend caps still apply. Clerk, Stripe and PostHog settings are ignored, so the Stripe webhook answers 503 and the OAuth metadata names no authorization server.
+- `OPENMERIT_PUBLIC_URL` and `OPENMERIT_APP_URL` default to `http://localhost:<port>`. `GET /api/me` reports `mode`.
+
+Teams on a self-hosted server will sign in through OIDC; that is not built yet.
+
 ## Configuration
 
 | Variable | Kind | For |
@@ -108,7 +119,8 @@ To run it by hand against a local engine: `TEST_STORAGE=$(mktemp -d) TEST_ENGINE
 | `OPENMERIT_REPO_MAX_MB`, `OPENMERIT_REPO_CLONE_SECONDS`, `OPENMERIT_REPOS`, `OPENMERIT_REVIEWS_PER_HOUR` | setting | GitHub repositories: the largest one cloned (200 MB, by GitHub's size and on disk), the longest a clone may take (120 s), repositories per account (20) and reviews an account starts an hour (20) |
 | `OPENMERIT_GITHUB_APP_SLUG` | setting | The OpenMerit GitHub App's slug (`openmeritai`), for its install link; empty turns the GitHub sign-in way of adding repositories off |
 | `OPENMERIT_GITHUB_API_URL`, `OPENMERIT_GITHUB_URL` | setting, tests only | GitHub's API (`https://api.github.com`) and git host (`https://github.com`); the tests point them at a local fake |
-| `OPENMERIT_PUBLIC_URL`, `OPENMERIT_APP_URL` | setting | Default `https://openmerit.ai` and `https://app.openmerit.ai` |
+| `OPENMERIT_MODE` | setting | `hosted` (default) or `self-hosted`, described above |
+| `OPENMERIT_PUBLIC_URL`, `OPENMERIT_APP_URL` | setting | Default `https://openmerit.ai` and `https://app.openmerit.ai`; self-hosted, `http://localhost:<port>` |
 | `OPENMERIT_CASE_WRITER_MODEL`, `OPENMERIT_JUDGE_MODEL`, `OPENMERIT_REVIEWER_MODEL` | setting | Catalogue models on OpenRouter that write cases, judge text answers and review a GitHub repository's code; all default to `anthropic/claude-sonnet-5.5` |
 | `OPENMERIT_REVIEW_BUDGET_USD`, `OPENMERIT_REVIEW_MINUTES` | setting | The most one repository review's model calls may cost ($2) and take (15 minutes) |
 | `OPENMERIT_WATCH_INTERVAL_MS`, `OPENMERIT_IDLE_DAYS` | setting | How often a watched task checks the catalogue (a day), and the days without a recommend call before a task is idle (30) |

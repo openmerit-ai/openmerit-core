@@ -1,5 +1,7 @@
 // The app's configuration, read once from the environment at startup. Every secret is optional so
 // the app starts without it; the feature that needs it answers 503 until it is set.
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { GitHubConfig } from "./github.ts";
 
 export type Env = Record<string, string | undefined>;
@@ -56,8 +58,19 @@ export interface SubscriptionsConfig {
 /** Where analytics events go (analytics.ts). */
 export interface PostHogConfig { token: string; host: string }
 
+/**
+ * `hosted` is openmerit.ai: Clerk sign-in, Stripe plans, a Rivet Cloud cluster. `self-hosted` is one person
+ * on their own machine: one local token signs in, no plan is needed, and the engine runs locally in `dataDir`.
+ */
+export type Mode = "hosted" | "self-hosted";
+
 export interface Config {
+  mode: Mode;
+  /** Self-hosted: where the local token and the engine's storage live. */
+  dataDir: string;
   port: number;
+  /** The interface the server listens on; self-hosted defaults to 127.0.0.1, hosted to every interface. */
+  host: string | undefined;
   /** Where openmerit.ai's router sends /mcp and /api: the base of every URL the app writes. */
   publicUrl: string;
   /** The web app, app.openmerit.ai: report pages, billing and keys. */
@@ -78,7 +91,7 @@ export interface Config {
   orphanAfterMs: number;
   /** A task with no openmerit_recommend call for this long is idle: its watch pauses until the next call. */
   idleAfterMs: number;
-  /** Null without POSTHOG_PROJECT_TOKEN: no event is sent. */
+  /** Null without POSTHOG_PROJECT_TOKEN, and always self-hosted: no event is sent. */
   posthog: PostHogConfig | null;
   /** GitHub's API and git host, and the clone limits (github.ts). */
   github: GitHubConfig;
@@ -96,9 +109,14 @@ export function clerkIssuer(publishableKey: string): string {
 }
 
 export function loadConfig(env: Env = process.env): Config {
-  const publicUrl = (env.OPENMERIT_PUBLIC_URL ?? "https://openmerit.ai").replace(/\/$/, "");
-  const appUrl = (env.OPENMERIT_APP_URL ?? "https://app.openmerit.ai").replace(/\/$/, "");
-  const clerk = env.CLERK_SECRET_KEY && env.CLERK_PUBLISHABLE_KEY ? {
+  const mode: Mode = env.OPENMERIT_MODE === "self-hosted" ? "self-hosted" : "hosted";
+  if (env.OPENMERIT_MODE && env.OPENMERIT_MODE !== mode) throw new Error(`OPENMERIT_MODE must be hosted or self-hosted, not ${env.OPENMERIT_MODE}`);
+  const port = number(env.PORT ?? env.RIVET_PORT, 8080);
+  const local = `http://localhost:${port}`;
+  const publicUrl = (env.OPENMERIT_PUBLIC_URL ?? (mode === "self-hosted" ? local : "https://openmerit.ai")).replace(/\/$/, "");
+  const appUrl = (env.OPENMERIT_APP_URL ?? (mode === "self-hosted" ? local : "https://app.openmerit.ai")).replace(/\/$/, "");
+  // Self-hosted signs in with its local token and needs no plan, so it ignores Clerk and Stripe settings.
+  const clerk = mode === "hosted" && env.CLERK_SECRET_KEY && env.CLERK_PUBLISHABLE_KEY ? {
     secretKey: env.CLERK_SECRET_KEY,
     publishableKey: env.CLERK_PUBLISHABLE_KEY,
     issuer: clerkIssuer(env.CLERK_PUBLISHABLE_KEY),
@@ -106,7 +124,7 @@ export function loadConfig(env: Env = process.env): Config {
     authorizedParties: [appUrl, ...(env.OPENMERIT_EXTRA_ORIGINS?.split(",").map(item => item.trim()).filter(Boolean) ?? [])],
     ...(env.CLERK_JWT_KEY ? { jwtKey: env.CLERK_JWT_KEY } : {}),
   } : null;
-  const stripe = env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET && env.STRIPE_PRICE_ID ? {
+  const stripe = mode === "hosted" && env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET && env.STRIPE_PRICE_ID ? {
     secretKey: env.STRIPE_SECRET_KEY,
     webhookSecret: env.STRIPE_WEBHOOK_SECRET,
     priceId: env.STRIPE_PRICE_ID,
@@ -116,7 +134,9 @@ export function loadConfig(env: Env = process.env): Config {
   const keyEncryptionKey = env.OPENMERIT_KEY_ENCRYPTION_KEY ? Buffer.from(env.OPENMERIT_KEY_ENCRYPTION_KEY, "base64") : null;
   if (keyEncryptionKey && keyEncryptionKey.length !== 32) throw new Error("OPENMERIT_KEY_ENCRYPTION_KEY must be 32 bytes, base64-encoded (openssl rand -base64 32)");
   return {
-    port: number(env.PORT ?? env.RIVET_PORT, 8080),
+    mode, port,
+    dataDir: env.OPENMERIT_DATA_DIR || join(env.OPENMERIT_HOME || join(homedir(), ".openmerit"), "server"),
+    host: env.OPENMERIT_HOST || (mode === "self-hosted" ? "127.0.0.1" : undefined),
     publicUrl, appUrl, clerk, stripe, keyEncryptionKey,
     openrouter: { baseUrl: (env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1").replace(/\/$/, ""), apiKey: env.OPENROUTER_API_KEY || null },
     allowPrivateEndpoints: env.OPENMERIT_ALLOW_PRIVATE_ENDPOINTS === "1",
@@ -150,6 +170,6 @@ export function loadConfig(env: Env = process.env): Config {
     watchIntervalMs: number(env.OPENMERIT_WATCH_INTERVAL_MS, 24 * 60 * 60 * 1000),
     orphanAfterMs: number(env.OPENMERIT_ORPHAN_AFTER_MS, 2 * 60 * 1000),
     idleAfterMs: number(env.OPENMERIT_IDLE_DAYS, 30) * 24 * 60 * 60 * 1000,
-    posthog: env.POSTHOG_PROJECT_TOKEN ? { token: env.POSTHOG_PROJECT_TOKEN, host: (env.POSTHOG_HOST || "https://us.i.posthog.com").replace(/\/$/, "") } : null,
+    posthog: mode === "hosted" && env.POSTHOG_PROJECT_TOKEN ? { token: env.POSTHOG_PROJECT_TOKEN, host: (env.POSTHOG_HOST || "https://us.i.posthog.com").replace(/\/$/, "") } : null,
   };
 }

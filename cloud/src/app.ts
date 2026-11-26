@@ -94,8 +94,10 @@ export interface StartOptions {
 }
 
 export async function startApp(options: StartOptions): Promise<{ server: Server; url: string; client: AppClient; registry: Registry }> {
+  // A self-hosted server bills nobody: no plan, no Checkout, no webhook, no meter events.
+  const billing = options.config.mode === "hosted" ? options.billing : null;
   setServices({
-    config: options.config, billing: options.billing, bundledCatalogue, refreshCatalogue: options.services?.refreshCatalogue ?? null,
+    config: options.config, billing, bundledCatalogue, refreshCatalogue: options.services?.refreshCatalogue ?? null,
     fetch: options.services?.fetch ?? fetch, agentEval: options.services?.agentEval ?? (() => null),
     githubToken: async userId => options.auth ? options.auth.githubToken(userId) : null,
   });
@@ -105,7 +107,7 @@ export async function startApp(options: StartOptions): Promise<{ server: Server;
   const client: AppClient = options.local
     ? createClient<Registry>({ endpoint: `http://127.0.0.1:${options.local.port}`, token: options.local.token })
     : createClient<Registry>();
-  const deps: AppDeps = { client, auth: options.auth, billing: options.billing, config: options.config };
-  const server = await serve(createHandler(deps), options.config.port);
+  const deps: AppDeps = { client, auth: options.auth, billing, config: options.config };
+  const server = await serve(createHandler(deps), options.config.port, options.config.host);
   return { server, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, client, registry };
 }
