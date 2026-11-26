@@ -90,6 +90,8 @@ export interface SearchSummary {
   /** ECI-ranked candidates searched, and eligible ones left out for lack of an ECI. */
   pool: number;
   unranked: number;
+  /** The pool is every model that can run the task, whatever it costs: a person marked the current model's answer wrong. */
+  anyPrice?: true;
   sampleIds: string[];
   pick: string | null;
   trials: { stage: Stage; model: string; eci: number; passes: number; total: number; accepted: boolean }[];
@@ -698,7 +700,12 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
     if (unit.status === "unavailable") throw new CandidateUnavailable(unit.error ?? "could not run");
     if (unit.status === "budget_paused") throw new NeedsInput(budgetQuestions(ctx, runId), "budget_paused");
     if (unit.status !== "pending") {
-      if (declined.has(id)) throw new StopTask(`${label} failed and was not retried: ${(unit.error ?? unit.status).split("\n")[0]}`);
+      if (declined.has(id)) {
+        const why = `${label} failed and was not retried: ${(unit.error ?? unit.status).split("\n")[0]}`;
+        // A declined screen leaves that candidate untested and the search goes on; only the current model's runs stop the task.
+        if (kind === "screen") throw new CandidateUnavailable(why);
+        throw new StopTask(why);
+      }
       throw new NeedsInput([retryQuestion(ctx, runId, stale())]);
     }
     const fail = (error: string): never => { state.setUnit(id, { status: "failed", error }); save(); throw new NeedsInput([retryQuestion(ctx, runId, stale())]); };
@@ -805,7 +812,7 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
     // Once a person marked the current model's answer wrong, the accepted Eval is the bar: every model that can run the task is a candidate, whatever it costs.
     const criteria = data.loop?.[task]?.bar === "criteria" && plan.generated ? criteriaOf((data.generated?.[task] ?? loadGeneratedEval(ctx.repo.root, plan.generated)).bundle, plan.criteriaPassRate) : null;
     const candidates = criteria ? widePool(ctx, data, task) : data.pool![task] ?? [];
-    const summary: SearchSummary = { status: "running", pool: candidates.length, unranked: data.unranked?.[task] ?? 0, sampleIds: [], pick: null, trials: [], skipped: [], finalists: [], challengers: [] };
+    const summary: SearchSummary = { status: "running", pool: candidates.length, unranked: data.unranked?.[task] ?? 0, ...(criteria ? { anyPrice: true } : {}), sampleIds: [], pick: null, trials: [], skipped: [], finalists: [], challengers: [] };
     data.search![task] = summary;
     // openmerit/engine's evaluateTask runs the policy; each of its measure calls is one eval run, replayed from SQLite once done.
     const baselineRuns: UnitResult[] = [];
@@ -1058,7 +1065,10 @@ function retryQuestion(ctx: Context, runId: string, stale: UnitRow[]): Question 
     // A run cut off by a stopped daemon or process is interrupted, not failed; say which it was.
     prompt: `${stale.length} eval run${stale.length === 1 ? "" : "s"} ${stale.every(unit => unit.status !== "failed") ? (stale.length === 1 ? "was interrupted" : "were interrupted") : stale.some(unit => unit.status !== "failed") ? "failed or were interrupted" : "failed"}. Run ${stale.length === 1 ? "it" : "them"} again?`,
     // The eval's last output lines say why it failed, such as a missing dependency.
-    detail: stale.map(unit => `- ${unit.role} ${unit.model} ${unit.repeat}: ${(unit.error ?? unit.status).split("\n")[0]}, ${usd(ctx.state.spend(runId, unit.id).totalUsd)} spent${logTail(unit.error)}`).join("\n"),
+    detail: [
+      ...stale.map(unit => `- ${unit.role} ${unit.model} ${unit.repeat}: ${(unit.error ?? unit.status).split("\n")[0]}, ${usd(ctx.state.spend(runId, unit.id).totalUsd)} spent${logTail(unit.error)}`),
+      ...(stale.some(unit => unit.role === "screen") ? ["No skips a candidate whose screen failed, and the search goes on without it."] : []),
+    ].join("\n"),
   };
 }
 

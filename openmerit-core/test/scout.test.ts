@@ -35,6 +35,8 @@ const requests: string[] = [];
 const rateLimit = { model: "", remaining: 0 };
 /** One ticket whose next `remaining` requests to `model` fail with HTTP 500, as a provider outage for that one call. */
 const hiccup = { model: "", ticket: "", remaining: 0 };
+/** The fake endpoint refuses `model`'s requests with HTTP 403, which fails the eval run rather than skipping the model. */
+const refuse = { model: "" };
 /** The fake endpoint stops `model`'s answers at their token limit before any text, as a model that reasons first does. */
 const cutOff = { model: "" };
 /** Models the fake endpoint answers wrongly. */
@@ -65,6 +67,7 @@ before(async () => {
       const fail = (status: number, message: string) => { res.writeHead(status, { "content-type": "application/json", "retry-after": "0" }); res.end(JSON.stringify({ error: { message } })); };
       if (req.headers.authorization !== "Bearer sk-fake-endpoint") return fail(401, "bad key");
       if (parsed.model === rateLimit.model && rateLimit.remaining-- > 0) { res.writeHead(429, { "content-type": "application/json", "retry-after": "0" }); return res.end(JSON.stringify({ error: { message: "rate-limited upstream" } })); }
+      if (parsed.model === refuse.model) return fail(403, "forbidden");
       if (parsed.model === cutOff.model) { res.writeHead(200, { "content-type": "application/json" }); return res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: null }, finish_reason: "length" }], usage: { prompt_tokens: 100, completion_tokens: 2000 } })); }
       if (parsed.model === "gpt-4.1-nano") return fail(404, "The model `gpt-4.1-nano` does not exist or you do not have access to it.");
       if (parsed.model === hiccup.model && parsed.messages.some(message => message.content === hiccup.ticket) && hiccup.remaining-- > 0) return fail(500, "upstream overloaded");
@@ -221,6 +224,9 @@ test("usages in tests, fixtures and docs make no task: they are counted under th
   const root = repo();
   mkdirSync(join(root, "tests"));
   writeFileSync(join(root, "tests/classify.test.ts"), `const pinned = "gpt-4.1-mini";\nconst cheap = "gpt-5-nano";\n`);
+  // A saved-results directory under any name, such as scout-results/, is not the application's code either.
+  mkdirSync(join(root, "scout-results"));
+  writeFileSync(join(root, "scout-results/2026-11-26.json"), `{"pick": "gpt-5-nano"}\n`);
   execFileSync("git", ["add", "-A"], { cwd: root });
   const ctx = context(root, mkdtempSync(join(tmpdir(), "openmerit-home-")));
   const runId = startRun(ctx);
@@ -229,7 +235,8 @@ test("usages in tests, fixtures and docs make no task: they are counted under th
   let step = await advance(ctx, runId, {});
   const models = step.questions[0]!.options!;
   assert.match(models.find(option => option.value === "openai/gpt-4.1-mini")!.detail!, /\+1 in tests, fixtures or docs/);
-  assert.equal(models.find(option => option.value === "openai/gpt-5-nano")!.detail, "only 1 in tests, fixtures or docs");
+  assert.equal(models.find(option => option.value === "openai/gpt-5-nano")!.detail, "only 2 in tests, fixtures or docs");
+  assert.equal(models.at(-1)!.value, "openai/gpt-5-nano", "a model named only in tests and saved results is offered after the application's models");
   // A model only tests name is offered only the tasks whose model is set at run time, which may be it.
   step = await advance(ctx, runId, { model: "openai/gpt-5-nano" });
   assert.ok(step.questions[0]!.options!.length && step.questions[0]!.options!.every(option => /its model is set at run time/.test(option.detail!)), JSON.stringify(step.questions));
@@ -913,6 +920,22 @@ test("a candidate still rate-limited after the proxy's retries is skipped as unt
     assert.equal(search.trials[0]!.model, "openai/gpt-5.4-nano", "the search went on without it");
     assert.ok(!asked.some(question => question.id === "retry_units" && question.detail?.includes("gpt-5-nano")), "no retry question for the rate limit");
   } finally { rateLimit.remaining = 0; }
+});
+
+test("declining to run a failed screen again skips that candidate, and the search goes on", async () => {
+  const ctx = context(repo(), mkdtempSync(join(tmpdir(), "openmerit-home-")));
+  const runId = startRun(ctx);
+  refuse.model = "gpt-5-nano";
+  try {
+    const { step, asked } = await drive(ctx, runId);
+    assert.equal(step.status, "done", step.error ?? JSON.stringify(step.questions).slice(0, 500));
+    assert.match(asked.find(question => question.id === "retry_units")!.detail!, /screen openai\/gpt-5-nano 1: .*\nNo skips a candidate whose screen failed/s);
+    const task = step.result!.tasks[0]!;
+    assert.notEqual(task.status, "stopped", task.note);
+    assert.deepEqual(task.search!.skipped.filter(item => item.model === "openai/gpt-5-nano").map(item => item.stage), ["search"]);
+    assert.equal(task.search!.trials[0]!.model, "openai/gpt-5.4-nano", "the search went on without it");
+    assert.ok(task.top.length && task.top.every(item => item.model !== "openai/gpt-5-nano"));
+  } finally { refuse.model = ""; }
 });
 
 test("when the current model's answers are cut off before any text, the stopped search says so", async () => {
