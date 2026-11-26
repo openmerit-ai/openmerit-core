@@ -32,10 +32,13 @@ It runs the pinned Wrangler with `--strict`, which stops if someone changed the 
 | `playground-claims` | `playground-claims` | `playground/wrangler.jsonc` | Sahra Health's customer claims and enrollment workflows |
 | `site` | `openmerit-site` | `wrangler.jsonc` | Protected memo. Code-only release with asset-retention checks and no container rollout |
 | `app` | `openmerit-app` | `wrangler.app.jsonc` | `app.openmerit.ai`: the cloud plan's run, task and account pages, built from `app/` by `scripts/build-app.ts` and served by `app/worker.ts`. Clerk sign-in; data from the cloud app's `/api/*`. Its first deploy creates the `app.openmerit.ai` custom domain |
+| `email` | `openmerit-email` | `wrangler.email.jsonc` | Inbound `openmerit.ai` aliases that reach more than one person; see [Email forwarding](#email-forwarding) |
 
 Deploy `scout-serving` before `domain-router` when a change spans both, as the rebuild cutover did.
 
-**Contact-sales form — unreleased source, 26 November 2026.** `scout-serving` handles `POST /contact-sales/api` in `demo/contact.ts`. It validates the form, allows three submissions a minute per IP (`CONTACT_RATE`, rate-limit namespace `2026112601`) and emails each request through the `CONTACT_EMAIL` send binding from `CONTACT_FROM` (`memo@openmerit.ai`, the sender the memo already verified) to `CONTACT_TO` (`lazim@openmerit.ai`, the only allowed destination), with Reply-To set to the sender. It stores nothing. The deploy that first adds these bindings is an email change and needs the owner's approval like any deploy. After it, submit the form once with a real address and check the email arrives and Reply-To works; the form falls back to the `mailto:` address when sending fails.
+**Team inbox — unreleased source, 26 November 2026.** `email/` and `wrangler.email.jsonc` are back, so `openmerit-email` is managed from this checkout again (key `email`); the deployed version matched the last source except for `team@`. `team@openmerit.ai` reaches lazim and praveen, and the contact-sales form sends there. See [Email forwarding](#email-forwarding) for the order of the deploy and the routing rule.
+
+**Contact-sales form — unreleased source, 26 November 2026.** `scout-serving` handles `POST /contact-sales/api` in `demo/contact.ts`. It validates the form, allows three submissions a minute per IP (`CONTACT_RATE`, rate-limit namespace `2026112601`) and emails each request through the `CONTACT_EMAIL` send binding from `CONTACT_FROM` (`memo@openmerit.ai`, the sender the memo already verified) to `CONTACT_TO` (`team@openmerit.ai`, the only allowed destination), with Reply-To set to the sender. It stores nothing. The deploy that first adds these bindings is an email change and needs the owner's approval like any deploy. After it, submit the form once with a real address and check the email arrives and Reply-To works; the form falls back to the `mailto:` address when sending fails.
 
 **Cloud app routes — unreleased source, 18 November 2026.** On `openmerit.ai`, the router proxies `/mcp`, `/.well-known/oauth-protected-resource` and `/api/*`, each with its subpaths, to the cloud app at the origin in the `CLOUD_APP_ORIGIN` variable of `wrangler.domains.jsonc`. It keeps the method, query, body and headers, drops the `Cookie` header, and sets `X-Forwarded-Host` and `X-Forwarded-Proto`. It is `https://openmeritdr2i.onrivet.dev`, the cloud app on Rivet Cloud. When the variable is empty, those paths return 503 with `Cache-Control: no-store`, and nothing else on the site changes; setting it to `""` and deploying is the way to take them offline without a rollback. After changing it, run `npm run types:workers`, land the change, and deploy `domain-router` with approval. No DNS change is needed. Deploy the router only once the cloud app answers at that origin: until then `/mcp` and `/api/*` return the origin's errors instead of 503.
 
@@ -46,6 +49,23 @@ Deploy `scout-serving` before `domain-router` when a change spans both, as the r
 **Scout removal — unreleased source, 10 November 2026.** The repository now keeps only `openmerit-core/`, the playground, the landing page, the memo and the Clerk sign-in. `scout-serving` runs `demo/web.ts` instead of the Scout app: the landing page, `/playground/scout/`, the sign-in page at `/scout/` and two APIs, `GET /scout/api/auth` (the publishable key) and `GET /scout/api/session` (verifies a Clerk session bearer token). Its next deploy removes the `/connect*` route and the R2, D1, Vectorize, Workers AI, rate-limit and version bindings, and applies `remove-scout-1`, which deletes the `ScoutAccounts`, `ScoutAgent` and `ScoutEvaluations` Durable Objects and all their data; back up anything still needed first. It keeps the `CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` secrets. The Scout data policy page, the `/connect/` device sign-in, the `openmerit-scout` publisher and the `openmerit-email` Worker are no longer in this repository; anything still deployed is not managed from this checkout.
 
 The hosted terminal sample's `openmerit-terminal-preview` Worker and its configuration were removed from the repository. The router had already stopped binding it. Any Worker still deployed in Cloudflare is not managed from this checkout; deleting it is a separate action that needs the owner's approval.
+
+## Email forwarding
+
+An Email Routing rule forwards an alias to exactly one verified destination, so the single-person aliases on `openmerit.ai` (`lazim@`, `praveen@`, `akhil@`, `invest@`) are plain forwarding rules. An alias that reaches several people has a rule that sends it to the `openmerit-email` Worker instead. [`email/worker.ts`](../email/worker.ts) lists each such alias with its recipients, forwards every message to all of them and rejects addresses it has no list for.
+
+| Alias | Recipients |
+|---|---|
+| `code@openmerit.ai` | lazim and praveen |
+| `team@openmerit.ai` | lazim and praveen; also where the contact-sales form sends |
+
+To add a recipient or alias:
+
+1. Check that each destination is a verified address under Email Routing's destination addresses; the Worker cannot forward to an unverified one. Adding a destination sends its owner a verification email.
+2. Add it to `recipients` in `email/worker.ts`, merge, and deploy with `npm run deploy -- email`.
+3. For a new alias, create the routing rule only after that deploy: a custom address on the `openmerit.ai` zone whose action is **Send to a Worker** with `openmerit-email`.
+
+Rule changes and destination changes are email changes and need the owner's approval, like deploys. After a change, send a real message to the alias and confirm that every recipient received it; the zone's Email Routing activity log shows each delivery. A successful deploy or API response is not proof of delivery. Replies go out from each person's own mailbox: Email Routing only receives mail, so nobody can send as `team@` without a separate outbound provider.
 
 ## Rolling back
 
@@ -66,6 +86,7 @@ What a Worker rollback does **not** undo:
 Per Worker:
 
 - **`scout-serving`:** a rollback also changes the landing page. Check `/`, `/scout/`, `/scout/api/auth` and `/playground/scout/`. Rolling back across `remove-scout-1` cannot restore the deleted Durable Objects.
+- **`email`:** send a real message to each alias in [Email forwarding](#email-forwarding) and confirm every recipient received it. If the Worker itself is failing, pointing the alias's rule back at a single verified destination restores delivery to that person.
 - **`app`:** a rollback before the app pages restores the static mockup. Check `/`, `/config.json` and `/r/<id>/`.
 - **`domain-router`:** check apex, `www` and legacy `.site` hosts, plus `/memo`, `/mcp` and `/api/me`. The route and pageview cases are in `demo/test/domain-migration.test.mjs`. Rolling back before the website pageviews stops them. Rolling back before the cloud app routes sends `/mcp` and `/api/*` to `openmerit-scout-alpha`, which returns 404.
 - **`site`:** the live version is `9b86e5da-ea75-4463-9d6b-4bc148eb7722` (148), deployed through the wrapper on 4 November 2026 from `8c6070cba2ae` (#46). It is also the latest upload. The [code-only restoration](site-memo.md#protected-memo-reconciliation--released-29-october-2026) was first released as `ebd22a17-37dc-4cad-8348-08f208a83712` (147) on 29 October from `8c1cf81d01eb` (#33). Release 148 applied the `remove-demo-v1` migration, which deleted the retired demo's Durable Object classes, and the live migration tag is now `remove-demo-v1`; see [demo retirement](site-memo.md#demo-retirement--released-4-november-2026). Do not roll back to 147 or earlier: their configuration predates that migration. The configuration retains uploaded assets. Because `keep_assets` inherits the latest upload, the wrapper requires a sole 100% active version matching the latest upload. It rejects every other undeployed latest version and split deployment. Do not activate an intermediate version merely to clear this guard. Do not run concurrent uploads during a site release: the remote check and upload are not atomic. After an approved release, check an existing memo session, real email-code login, protected Markdown, reader/admin permissions, logout and all referenced assets. No production test writes or real email sends are authorized by local verification alone.

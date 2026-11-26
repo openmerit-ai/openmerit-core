@@ -48,7 +48,7 @@ const back = '<a href="/contact-sales/">Back to the form</a>.';
 export async function contactSubmit(request: Request, env: ContactEnv): Promise<Response> {
   const to = env.CONTACT_TO ?? '';
   if (request.method !== 'POST') return new Response('Not found.', { status: 404, headers: { 'Cache-Control': 'no-store' } });
-  if (!env.CONTACT_EMAIL || !to || !env.CONTACT_FROM) return page(503, 'The form is unavailable', `Please try again later. ${fallback(to || 'lazim@openmerit.ai')}`);
+  if (!env.CONTACT_EMAIL || !to || !env.CONTACT_FROM) return page(503, 'The form is unavailable', `Please try again later. ${fallback(to || 'team@openmerit.ai')}`);
 
   const ip = request.headers.get('cf-connecting-ip') ?? 'unknown';
   if (env.CONTACT_RATE && !(await env.CONTACT_RATE.limit({ key: ip })).success) {
