@@ -4,6 +4,10 @@
 
 Reviewed the homepage against 0.5.1: a rerun of failed calls now counts as part of its run in Scout's results, and the npm package's description, keywords and homepage changed. `site/index.html` makes no claim about either. No homepage copy change.
 
+## Structured data and llms.txt — unreleased, 26 November 2026
+
+The homepage's JSON-LD says the CLI is free (price 0), runs on Linux and macOS (`openmerit-core/README.md`'s supported platforms; Windows is unsupported) and installs from npm; `/llms.txt` repeats each page's own description. Recheck them when pricing, supported platforms or a page's description changes. The `/vs-routers/` FAQPage is generated from its visible FAQ, so it changes with it.
+
 ## Get Demo replaces Try Scout — unreleased, 26 November 2026
 
 The homepage's call to action is now **Get Demo**, linking `/contact-sales/`, and Scout's sign-in page at `/scout/` redirects there. The hero copy and its Scout coverage figures are unchanged, so no claim changed; the paragraph no longer links to a Scout page. The homepage has no FAQ block.

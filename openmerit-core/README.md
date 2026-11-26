@@ -1,6 +1,6 @@
 # OpenMerit
 
-OpenMerit finds cheaper models that perform at least as well as the ones your code uses today, measured with an eval OpenMerit writes from a review of your code, and your repository's own evals when it has them. It is a global npm CLI and a local MCP server. It runs on your machine with no OpenMerit account, login or hosted service.
+OpenMerit finds cheaper models that perform at least as well as the ones your code uses today, measured with an eval OpenMerit writes from a review of your code, and your repository's own evals when it has them. It is a global npm CLI and a local MCP server. It runs on your machine with no OpenMerit account, login or hosted service, and it is free. Website: **[openmerit.ai](https://openmerit.ai)**, where [OpenMerit Cloud](https://openmerit.ai/contact-sales/) also runs it for you.
 
 - **OpenMerit Harness**, built on [Pi](https://pi.dev), does Scout's reasoning: it maps model usages to tasks and finds each task's eval and how to run it per model. Claude Code (through [pi-claude-bridge](https://pi.dev/packages/pi-claude-bridge) and your Claude login), Codex models (through a ChatGPT Plus or Pro sign-in) or an API key powers it. `openmerit connect` chooses which.
 - **Scout** is the first workflow: scan → choose a model and tasks → find the eval → Scout Model Binary Search → compare → optionally configure. Tuner, for prompt optimization and fine-tuning, comes later.

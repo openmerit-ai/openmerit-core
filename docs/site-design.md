@@ -2,6 +2,10 @@
 
 Domain operations: see the [primary domain migration](site-domain-migration.md) for current routing, email, auth, and deployment constraints. Historical publication records below retain their original domains.
 
+## Sitemap, llms.txt and structured data — unreleased source, 26 November 2026
+
+`scripts/build-scout.mjs` builds three things for search engines and AI assistants from the pages in `markdownPages`, using `scripts/agent-files.ts`: `/sitemap.xml` listing them, `/llms.txt` (the homepage's description, then each page's title and description, and the npm and GitHub links), and JSON-LD in each page's `<head>`. The homepage gets an Organization, WebSite and SoftwareApplication graph (free to run, Linux and macOS, downloaded from npm, `sameAs` GitHub and npm); a page with a visible `.compare-faq` gets a FAQPage with the same questions and answers. Everything comes from the pages' own metadata and text, and `scripts/docs.test.ts` checks it. robots.txt is served by Cloudflare before the request reaches the Worker, so it has no `Sitemap:` line; submit `https://openmerit.ai/sitemap.xml` in Google Search Console and Bing Webmaster Tools instead.
+
 ## Get Demo instead of Scout — unreleased source, 26 November 2026
 
 At the owner's request, the homepage's **Try Scout** button is now **Get Demo** and goes to `/contact-sales/`, and the header nav on every page reads Memo, then Get Demo, in place of Scout. The hero's second paragraph still introduces Scout but no longer links it, the playground walkthrough's footer links the homepage, and `/scout/` (the Clerk sign-in page) is removed and redirects to `/contact-sales/`. Older notes below that mention Try Scout or `/scout/` describe earlier releases.

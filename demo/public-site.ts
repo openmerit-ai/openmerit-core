@@ -13,6 +13,9 @@ const sharedAssets = new Set([
   '/playground/scout',
   '/playground/scout/',
   ...contentPages.flatMap(page => [page, page.slice(0, -1)]),
+  // Built by scripts/build-scout.mjs for search engines and AI agents.
+  '/sitemap.xml',
+  '/llms.txt',
   // The contact-sales form's endpoint and its confirmation page.
   '/contact-sales/api',
   '/contact-sales/thanks/',

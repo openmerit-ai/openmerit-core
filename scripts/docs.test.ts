@@ -57,3 +57,24 @@ test('Markdown product guides retain working relative links and section destinat
     }
   }
 });
+
+test('sitemap, llms.txt and JSON-LD come from the pages themselves', async () => {
+  const {pageInfo, sitemap, llmsTxt, structuredData} = await import('./agent-files.ts');
+  const {markdownPages} = await import('../demo/public-site.ts');
+  const sources = pages.filter(page => markdownPages.includes(page.url));
+  assert.equal(sources.length, markdownPages.length);
+  const infos = sources.map(page => pageInfo(page.text, page.url));
+  for (const info of infos) {
+    assert.ok(info.title && info.description, info.url);
+    assert.ok(sitemap(infos).includes(`<loc>${info.url}</loc>`), info.url);
+    if (info.url !== 'https://openmerit.ai/') assert.ok(llmsTxt(infos).includes(`](${info.url}): ${info.description}`), info.url);
+  }
+  const home = structuredData(sources.find(page => page.url === '/')!.text, '/') as {'@graph': {'@type': string, offers?: {price: string}}[]};
+  assert.equal(home['@graph'].find(node => node['@type'] === 'SoftwareApplication')?.offers?.price, '0');
+  for (const page of sources) {
+    // Every visible FAQ question becomes a FAQPage entry with the same wording.
+    const questions = [...page.text.matchAll(/<dt>([\s\S]*?)<\/dt>/g)].map(match => match[1]!.replace(/<[^>]+>/g, ''));
+    const data = structuredData(page.text, page.url) as {mainEntity?: {name: string}[]} | null;
+    if (page.url !== '/') assert.deepEqual(data?.mainEntity?.map(entry => entry.name) ?? [], questions, page.url);
+  }
+});
