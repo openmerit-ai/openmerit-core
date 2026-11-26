@@ -107,8 +107,12 @@ export function taskResult<T extends Rung>(evaluated: EvaluateResult<T>, describ
 }
 
 /** The criteria bar's result in one sentence, such as "Your current model fails 2 of your checks (C1, G2); the cheapest model that passes them is Y, at $0.40 more per 1,000 calls." */
-export function criteriaSummary(failedChecks: readonly string[], baseline: { costPerItemUsd: number | null }, pick: Pick<ModelResult, "model" | "costPerItemUsd"> | null): string {
-  if (!failedChecks.length) return pick ? `Your current model passes your checks; ${pick.model} passes them too, for less.` : "Your current model passes your checks, and no cheaper model OpenMerit tried does.";
+export function criteriaSummary(failedChecks: readonly string[], baseline: { costPerItemUsd: number | null; passes: number; total: number }, pick: Pick<ModelResult, "model" | "costPerItemUsd"> | null): string {
+  if (!failedChecks.length) {
+    // Meeting the checks allows a few failed cases (CRITERIA_PASS_RATE), so a model with failed cases says how many, not "passes".
+    const meets = `Your current model meets your checks${baseline.passes < baseline.total ? `, though it fails ${baseline.total - baseline.passes} of its ${baseline.total} case runs` : ""}`;
+    return pick ? `${meets}; ${pick.model} meets them too, for less.` : `${meets}, and no cheaper model OpenMerit tried does.`;
+  }
   const fails = `Your current model fails ${failedChecks.length} of your checks (${failedChecks.join(", ")})`;
   if (!pick) return `${fails}, and no model OpenMerit tried passes them.`;
   const delta = pick.costPerItemUsd === null || baseline.costPerItemUsd === null ? null : (pick.costPerItemUsd - baseline.costPerItemUsd) * 1000;

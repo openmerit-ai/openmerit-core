@@ -305,21 +305,24 @@ export function plannedSteps(ranked: number, unplaced: number, repeats: number):
 }
 
 /** What a job will make, cost and take, roughly, before it spends: case runs, dollars (null when a price is unknown), the budget that caps them, and a range of minutes. */
-export interface JobEstimate { caseRuns: number; usd: number | null; budgetUsd: number; minutes: { low: number; high: number } }
+/**
+ * `caseRuns`, `usd` and `minutes` are for one search. `rounds` is the most searches the job may run: in a task's
+ * first run, each grading round that writes the eval again searches again, up to MAX_ROUNDS.
+ */
+export interface JobEstimate { caseRuns: number; usd: number | null; budgetUsd: number; minutes: { low: number; high: number }; rounds: number }
 
 /**
  * A job's estimate from its pool before anything runs, as the search's planned steps: the current model's
- * runs and the finalists' and challengers' on every case, screens on every case of a small eval or on
- * the sample, and a judge call per case run when the output needs one. A case run costs callCost on its
+ * runs and the finalists' and challengers' on every case, screens on up to SMALL_EVAL cases, and a judge call per case run when the output needs one. A case run costs callCost on its
  * model; candidates are priced at the pool's median. A step takes a quarter of a minute to a minute.
  */
-export function estimateJob(pool: Pool, bundle: TaskBundle, input: { repeats: number; budgetUsd: number; costPerCall: (model: string) => number | null; judge: string | null }): JobEstimate {
+export function estimateJob(pool: Pool, bundle: TaskBundle, input: { repeats: number; budgetUsd: number; costPerCall: (model: string) => number | null; judge: string | null; grading: boolean }): JobEstimate {
   const cases = (bundle.examples ?? []).filter(example => example.expected !== undefined).length + WRITTEN_CASES;
   const ranked = pool.ranked.length, unplaced = pool.unplaced.length;
   const searchScreens = Math.min(Math.ceil(Math.log2(ranked + 1)) + FINALISTS + 1, ranked);
   const challengers = Math.min(CHALLENGERS, ranked) + unplaced;
   const fullRuns = (Math.min(FINALISTS, ranked) + challengers) * input.repeats;
-  const screenRuns = (searchScreens + challengers) * (cases <= SMALL_EVAL ? cases : SAMPLE_SIZE);
+  const screenRuns = (searchScreens + challengers) * Math.min(cases, SMALL_EVAL);
   const baselineRuns = input.repeats * cases, candidateRuns = screenRuns + fullRuns * cases;
   const prices = [...pool.ranked, ...pool.unplaced].map(option => input.costPerCall(option.endpointModel)).filter((value): value is number => value !== null).sort((a, b) => a - b);
   const median = prices.length ? prices[Math.floor(prices.length / 2)]! : null;
@@ -327,12 +330,12 @@ export function estimateJob(pool: Pool, bundle: TaskBundle, input: { repeats: nu
   const judge = input.judge === null ? 0 : input.costPerCall(input.judge);
   const usd = baseline === null || median === null || judge === null ? null : baselineRuns * baseline + candidateRuns * median + (baselineRuns + candidateRuns) * judge;
   const steps = plannedSteps(ranked, unplaced, input.repeats);
-  return { caseRuns: baselineRuns + candidateRuns, usd: usd === null ? null : Math.min(usd, input.budgetUsd), budgetUsd: input.budgetUsd, minutes: { low: Math.max(1, Math.round(steps / 4)), high: Math.max(1, steps) } };
+  return { caseRuns: baselineRuns + candidateRuns, usd: usd === null ? null : Math.min(usd, input.budgetUsd), budgetUsd: input.budgetUsd, minutes: { low: Math.max(1, Math.round(steps / 4)), high: Math.max(1, steps) }, rounds: input.grading ? MAX_ROUNDS : 1 };
 }
 
 /** The estimate in one sentence, for the coding agent and the person it asks. */
 export const estimateLine = (estimate: JobEstimate) =>
-  `Measuring makes about ${estimate.caseRuns.toLocaleString("en-US")} case runs, ${estimate.usd === null ? "at a cost OpenMerit cannot estimate" : `about $${estimate.usd < 0.1 ? estimate.usd.toFixed(3) : estimate.usd.toFixed(2)}`}, never more than the $${estimate.budgetUsd.toFixed(2)} budget per job, and takes about ${estimate.minutes.low === estimate.minutes.high ? estimate.minutes.low : `${estimate.minutes.low} to ${estimate.minutes.high}`} minutes.`;
+  `Measuring makes about ${estimate.caseRuns.toLocaleString("en-US")} case runs, ${estimate.usd === null ? "at a cost OpenMerit cannot estimate" : `about $${estimate.usd < 0.1 ? estimate.usd.toFixed(3) : estimate.usd.toFixed(2)}`}, never more than the $${estimate.budgetUsd.toFixed(2)} budget per job, and takes about ${estimate.minutes.low === estimate.minutes.high ? estimate.minutes.low : `${estimate.minutes.low} to ${estimate.minutes.high}`} minutes.${estimate.rounds > 1 ? ` That is one round: when your grades of its answers make OpenMerit write the eval again, it searches again, up to ${estimate.rounds} rounds, each about as much again or more, within the same budget.` : ""}`;
 
 /** The result's pick: its figures, the saving per call against the current model, and the calls that repay `runUsd`. */
 function pickOf(chosen: MeasuredModel, baseline: MeasuredModel, runUsd: number): NonNullable<JobResult["pick"]> {
@@ -690,9 +693,11 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
               if (!option) throw new JobStop("stopped", "baseline_failed", `${current.model} could not run: ${result.reason}`, { kind: "rerun" });
               throw new CandidateUnavailable(result.reason);
             }
+            // A candidate whose step kept failing, such as on a deadline, is skipped as untested: the next one still runs.
+            if (result.kind === "error" && option) throw new CandidateUnavailable(`measuring it failed: ${result.reason}`);
             if (result.kind !== "ok") {
               const stop = stopFor(result, option ? target.model : `the current model ${current.model}`);
-              // The finalists are measured, so a challenger the budget refuses, or one that fails, ends the challengers only.
+              // The finalists are measured, so a challenger the budget refuses ends the challengers only.
               if (call.stage === "challenger") { endedFix = stop.fix; throw new EndChallengers(stop.message); }
               throw stop;
             }

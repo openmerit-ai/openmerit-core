@@ -762,8 +762,14 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
     if (absent.length) return fail(`The eval reported no result for ${absent.length} requested item(s): ${absent.slice(0, 10).join(", ")}.`);
     const results: Record<string, boolean> = Object.fromEntries(ids.map(item => [item, reported.get(item)!]));
     const passes = Object.values(results).filter(Boolean).length, total = Object.keys(results).length;
+    // A generated eval says which items' calls failed. The repository's own eval does not, so when any of its
+    // calls failed, each of its failed items may have been a failed call rather than a wrong answer.
     const callsFailed = tally.upstreamErrors.length > 0 || tally.abandoned > 0 || (judged?.abandoned ?? 0) > 0;
-    const result: UnitResult = { items: results, passes, total, source: "eval", requests: tally.requests, durationMs: outcome.durationMs, cutOff: tally.cutOff, ...(callsFailed ? { errored: ids.filter(item => !results[item]) } : {}), ...(outcome.reasons && Object.keys(outcome.reasons).length ? { reasons: outcome.reasons } : {}), ...(outcome.checks && Object.keys(outcome.checks).length ? { checks: outcome.checks } : {}), ...(outcome.answers?.length ? { answers: outcome.answers } : {}) };
+    const errored = [
+      ...(outcome.errored ?? []).filter(item => results[item] === false),
+      ...(callsFailed ? ids.filter(item => !results[item] && (!plan.generated || item.startsWith(REPO_ITEM))) : []),
+    ];
+    const result: UnitResult = { items: results, passes, total, source: "eval", requests: tally.requests, durationMs: outcome.durationMs, cutOff: tally.cutOff, ...(errored.length ? { errored } : {}), ...(outcome.reasons && Object.keys(outcome.reasons).length ? { reasons: outcome.reasons } : {}), ...(outcome.checks && Object.keys(outcome.checks).length ? { checks: outcome.checks } : {}), ...(outcome.answers?.length ? { answers: outcome.answers } : {}) };
     // An eval that sends no request through the proxy did not use the model under test, and its spend was neither metered nor capped.
     if (!tally.requests) {
       const violations = [...new Set(tally.poolViolations)];
@@ -1014,7 +1020,7 @@ function approvalQuestion(ctx: Context, runId: string, data: RunState): Question
         `  Results: $OPENMERIT_RESULT${own.threshold !== undefined && !plan.generated ? `; pass rate ≥ ${own.threshold}` : ""}`,
       ] : []),
       `  Candidates: ${candidates.length} cheaper than ${data.model}${candidates.length ? `, ECI ${candidates[0]!.eci.toFixed(1)}–${candidates.at(-1)!.eci.toFixed(1)}` : ""}${data.unranked?.[name] ? ` (${data.unranked[name]} without ECI left out)` : ""}`,
-      `  Runs: at most ${runs.fullRuns} full and ${runs.screens} screens, each on ${SAMPLE_SIZE} sampled items, or on every item of an eval of ${SMALL_EVAL} or fewer`,
+      `  Runs: at most ${runs.fullRuns} full and ${runs.screens} screens, each on every item the current model passes, or ${SMALL_EVAL} of them in a larger eval`,
       ...(plan.helperFiles ?? []).map(helper => `  New helper file ${helper.path} (${helper.purpose}):\n${helper.content.split("\n").map(line => `    + ${line}`).join("\n")}`),
     ].join("\n");
   });

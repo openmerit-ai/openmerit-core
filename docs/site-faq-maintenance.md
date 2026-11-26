@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Retest fixes: 20-case screens, failed calls, challengers and the estimate — unreleased, 26 November 2026
+
+Reviewed the homepage against screens running on up to 20 cases in every eval, only failed calls being retried, a failing candidate step being skipped instead of ending the challengers, the estimate's `rounds`, and the criteria summary's wording. `site/index.html` makes no claim about screening, retries, challengers, estimates or the criteria bar. No homepage change; its "400+ models" claim is still open in the fix plan.
+
 ## README link and MCP Registry name — npm 0.5.2 release preparation, 26 November 2026
 
 Reviewed the homepage against 0.5.2: the package README now opens with the site's definition and links openmerit.ai, and `package.json` names the MCP server for the official MCP Registry. Neither changes Scout's behaviour, and `site/index.html` makes no claim about either. No homepage change.

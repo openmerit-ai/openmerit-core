@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { loadCatalogue } from "../src/catalogue/catalogue.ts";
 import { renderRun } from "../src/cli/render.ts";
+import { runGeneratedEval } from "../src/eval/generated.ts";
 import { EvalProxy, MODEL_CALL_RETRIES } from "../src/eval/proxy.ts";
 import type { Harness, JsonRequest } from "../src/harness/harness.ts";
 import { startRun } from "../src/local.ts";
@@ -543,6 +544,18 @@ test("a call that fails in one of the current model's runs is measured again, an
     const task = step.result!.tasks[0]!;
     assert.deepEqual([task.baseline!.status, task.baseline!.passes, task.baseline!.total, task.baseline!.runs], ["measured", 30, 30, 3]);
     assert.equal(task.status, "ranked", task.note);
+  } finally { Object.assign(hiccup, { model: "", ticket: "", remaining: 0 }); }
+});
+
+test("a generated eval reports as errored only the cases whose model call failed, not the ones answered wrongly in the same run", async () => {
+  const [failing, ...others] = [...tickets.keys()].slice(0, 3);
+  const value = { bundle: specBundle({ ...CLASSIFIER_SPEC, steps: [] } as SpecReply, { name: "ticket classifier" }, [], "gpt-4o-mini"), cases: [failing!, ...others].map((ticket, index) => ({ id: `written-${index + 1}`, input: { ticket }, expected: tickets.get(ticket), origin: "written" as const })) };
+  // gpt-4o-mini answers every ticket wrongly, and the first ticket's call fails outright.
+  Object.assign(hiccup, { model: "gpt-4o-mini", ticket: failing!, remaining: 100 });
+  try {
+    const outcome = await runGeneratedEval(value, { model: "gpt-4o-mini", baseUrl, apiKey: "sk-fake-endpoint", items: null });
+    assert.deepEqual(outcome.items, [{ id: "written-1", pass: false }, { id: "written-2", pass: false }, { id: "written-3", pass: false }]);
+    assert.deepEqual(outcome.errored, ["written-1"]);
   } finally { Object.assign(hiccup, { model: "", ticket: "", remaining: 0 }); }
 });
 

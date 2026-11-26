@@ -6,7 +6,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { approve, basedOn, binarySearch, CRITERIA_PASS_RATE, EVAL_FLOOR, meetsCriteria, MIN_SAVING, challengers, checkAgent, evaluateTask, stableSample, mergeEvidence, MemoryLedger, proposeEdit, strongest, taskResult, type EvidencePart, type CatalogueModel, resolveGuardrails, type AgentRun, type Ledger, type MeasureCall, type Rung } from "../src/engine/index.ts";
+import { approve, basedOn, binarySearch, CRITERIA_PASS_RATE, criteriaSummary, EVAL_FLOOR, meetsCriteria, MIN_SAVING, challengers, checkAgent, evaluateTask, stableSample, mergeEvidence, MemoryLedger, proposeEdit, strongest, taskResult, type EvidencePart, type CatalogueModel, resolveGuardrails, type AgentRun, type Ledger, type MeasureCall, type Rung } from "../src/engine/index.ts";
 import { State } from "../src/state/db.ts";
 
 test("the search keeps a ladder's own order, and unplaced options are always challengers", async () => {
@@ -350,10 +350,10 @@ test("against the task's criteria: every guardrail on every case, each criterion
   assert.deepEqual(meetsCriteria([{ items: { a: false, b: false, c: true, d: true, e: true, f: true, g: true, h: true, i: true, j: true }, costUsd: 0 }], criteria).failed, ["C1", "C2"]);
 });
 
-test("a screen that misses one sampled item is screened once more on the next five; two misses, or a broken guardrail against the criteria, end it", async () => {
-  // Thirty items the current model always passes, more than a small eval. The sampler returns them in order: i1–i5 screen, i6–i10 retry.
+test("a larger eval screens on 20 sampled cases, and one miss is screened once more on that case; two misses, or a broken guardrail against the criteria, end it", async () => {
+  // Thirty items the current model always passes. The sampler returns them in order, so i1–i20 screen.
   const items = Array.from({ length: 30 }, (_, index) => `i${index + 1}`);
-  const run = async (missed: Record<string, string>, criteria = false) => {
+  const run = async (missed: Record<string, string>, criteria = false, onlyFirst = false) => {
     const screens: string[][] = [];
     const result = await evaluateTask({
       ladder: [{ key: "x", price: 1 }], strength: () => 1, items, repeats: 1, baselinePrice: 10,
@@ -361,22 +361,21 @@ test("a screen that misses one sampled item is screened once more on the next fi
       sample: (pool, count) => pool.slice(0, count),
       measure: async (option: Rung | null, ids: readonly string[] | null, call: MeasureCall) => {
         if (call.role === "screen") screens.push([...ids!]);
-        const misses = option ? missed : {};
+        const misses = option && !(onlyFirst && call.role === "screen" && call.repeat === 2) ? missed : {};
         return { items: Object.fromEntries(ids!.map(id => [id, !misses[id]])), checks: Object.fromEntries(Object.entries(misses).map(([id, check]) => [id, [check]])), costUsd: ids!.length * (option ? 0.001 : 0.01) };
       },
     });
     return { x: result.candidates.find(item => item.option.key === "x")!, screens, result };
   };
-  const lucky = await run({ i3: "C1" });
-  assert.deepEqual(lucky.screens, [items.slice(0, 5), items.slice(5, 10)], "retried on the next five items");
-  assert.deepEqual([lucky.x.status, lucky.x.runs.length, lucky.result.samples], ["measured", 1, items.slice(0, 5)]);
-  const twice = await run({ i3: "C1", i7: "C1" });
-  assert.deepEqual([twice.x.status, twice.x.passes, twice.x.total], ["screened_out", 8, 10], "a miss in the retry too ends it");
-  const weak = await run({ i3: "C1", i4: "C1" });
+  const lucky = await run({ i3: "C1" }, false, true);
+  assert.deepEqual(lucky.screens, [items.slice(0, 20), ["i3"]], "20 cases, then the missed one again");
+  assert.deepEqual([lucky.x.status, lucky.result.samples, lucky.result.evidence.screened], ["measured", items.slice(0, 20), 20]);
+  assert.equal((await run({ i3: "C1" })).x.status, "screened_out", "a miss on the retry too ends it");
+  const weak = await run({ i3: "C1", i4: "C1" }, false, true);
   assert.deepEqual([weak.x.status, weak.screens.length], ["screened_out", 1], "two misses are not retried");
   // Against the criteria: a missed criterion is retried, a broken guardrail never is, since every case must pass it.
-  assert.equal((await run({ i3: "C1" }, true)).x.status, "measured");
-  const guardrail = await run({ i3: "G1" }, true);
+  assert.equal((await run({ i3: "C1" }, true, true)).x.status, "measured");
+  const guardrail = await run({ i3: "G1" }, true, true);
   assert.deepEqual([guardrail.x.status, guardrail.screens.length], ["screened_out", 1]);
 });
 
@@ -441,4 +440,9 @@ test("stableSample draws the same items for the same eval, whatever the pool's o
   assert.deepEqual(stableSample(pool.filter(id => id !== left), 10, key), drawn);
   assert.deepEqual(stableSample(pool.filter(id => id !== drawn[2]), 10, key).slice(0, 9), drawn.filter(id => id !== drawn[2]), "only the item that left is replaced");
   assert.notDeepEqual(stableSample(pool, 10, id => `refund triage\n${id}`), drawn, "another eval draws other items");
+});
+
+test("against the criteria, a current model that meets the checks with some failed cases says how many, instead of that it passes", () => {
+  assert.equal(criteriaSummary([], { costPerItemUsd: 0.001, passes: 49, total: 51 }, null), "Your current model meets your checks, though it fails 2 of its 51 case runs, and no cheaper model OpenMerit tried does.");
+  assert.equal(criteriaSummary([], { costPerItemUsd: 0.001, passes: 51, total: 51 }, { model: "m", costPerItemUsd: 0.0005 }), "Your current model meets your checks; m meets them too, for less.");
 });
