@@ -2,6 +2,32 @@
 
 Dated observations from using OpenMerit as Sahra Health, newest release first. Each entry says what we ran, what happened and what a customer would expect.
 
+## Published 0.5.3: claims intake agent, rerun to a recommendation (26 Nov 2026)
+
+We reran the 0.5.2 entry below on `openmerit@0.5.3`, installed globally, in the same standalone copy, with the same harness and endpoint and a $5 budget. The run was `run-20261126-190920-efb1`, against catalogue 2026-11-12. The result is in `scout-results/2026-11-26-0.5.3-claims-intake-binary-search.json`. It was for a launch example, not release acceptance.
+
+**What happened.** Scout wrote a 17-case eval; with the repository's two items, it has 19. Sonnet passed 11 of 19 in each of its three runs, under the floor. The owner again delegated grading to the agent, so no person graded this eval. The agent marked an answer bad when its mismatch list held entries that are not bill/XML differences (a missing e-Referral, "A1 matches", an injected instruction), or when it put a placeholder in the referral field. Scout wrote eval version 2 from those grades and searched at any price. Sonnet passed 23/57 on it. In round 2 the agent agreed with all 12 of OpenMerit's grades, and the eval was accepted. We declined configure.
+
+| | Model | Passed | Cost/item | Latency/request |
+| --- | --- | --- | --- | --- |
+| Current | anthropic/claude-sonnet-5.5 | 23/57 | $0.0163 | 2345 ms |
+| #1 | openai/gpt-6.1-terra | 54/57 | $0.0033 | 2338 ms |
+| #2 | openai/gpt-6-sol | 54/57 | $0.0067 | 1751 ms |
+| #3 | google/gemini-4-argon | 54/57 | $0.0088 | 6725 ms |
+| | google/gemini-4-carbon | 55/57 | $0.0169 | 9160 ms |
+| | meta/muse-wonder | 54/57 | $0.0302 | 3359 ms |
+
+Eighteen candidates were screened on all 19 items, and two were skipped. Eval spend was $26.91 over 3,217 requests, plus $0.66 harness. The owner raised the budget four times ($5 → $12 → $18 → $26 → $27). The OpenRouter key reached its $80 total limit once in the middle, and the owner raised it.
+
+**0.5.2 findings rechecked.** The app's own model is now offered first; models named only in `scout-results/` come after it. The search path says "Candidates at any price: you marked the current model's answer wrong…". A declined screen retry did not come up this time.
+
+**Findings**
+
+1. **The any-price search cost five times the default budget, with no warning beforehand.** The approval said nothing about the cost of a search at any price. It came after grading, and screening climbed to the strongest and most expensive models: GPT-5.5 Pro, Claude Fable 5 and 5.1, and Opus 5 and 5.5. Every budget pause asked only for a new number, with no estimate of what remained.
+2. **Two expensive candidates were paid for and then left unmeasured.** GPT-5.5 Pro ($3.68) and Claude Fable 5.1 (about $1.65) answered the 17 generated cases. Then both calls of the repository's eval failed upstream within about 30 ms, twice, and Scout skipped them as "not measured". A customer would want the cheap repository items tried first, or the failure caught before the generated cases are paid for.
+3. **The retry of failed calls is logged as a score.** The terminal printed `screen openai/gpt-5.5-pro (2 items)… 0/2 · $10.5025`, which reads as two wrong answers rather than two failed calls.
+4. **An account limit surfaced as a judge problem.** When the OpenRouter key ran out, the retry question said "The judge … gave no verdict for case written-5: Key limit exceeded (total limit)…". The cause was in the text, but the question offered a retry that could only fail again.
+
 ## Published 0.5.2: claims intake agent, Scout stopped without a pick (26 Nov 2026)
 
 We ran `openmerit@0.5.2` from npm, installed globally, in a standalone `git init` copy of this directory. `package.json` still pins 0.4.2. Setup used an API-key harness over OpenRouter (`anthropic/claude-sonnet-5.5`), one OpenRouter endpoint with every model allowed, and a $5 budget. We chose the "Claims intake agent" from the six tasks Scout mapped. The run was `run-20261126-133311-db3b`, against catalogue 2026-11-12, and the result is in `scout-results/2026-11-26-0.5.2-claims-intake-binary-search.json`. This was for a launch example, not release acceptance.
