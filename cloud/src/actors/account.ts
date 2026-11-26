@@ -5,8 +5,7 @@ import { randomBytes } from "node:crypto";
 import { actor } from "rivetkit";
 import { db } from "rivetkit/db";
 import type { PlanUpdate } from "../billing.ts";
-import { GUARDRAIL_KINDS, LEVELS, resolveGuardrails, settledUsd, type Funding, type GuardrailKey, type Catalogue, type Guardrails, type Level, type ReserveResult, type ResolvedGuardrails, type Settlement } from "../engine.ts";
-import { checkRepo, parseRepoUrl, reviewRepository, tokenProblem, type RepoReview } from "../github.ts";
+import { GUARDRAIL_KINDS, LEVELS, resolveGuardrails, settledUsd, type Funding, type GuardrailKey, type Guardrails, type Level, type ReserveResult, type ResolvedGuardrails, type Settlement } from "../engine.ts";
 import { decryptKey, encryptKey, endpointUrlProblem } from "../keys.ts";
 import { OPENROUTER, type EndpointInfo } from "../../../openmerit-core/src/job/pool.ts";
 import type { Case, EndpointConfig, EndpointKind, TaskBundle } from "../../../openmerit-core/src/ranking/index.ts";
@@ -16,62 +15,48 @@ import { services } from "../services.ts";
 
 type Row = Record<string, unknown>;
 
-/**
- * An account's projects group its tasks, runs, guardrails, model endpoints and GitHub repositories.
- * The plan, members, spend caps and the ledger stay the organization's. Every account has the
- * default project, which holds what the account had before projects and can be renamed but not deleted.
- */
-// The project, eval and budget names the task job (openmerit-core/src/job/workflow.ts) shares with this actor.
-export { DEFAULT_PROJECT, JOB_BUDGET, specOf, type EvalBar, type EvalSource, type EvalSpec } from "../../../openmerit-core/src/job/workflow.ts";
-import { DEFAULT_PROJECT, JOB_BUDGET, specOf, type EvalBar, type EvalSource, type EvalSpec } from "../../../openmerit-core/src/job/workflow.ts";
-export const DEFAULT_PROJECT_NAME = "Default project";
-export interface Project { id: string; name: string; createdAt: string; tasks: number; repos: string[]; endpoints: number }
+// The eval and budget names the task job (openmerit-core/src/job/workflow.ts) shares with this actor.
+export { JOB_BUDGET, type EvalBar, type EvalSource, type EvalSpec } from "../../../openmerit-core/src/job/workflow.ts";
+import { JOB_BUDGET, type EvalBar, type EvalSource, type EvalSpec } from "../../../openmerit-core/src/job/workflow.ts";
 
+/** Bumped when the schema changes in a way old accounts cannot keep: their tables are dropped. */
+const SCHEMA_VERSION = 2;
+const RESET_TABLES = ["projects", "endpoints", "guardrails", "jobs", "tasks", "deletions", "decisions", "reports", "repos", "repo_reviews", "evals", "eval_sync", "eval_drafts", "confirmations", "eval_commands"];
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS account (id INTEGER PRIMARY KEY CHECK (id = 1), name TEXT, mcp_revoked_before INTEGER)`,
   `CREATE TABLE IF NOT EXISTS plan (id INTEGER PRIMARY KEY CHECK (id = 1), name TEXT, status TEXT, customer_id TEXT, subscription_id TEXT,
     period_start INTEGER, period_end INTEGER, included_evals INTEGER NOT NULL DEFAULT 0, overage TEXT NOT NULL DEFAULT 'refuse', event_created INTEGER NOT NULL DEFAULT 0)`,
   `CREATE TABLE IF NOT EXISTS stripe_events (id TEXT PRIMARY KEY, received_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS members (user_id TEXT PRIMARY KEY, role TEXT NOT NULL, last_session_at INTEGER)`,
-  `CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at INTEGER NOT NULL)`,
-  `CREATE TABLE IF NOT EXISTS endpoints (id TEXT PRIMARY KEY, project_id TEXT NOT NULL DEFAULT 'default', kind TEXT NOT NULL, base_url TEXT NOT NULL, allowed_models TEXT NOT NULL,
+  `CREATE TABLE IF NOT EXISTS endpoints (id TEXT PRIMARY KEY, kind TEXT NOT NULL, base_url TEXT NOT NULL, allowed_models TEXT NOT NULL,
     sealed_key TEXT NOT NULL, key_last4 TEXT NOT NULL, created_at INTEGER NOT NULL, verified_at INTEGER)`,
-  `CREATE TABLE IF NOT EXISTS guardrails (project_id TEXT NOT NULL DEFAULT 'default', level TEXT NOT NULL, scope TEXT NOT NULL, settings TEXT NOT NULL, PRIMARY KEY (project_id, level, scope))`,
-  `CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, project_id TEXT NOT NULL DEFAULT 'default', task_id TEXT NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL, started_at INTEGER NOT NULL,
-    finished_at INTEGER, budget_usd REAL, cap_openmerit_usd REAL, cap_customer_usd REAL, counted INTEGER NOT NULL DEFAULT 0, metered INTEGER NOT NULL DEFAULT 0, asked_by TEXT, deleted_at INTEGER)`,
+  `CREATE TABLE IF NOT EXISTS guardrails (level TEXT NOT NULL, scope TEXT NOT NULL, settings TEXT NOT NULL, PRIMARY KEY (level, scope))`,
+  `CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL, started_at INTEGER NOT NULL,
+    finished_at INTEGER, budget_usd REAL, cap_openmerit_usd REAL, cap_customer_usd REAL, counted INTEGER NOT NULL DEFAULT 0, metered INTEGER NOT NULL DEFAULT 0, asked_by TEXT, deleted_at INTEGER, eval_version INTEGER)`,
   `CREATE TABLE IF NOT EXISTS ledger (key TEXT PRIMARY KEY, job_id TEXT NOT NULL, funding TEXT NOT NULL, model TEXT, endpoint TEXT, status TEXT NOT NULL,
     reserved_usd REAL NOT NULL, actual_usd REAL, estimated_usd REAL, failed INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)`,
-  `CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, project_id TEXT NOT NULL DEFAULT 'default', environment TEXT NOT NULL, agent TEXT, name TEXT NOT NULL, current_model TEXT NOT NULL,
+  `CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, environment TEXT NOT NULL, agent TEXT, name TEXT NOT NULL, current_model TEXT NOT NULL,
     pick TEXT, status TEXT NOT NULL, last_run_at INTEGER, last_job_id TEXT, monthly_saving_usd REAL, retired INTEGER NOT NULL DEFAULT 0, last_recommend_at INTEGER)`,
-  `CREATE TABLE IF NOT EXISTS deletions (project_id TEXT NOT NULL DEFAULT 'default', task_id TEXT NOT NULL, name TEXT NOT NULL, environment TEXT NOT NULL, user_id TEXT NOT NULL, jobs INTEGER NOT NULL, deleted_at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS deletions (task_id TEXT NOT NULL, name TEXT NOT NULL, environment TEXT NOT NULL, user_id TEXT NOT NULL, jobs INTEGER NOT NULL, deleted_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS decisions (job_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, decision TEXT NOT NULL, change TEXT NOT NULL,
     decided_by TEXT NOT NULL, decided_by_name TEXT, decided_by_email TEXT, decided_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS reports (job_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, created_at INTEGER NOT NULL, json TEXT NOT NULL, markdown TEXT NOT NULL, share_token TEXT UNIQUE)`,
-  `CREATE TABLE IF NOT EXISTS repos (id TEXT PRIMARY KEY, project_id TEXT NOT NULL DEFAULT 'default', full_name TEXT NOT NULL UNIQUE COLLATE NOCASE, private INTEGER NOT NULL, default_branch TEXT NOT NULL,
-    sealed_token TEXT, token_last4 TEXT, added_at INTEGER NOT NULL, checked_at INTEGER NOT NULL,
-    review_status TEXT NOT NULL, review_requested_at INTEGER NOT NULL, review_finished_at INTEGER, review_error TEXT, review TEXT)`,
-  `CREATE TABLE IF NOT EXISTS repo_reviews (repo_id TEXT NOT NULL, requested_at INTEGER NOT NULL)`,
   // openmerit_recommend's idempotency keys, kept a day: the job each started, or null while it is starting.
   `CREATE TABLE IF NOT EXISTS recommend_keys (key TEXT PRIMARY KEY, job_id TEXT, created_at INTEGER NOT NULL)`,
   // A task's eval: the accepted one runs, unchanged, until the task changes or someone revises it. version counts acceptances;
   // shape is the prompt, tools and output it was accepted for. The draft_ columns hold the eval under review, edited in place;
   // draft_bundle is the changed task's bundle, which replaces the task's on acceptance. bar is `criteria` once a person grading
   // a run's answers marked the current model's own wrong, so models are measured against the eval's checks; else null.
-  `CREATE TABLE IF NOT EXISTS evals (task_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, version INTEGER NOT NULL, spec TEXT NOT NULL, cases TEXT NOT NULL, shape TEXT NOT NULL,
+  `CREATE TABLE IF NOT EXISTS evals (task_id TEXT PRIMARY KEY, version INTEGER NOT NULL, spec TEXT NOT NULL, cases TEXT NOT NULL, shape TEXT NOT NULL,
     source TEXT NOT NULL, accepted_by TEXT, accepted_at INTEGER NOT NULL, bar TEXT,
     draft_reason TEXT, draft_changed TEXT, draft_spec TEXT, draft_cases TEXT, draft_bundle TEXT, draft_by TEXT, draft_at INTEGER)`,
-  // The version the coding agent last wrote to the repository's .openmerit/evals/.
-  `CREATE TABLE IF NOT EXISTS eval_sync (task_id TEXT PRIMARY KEY, version INTEGER NOT NULL, synced_by TEXT NOT NULL, client TEXT, synced_at INTEGER NOT NULL)`,
-  // Evals a repository review wrote, waiting for a person to approve (which creates the task) or dismiss them.
   // Critical requests a coding agent made, waiting for a person to confirm them (api.ts). body is the request's JSON, sealed with the
   // key-encryption key when the server has one, since an endpoint's key can be in it; it is cleared once the request ran.
-  `CREATE TABLE IF NOT EXISTS confirmations (id TEXT PRIMARY KEY, nonce TEXT NOT NULL, project_id TEXT NOT NULL, method TEXT NOT NULL, path TEXT NOT NULL, body TEXT NOT NULL,
+  `CREATE TABLE IF NOT EXISTS confirmations (id TEXT PRIMARY KEY, nonce TEXT NOT NULL, method TEXT NOT NULL, path TEXT NOT NULL, body TEXT NOT NULL,
     checks TEXT NOT NULL, title TEXT NOT NULL, items TEXT NOT NULL, requested_by TEXT NOT NULL, requested_via TEXT, status TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
     decided_by TEXT, decided_at INTEGER, result TEXT)`,
   // A task's own eval command, which a self-hosted server runs to measure it, as a person confirmed it (api.ts).
   `CREATE TABLE IF NOT EXISTS eval_commands (task_id TEXT PRIMARY KEY, spec TEXT NOT NULL, confirmed_by TEXT NOT NULL, confirmed_at INTEGER NOT NULL)`,
-  `CREATE TABLE IF NOT EXISTS eval_drafts (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, repo_id TEXT, environment TEXT NOT NULL, name TEXT NOT NULL, bundle TEXT NOT NULL,
-    cases TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL, decided_by TEXT, decided_at INTEGER, task_id TEXT)`,
 ];
 
 /** What a ledger row counts: settled at its cost, reserved at its reservation, released not at all. */
@@ -98,12 +83,12 @@ export interface EndpointView { id: string; kind: EndpointKind; baseUrl: string;
  */
 export type WatchState = "watching" | "idle" | "frozen" | "retired" | "review";
 /** `watching` is `state === "watching"`, for clients that predate `state`. `idleSince` is set only while idle. */
-export interface TaskRow { id: string; projectId: string; environment: string; agent: string | null; name: string; currentModel: string; pick: string | null; status: string; state: WatchState; idleSince: string | null; watching: boolean; lastRunAt: string | null; lastJobId: string | null; monthlySavingUsd: number | null }
+export interface TaskRow { id: string; environment: string; agent: string | null; name: string; currentModel: string; pick: string | null; status: string; state: WatchState; idleSince: string | null; watching: boolean; lastRunAt: string | null; lastJobId: string | null; monthlySavingUsd: number | null }
 /** What a finished job's report found, so a list of runs can say it without loading each report. */
 export interface RunResult { status: string; task: string | null; model: string | null; from: string | null; savingPerCallUsd: number | null }
 /** askedBy is the MCP client's name (clientInfo.name) for a run a coding agent started; null for a watch run or an unnamed client. */
 
-export interface JobRow { id: string; projectId: string; taskId: string; kind: string; status: string; startedAt: string; finishedAt: string | null; askedBy: string | null; evalVersion: number | null; result: RunResult | null }
+export interface JobRow { id: string; taskId: string; kind: string; status: string; startedAt: string; finishedAt: string | null; askedBy: string | null; evalVersion: number | null; result: RunResult | null }
 
 /** What about a task its eval was accepted for; a bundle that differs in one reopens the eval. */
 export type TaskPart = "prompt" | "tools" | "output";
@@ -115,14 +100,10 @@ export type TaskPart = "prompt" | "tools" | "output";
  * by is a Clerk user ID; /api adds byName, that person's name or email from Clerk, or null when Clerk does not know them.
  */
 export interface EvalView {
-  taskId: string; projectId: string;
+  taskId: string;
   accepted: { version: number; spec: EvalSpec; cases: Case[]; source: EvalSource; by: string | null; byName?: string | null; at: string; runs: number; bar: EvalBar } | null;
   draft: { reason: "task_changed" | "revise"; changed: TaskPart[]; spec: EvalSpec; cases: Case[]; output: TaskBundle["output"] | null; by: string | null; byName?: string | null; at: string } | null;
-  repo: { version: number; by: string; byName?: string | null; client: string | null; at: string } | null;
 }
-export interface EvalDraft { id: string; projectId: string; repoId: string | null; environment: string; name: string; bundle: TaskBundle; cases: Case[]; status: "pending" | "approved" | "dismissed"; createdAt: string; taskId: string | null }
-/** Where the coding agent keeps a task's eval in its repository, by the CLI's rule for a task name. */
-export const evalDir = (task: string) => `.openmerit/evals/${task.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "task"}`;
 /** JSON with object keys sorted, so the same value compares equal however the coding agent ordered it. */
 const canonical = (value: unknown): string => JSON.stringify(value, (_key, item: unknown) => item && typeof item === "object" && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item);
 /** The parts of a task its eval depends on. A tool's mockResult is test data, not the task. */
@@ -131,16 +112,6 @@ export const shapeOf = (bundle: TaskBundle): Record<TaskPart, string> => ({
 });
 const PARTS: TaskPart[] = ["prompt", "tools", "output"];
 export interface GuardrailSetting { key: string; value: unknown; kind: "constraint" | "default" }
-/**
- * A GitHub repository the account added. tokenLast4 is null for a public repository added by its URL
- * alone. review.result is the last review that finished, kept while a new one runs or after it fails.
- */
-export interface RepoView {
-  id: string; projectId: string; fullName: string; url: string; private: boolean; defaultBranch: string; tokenLast4: string | null; addedAt: string; checkedAt: string;
-  /** How OpenMerit reads it: by its public URL, with a fine-grained token, or through the GitHub sign-in of the member who added it (`githubUser`, a Clerk user ID). */
-  access: "public" | "token" | "github"; githubUser: string | null;
-  review: { status: "queued" | "reviewing" | "done" | "failed"; requestedAt: string; finishedAt: string | null; error: string | null; result: RepoReview | null };
-}
 export type Started = { ok: true } | { ok: false; error: string };
 
 /**
@@ -150,7 +121,7 @@ export type Started = { ok: true } | { ok: false; error: string };
  */
 export type ConfirmationStatus = "pending" | "confirming" | "done" | "failed" | "declined" | "expired";
 export interface ConfirmationView {
-  id: string; projectId: string; method: string; path: string; checks: "person" | "reverify"; title: string; items: string[];
+  id: string; method: string; path: string; checks: "person" | "reverify"; title: string; items: string[];
   requestedBy: string; requestedVia: string | null; status: ConfirmationStatus; createdAt: string; expiresAt: string; decidedBy: string | null; decidedAt: string | null;
   result: { status: number; body: unknown } | null;
 }
@@ -159,15 +130,14 @@ export const CONFIRM_HOURS = 24;
 
 const iso = (ms: unknown) => (typeof ms === "number" ? new Date(ms).toISOString() : null);
 const confirmationRow = (row: Row): ConfirmationView => ({
-  id: String(row.id), projectId: String(row.project_id), method: String(row.method), path: String(row.path), checks: row.checks === "reverify" ? "reverify" : "person",
+  id: String(row.id), method: String(row.method), path: String(row.path), checks: row.checks === "reverify" ? "reverify" : "person",
   title: String(row.title), items: JSON.parse(String(row.items)) as string[], requestedBy: String(row.requested_by), requestedVia: (row.requested_via as string | null) ?? null,
   status: row.status === "pending" && Number(row.expires_at) <= Date.now() ? "expired" : String(row.status) as ConfirmationStatus,
   createdAt: iso(row.created_at)!, expiresAt: iso(row.expires_at)!, decidedBy: (row.decided_by as string | null) ?? null, decidedAt: iso(row.decided_at),
   result: row.result ? JSON.parse(String(row.result)) as { status: number; body: unknown } : null,
 });
 const startOfMonth = (now: number) => { const date = new Date(now); return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1); };
-const scopeKey = (level: Level, input: { environment: string; agent?: string | null; taskId?: string }) =>
-  level === "environment" ? input.environment : level === "agent" ? `${input.environment}:${input.agent ?? ""}` : input.taskId ?? "";
+const scopeKey = (level: Level, input: { environment: string; taskId?: string }) => level === "environment" ? input.environment : input.taskId ?? "";
 
 /** A task's watch state. Retired wins over review, review over frozen, and frozen over idle: each says why the watch stopped, most deliberate first. */
 export function watchState(input: { retired: boolean; review: boolean; watch: boolean | undefined; lastRecommendAt: number | null; now: number; idleAfterMs: number }): { state: WatchState; idleSince: string | null } {
@@ -182,7 +152,7 @@ export function watchState(input: { retired: boolean; review: boolean; watch: bo
 const taskRow = (row: Row, watch: boolean | undefined): TaskRow => {
   const { state, idleSince } = watchState({ retired: row.retired === 1, review: Boolean(row.eval_review), watch, lastRecommendAt: (row.last_recommend_at as number | null) ?? null, now: Date.now(), idleAfterMs: services().config.idleAfterMs });
   return {
-    id: String(row.id), projectId: String(row.project_id), environment: String(row.environment), agent: (row.agent as string | null) ?? null, name: String(row.name), currentModel: String(row.current_model),
+    id: String(row.id), environment: String(row.environment), agent: (row.agent as string | null) ?? null, name: String(row.name), currentModel: String(row.current_model),
     pick: (row.pick as string | null) ?? null, status: String(row.status), state, idleSince, watching: state === "watching", lastRunAt: iso(row.last_run_at), lastJobId: (row.last_job_id as string | null) ?? null,
     monthlySavingUsd: (row.monthly_saving_usd as number | null) ?? null,
   };
@@ -195,47 +165,20 @@ function runResult(json: unknown): RunResult | null {
   return { status: report.status, task: text(report.task), model: text(report.pick?.model), from: text(report.baseline?.model), savingPerCallUsd: typeof report.pick?.savingPerCallUsd === "number" ? report.pick.savingPerCallUsd : null };
 }
 const jobRow = (row: Row): JobRow => ({
-  id: String(row.id), projectId: String(row.project_id), taskId: String(row.task_id), kind: String(row.kind), status: String(row.status), startedAt: iso(row.started_at)!, finishedAt: iso(row.finished_at),
+  id: String(row.id), taskId: String(row.task_id), kind: String(row.kind), status: String(row.status), startedAt: iso(row.started_at)!, finishedAt: iso(row.finished_at),
   askedBy: (row.asked_by as string | null) ?? null, evalVersion: (row.eval_version as number | null) ?? null, result: runResult(row.report_json),
 });
 
 export const account = actor({
   db: db({ onMigrate: async database => {
+    // An account stored before schema version 2 had projects and repository reviews. There were no customers yet, so its
+    // tasks, runs, evals and settings are deleted rather than migrated. Its plan, members and ledger, which this month's caps count, stay.
+    const [version] = await database.execute(`PRAGMA user_version`);
+    if (Number(version?.user_version ?? 0) < SCHEMA_VERSION) {
+      for (const table of RESET_TABLES) await database.execute(`DROP TABLE IF EXISTS ${table}`);
+      await database.execute(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+    }
     for (const statement of SCHEMA) await database.execute(statement);
-    // Accounts created before jobs recorded the asking client.
-    const columns = await database.execute(`PRAGMA table_info(jobs)`);
-    if (!columns.some(column => column.name === "asked_by")) await database.execute(`ALTER TABLE jobs ADD COLUMN asked_by TEXT`);
-    if (!columns.some(column => column.name === "deleted_at")) await database.execute(`ALTER TABLE jobs ADD COLUMN deleted_at INTEGER`);
-    if (!columns.some(column => column.name === "eval_version")) await database.execute(`ALTER TABLE jobs ADD COLUMN eval_version INTEGER`);
-    const deletionColumns = await database.execute(`PRAGMA table_info(deletions)`);
-    if (!deletionColumns.some(column => column.name === "repo_copy")) await database.execute(`ALTER TABLE deletions ADD COLUMN repo_copy TEXT`);
-    // The Viktor and Langfuse connections' tables, from before they were removed.
-    await database.execute(`DROP TABLE IF EXISTS connections`);
-    await database.execute(`DROP TABLE IF EXISTS approvals`);
-    // Accounts created before tasks could be retired or go idle. Their tasks become watched; a task's idle clock starts at its last recommend call.
-    const taskColumns = await database.execute(`PRAGMA table_info(tasks)`);
-    if (!taskColumns.some(column => column.name === "retired")) await database.execute(`ALTER TABLE tasks ADD COLUMN retired INTEGER NOT NULL DEFAULT 0`);
-    if (!taskColumns.some(column => column.name === "last_recommend_at")) {
-      await database.execute(`ALTER TABLE tasks ADD COLUMN last_recommend_at INTEGER`);
-      await database.execute(`UPDATE tasks SET last_recommend_at = (SELECT max(started_at) FROM jobs WHERE jobs.task_id = tasks.id AND jobs.kind = 'run')`);
-    }
-    // Accounts created before projects: everything they hold moves into the default project.
-    for (const table of ["endpoints", "jobs", "tasks", "deletions", "repos"]) {
-      const found = await database.execute(`PRAGMA table_info(${table})`);
-      if (!found.some(column => column.name === "project_id")) await database.execute(`ALTER TABLE ${table} ADD COLUMN project_id TEXT NOT NULL DEFAULT '${DEFAULT_PROJECT}'`);
-    }
-    // Accounts created before repositories could be added through a member's GitHub sign-in.
-    const repoColumns = await database.execute(`PRAGMA table_info(repos)`);
-    if (!repoColumns.some(column => column.name === "github_user")) await database.execute(`ALTER TABLE repos ADD COLUMN github_user TEXT`);
-    // A guardrail's scope (an environment name, environment:agent or a task ID) is unique within its project only.
-    const guardrailColumns = await database.execute(`PRAGMA table_info(guardrails)`);
-    if (!guardrailColumns.some(column => column.name === "project_id")) {
-      await database.execute(`CREATE TABLE guardrails_by_project (project_id TEXT NOT NULL DEFAULT '${DEFAULT_PROJECT}', level TEXT NOT NULL, scope TEXT NOT NULL, settings TEXT NOT NULL, PRIMARY KEY (project_id, level, scope))`);
-      await database.execute(`INSERT INTO guardrails_by_project (level, scope, settings) SELECT level, scope, settings FROM guardrails`);
-      await database.execute(`DROP TABLE guardrails`);
-      await database.execute(`ALTER TABLE guardrails_by_project RENAME TO guardrails`);
-    }
-    await database.execute(`INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?) ON CONFLICT (id) DO NOTHING`, DEFAULT_PROJECT, DEFAULT_PROJECT_NAME, Date.now());
   } }),
   actions: {
     /** Records the calling member and the account's name. A null role, from a token that names none, keeps the recorded one. */
@@ -247,51 +190,6 @@ export const account = actor({
     info: async (c): Promise<{ id: string; name: string | null; plan: Plan | null; mcpRevokedBefore: number | null }> => {
       const [row] = await c.db.execute(`SELECT name, mcp_revoked_before FROM account WHERE id = 1`);
       return { id: c.key[0]!, name: (row?.name as string | null) ?? null, plan: await plan(c.db), mcpRevokedBefore: (row?.mcp_revoked_before as number | null) ?? null };
-    },
-
-    // Projects. Names are unique in the account, ignoring case.
-    projects: async (c): Promise<Project[]> => projectViews(c.db),
-    project: async (c, id: string): Promise<Project | null> => (await projectViews(c.db, id))[0] ?? null,
-
-    createProject: async (c, input: { name: string }): Promise<{ ok: true; project: Project } | { ok: false; error: string }> => {
-      const name = projectNameProblem(input.name) ?? await nameTaken(c.db, input.name.trim(), null);
-      if (name) return { ok: false, error: name };
-      const [count] = await c.db.execute(`SELECT count(*) AS n FROM projects`);
-      if (Number(count?.n) >= MAX_PROJECTS) return { ok: false, error: `This account has ${MAX_PROJECTS} projects, its limit. Delete one to add another.` };
-      const id = `prj_${randomBytes(6).toString("hex")}`;
-      await c.db.execute(`INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?)`, id, input.name.trim(), Date.now());
-      return { ok: true, project: (await projectViews(c.db, id))[0]! };
-    },
-
-    renameProject: async (c, input: { id: string; name: string }): Promise<{ ok: true; project: Project } | { ok: false; status: 400 | 404; error: string }> => {
-      if (!(await projectViews(c.db, input.id)).length) return { ok: false, status: 404, error: "No such project in this account." };
-      const problem = projectNameProblem(input.name) ?? await nameTaken(c.db, input.name.trim(), input.id);
-      if (problem) return { ok: false, status: 400, error: problem };
-      await c.db.execute(`UPDATE projects SET name = ? WHERE id = ?`, input.name.trim(), input.id);
-      return { ok: true, project: (await projectViews(c.db, input.id))[0]! };
-    },
-
-    /**
-     * Deletes a project with its endpoints, repositories and guardrails. A project that still has
-     * tasks is refused: deleting a task erases its runs, which the caller does task by task.
-     */
-    deleteProject: async (c, id: string): Promise<{ ok: true } | { ok: false; status: 404 | 409; error: string }> => c.db.transaction(async tx => {
-      if (id === DEFAULT_PROJECT) return { ok: false, status: 409, error: "The default project cannot be deleted. Rename it instead." };
-      const [found] = await tx.execute(`SELECT id FROM projects WHERE id = ?`, id);
-      if (!found) return { ok: false, status: 404, error: "No such project in this account." };
-      const [tasks] = await tx.execute(`SELECT count(*) AS n FROM tasks WHERE project_id = ?`, id);
-      if (Number(tasks?.n)) return { ok: false, status: 409, error: `This project has ${Number(tasks?.n)} task${Number(tasks?.n) === 1 ? "" : "s"}. Delete them first.` };
-      for (const table of ["endpoints", "repos", "guardrails", "projects"]) await tx.execute(`DELETE FROM ${table} WHERE ${table === "projects" ? "id" : "project_id"} = ?`, id);
-      return { ok: true };
-    }, { name: "delete_project" }),
-
-    /**
-     * The project an MCP call without one works in: the project whose GitHub repository the call's
-     * environment names (owner/repo, ignoring case), else the default project.
-     */
-    projectForEnvironment: async (c, environment: string): Promise<string> => {
-      const [row] = await c.db.execute(`SELECT project_id FROM repos WHERE full_name = ?`, environment);
-      return row ? String(row.project_id) : DEFAULT_PROJECT;
     },
 
     /** Applies a Stripe webhook. Each event applies once; an older subscription event never overwrites a newer one. */
@@ -314,7 +212,7 @@ export const account = actor({
     }, { name: "apply_stripe" }),
 
     /** Checks the plan and the account's job limits, then records the job. */
-    startJob: async (c, input: { jobId: string; projectId: string; taskId: string; kind: "run" | "watch"; askedBy?: string | null }): Promise<Started> => c.db.transaction(async (tx): Promise<Started> => {
+    startJob: async (c, input: { jobId: string; taskId: string; kind: "run" | "watch"; askedBy?: string | null }): Promise<Started> => c.db.transaction(async (tx): Promise<Started> => {
       const { limits, appUrl } = services().config;
       const current = await plan(tx);
       const unpaid = planRefusal(current);
@@ -325,7 +223,7 @@ export const account = actor({
       if (Number(hour?.n) >= limits.jobsPerHour) return { ok: false, error: `This account started ${limits.jobsPerHour} jobs in the last hour, its limit. Try again later.` };
       const [running] = await tx.execute(`SELECT count(*) AS n FROM jobs WHERE status IN ('queued', 'running')`);
       if (Number(running?.n) >= limits.concurrentJobs) return { ok: false, error: `This account has ${limits.concurrentJobs} jobs running, its limit. Try again when one finishes.` };
-      await tx.execute(`INSERT INTO jobs (id, project_id, task_id, kind, status, started_at, asked_by) VALUES (?, ?, ?, ?, 'queued', ?, ?)`, input.jobId, input.projectId, input.taskId, input.kind, now, input.askedBy ?? null);
+      await tx.execute(`INSERT INTO jobs (id, task_id, kind, status, started_at, asked_by) VALUES (?, ?, ?, 'queued', ?, ?)`, input.jobId, input.taskId, input.kind, now, input.askedBy ?? null);
       return { ok: true };
     }, { name: "start_job" }).then(async started => { await meterOverage(c.db); return started; }),
 
@@ -373,11 +271,11 @@ export const account = actor({
     unfinishedJobs: async (c): Promise<{ id: string; taskId: string; startedAt: number }[]> =>
       (await c.db.execute(`SELECT id, task_id, started_at FROM jobs WHERE status IN ('queued', 'running') AND deleted_at IS NULL`)).map(row => ({ id: String(row.id), taskId: String(row.task_id), startedAt: Number(row.started_at) })),
 
-    /** The account's jobs, newest first: one task's, one project's, or every project's. */
-    jobs: async (c, input: { projectId?: string; taskId?: string; limit?: number } = {}): Promise<JobRow[]> => {
+    /** The account's jobs, newest first, or one task's. */
+    jobs: async (c, input: { taskId?: string; limit?: number } = {}): Promise<JobRow[]> => {
       const rows = await c.db.execute(`SELECT jobs.*, reports.json AS report_json FROM jobs LEFT JOIN reports ON reports.job_id = jobs.id
-        WHERE jobs.deleted_at IS NULL AND (? IS NULL OR jobs.task_id = ?) AND (? IS NULL OR jobs.project_id = ?) ORDER BY jobs.started_at DESC LIMIT ?`,
-      input.taskId ?? null, input.taskId ?? null, input.projectId ?? null, input.projectId ?? null, input.limit ?? 50);
+        WHERE jobs.deleted_at IS NULL AND (? IS NULL OR jobs.task_id = ?) ORDER BY jobs.started_at DESC LIMIT ?`,
+      input.taskId ?? null, input.taskId ?? null, input.limit ?? 50);
       return rows.map(jobRow);
     },
 
@@ -440,8 +338,8 @@ export const account = actor({
         usd: row.status === "settled" ? settledUsd(Number(row.reserved_usd), { actualUsd: (row.actual_usd as number | null) ?? null, estimatedUsd: (row.estimated_usd as number | null) ?? null }) : row.status === "reserved" ? Number(row.reserved_usd) : 0,
       })),
 
-    // Endpoints, per project. Keys arrive only through /api/endpoints and are stored encrypted with the app's key.
-    addEndpoint: async (c, input: { projectId: string; kind: EndpointKind; baseUrl: string; apiKey: string; allowedModels: string[] | "all" }): Promise<{ ok: true; endpoint: EndpointView } | { ok: false; error: string }> => {
+    // Endpoints. Keys arrive only through /api/endpoints and are stored encrypted with the app's key.
+    addEndpoint: async (c, input: { kind: EndpointKind; baseUrl: string; apiKey: string; allowedModels: string[] | "all" }): Promise<{ ok: true; endpoint: EndpointView } | { ok: false; error: string }> => {
       const { keyEncryptionKey, allowPrivateEndpoints } = services().config;
       if (!keyEncryptionKey) return { ok: false, error: "Customer endpoints are not available yet: the app has no key-encryption key." };
       if (!["openrouter", "openai-compatible", "anthropic"].includes(input.kind)) return { ok: false, error: "kind must be openrouter, openai-compatible or anthropic" };
@@ -451,107 +349,42 @@ export const account = actor({
       const models = input.allowedModels === "all" ? "all" : Array.isArray(input.allowedModels) ? input.allowedModels.filter(item => typeof item === "string" && item.trim()).map(item => item.trim()) : null;
       if (!models || (models !== "all" && !models.length)) return { ok: false, error: "allowedModels must be \"all\" or a list of model IDs" };
       if (models === "all" && input.kind !== "openrouter") return { ok: false, error: "List the models this endpoint may run: only an OpenRouter endpoint can allow all" };
-      if (!(await projectViews(c.db, input.projectId)).length) return { ok: false, error: "No such project in this account." };
       const id = `ep_${randomBytes(6).toString("hex")}`;
       const key = input.apiKey.trim();
-      await c.db.execute(`INSERT INTO endpoints (id, project_id, kind, base_url, allowed_models, sealed_key, key_last4, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        id, input.projectId, input.kind, input.baseUrl.replace(/\/$/, ""), JSON.stringify(models), encryptKey(keyEncryptionKey, c.key[0]!, key), key.slice(-4), Date.now());
-      return { ok: true, endpoint: (await endpointViews(c.db, input.projectId)).find(item => item.id === id)! };
+      await c.db.execute(`INSERT INTO endpoints (id, kind, base_url, allowed_models, sealed_key, key_last4, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        id, input.kind, input.baseUrl.replace(/\/$/, ""), JSON.stringify(models), encryptKey(keyEncryptionKey, c.key[0]!, key), key.slice(-4), Date.now());
+      return { ok: true, endpoint: (await endpointViews(c.db)).find(item => item.id === id)! };
     },
 
-    endpoints: async (c, projectId: string): Promise<EndpointView[]> => endpointViews(c.db, projectId),
+    endpoints: async (c): Promise<EndpointView[]> => endpointViews(c.db),
 
-    removeEndpoint: async (c, input: { projectId: string; id: string }): Promise<boolean> =>
-      (await c.db.execute(`DELETE FROM endpoints WHERE id = ? AND project_id = ? RETURNING id`, input.id, input.projectId)).length > 0,
-
-    // GitHub repositories. A token arrives only through /api/repos and is stored encrypted, as endpoint keys are.
-    /** Checks that OpenMerit can read the repository, saves it and starts its review. Adding one again replaces its token. */
-    addRepo: async (c, input: { projectId: string; url: string; token?: string | null; githubUser?: string | null }): Promise<{ ok: true; repo: RepoView } | { ok: false; error: string }> => {
-      const { config, fetch } = services();
-      // Reviews are part of a paid plan: without one, nothing reaches GitHub, is cloned or is spent.
-      const unpaid = planRefusal(await plan(c.db));
-      if (unpaid) return { ok: false, error: unpaid };
-      const ref = parseRepoUrl(typeof input.url === "string" ? input.url : "");
-      if (!ref) return { ok: false, error: "Paste the repository's GitHub URL, such as https://github.com/acme/app." };
-      const pasted = typeof input.token === "string" && input.token.trim() ? input.token.trim() : null;
-      // Through a member's GitHub sign-in, OpenMerit reads it with that member's GitHub token, which Clerk renews; it stores no token.
-      const githubUser = !pasted && input.githubUser ? input.githubUser : null;
-      const signIn = githubUser ? await services().githubToken(githubUser).catch(() => null) : null;
-      if (githubUser && !signIn) return { ok: false, error: "Your OpenMerit sign-in has no GitHub account. Sign in with GitHub, or add the repository with a fine-grained token." };
-      const token = pasted ?? signIn;
-      if (pasted) {
-        const problem = tokenProblem(pasted);
-        if (problem) return { ok: false, error: problem };
-        if (!config.keyEncryptionKey) return { ok: false, error: "Private repositories are not available yet: the app has no key-encryption key." };
-      }
-      if (!(await projectViews(c.db, input.projectId)).length) return { ok: false, error: "No such project in this account." };
-      // A repository belongs to one project, so an MCP call from it finds its project.
-      const [known] = await c.db.execute(`SELECT repos.id, repos.project_id, projects.name FROM repos LEFT JOIN projects ON projects.id = repos.project_id WHERE full_name = ?`, `${ref.owner}/${ref.name}`);
-      if (known && known.project_id !== input.projectId) return { ok: false, error: `${ref.owner}/${ref.name} is already in the project ${String(known.name ?? known.project_id)}. Remove it there first.` };
-      const [count] = await c.db.execute(`SELECT count(*) AS n FROM repos`);
-      if (!known && Number(count?.n) >= config.limits.repos) return { ok: false, error: `This account has ${config.limits.repos} repositories, its limit. Remove one to add another.` };
-      const busy = await reviewsRefusal(c.db);
-      if (busy) return { ok: false, error: busy };
-      const checked = await checkRepo(ref, token, config.github, fetch);
-      if (!checked.ok) return { ok: false, error: githubUser ? checked.error.replace(/^This token cannot see (\S+)\. Check that its Repository access includes it\.$/, "The OpenMerit GitHub App cannot see $1 for you. Install it on the repository's account or organization and select the repository.") : checked.error };
-      const { repo } = checked;
-      const now = Date.now();
-      const [existing] = await c.db.execute(`SELECT id FROM repos WHERE full_name = ?`, repo.fullName);
-      const id = existing ? String(existing.id) : `repo_${randomBytes(6).toString("hex")}`;
-      await c.db.execute(`INSERT INTO repos (id, project_id, full_name, private, default_branch, sealed_token, token_last4, github_user, added_at, checked_at, review_status, review_requested_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?)
-        ON CONFLICT (id) DO UPDATE SET full_name = excluded.full_name, private = excluded.private, default_branch = excluded.default_branch, sealed_token = excluded.sealed_token,
-        token_last4 = excluded.token_last4, github_user = excluded.github_user, checked_at = excluded.checked_at`,
-      id, input.projectId, repo.fullName, repo.private ? 1 : 0, repo.defaultBranch, pasted ? encryptKey(config.keyEncryptionKey!, c.key[0]!, pasted) : null, pasted ? pasted.slice(-4) : null, githubUser, now, now, now);
-      await startReview(c, id, () => c.client<Registry>().catalogue.getOrCreate(["global"]).get());
-      return { ok: true, repo: (await repoViews(c.db, { id }))[0]! };
-    },
-
-    repos: async (c, projectId: string): Promise<RepoView[]> => repoViews(c.db, { projectId }),
-
-    /** Reviews the repository again, unless a review is already queued or running. */
-    reviewRepo: async (c, input: { projectId: string; id: string }): Promise<{ ok: true; repo: RepoView } | { ok: false; status: 402 | 404 | 409; error: string }> => {
-      const { id } = input;
-      const [view] = await repoViews(c.db, input);
-      if (!view) return { ok: false, status: 404, error: "No such repository in this account." };
-      if (view.review.status === "queued" || view.review.status === "reviewing") return { ok: true, repo: view };
-      const unpaid = planRefusal(await plan(c.db));
-      if (unpaid) return { ok: false, status: 402, error: unpaid };
-      const busy = await reviewsRefusal(c.db);
-      if (busy) return { ok: false, status: 409, error: busy };
-      await startReview(c, id, () => c.client<Registry>().catalogue.getOrCreate(["global"]).get());
-      return { ok: true, repo: (await repoViews(c.db, { id }))[0]! };
-    },
-
-    /** Deletes the repository, its token and its review. A review still running finishes without saving. */
-    removeRepo: async (c, input: { projectId: string; id: string }): Promise<boolean> =>
-      (await c.db.execute(`DELETE FROM repos WHERE id = ? AND project_id = ? RETURNING id`, input.id, input.projectId)).length > 0,
+    removeEndpoint: async (c, id: string): Promise<boolean> => (await c.db.execute(`DELETE FROM endpoints WHERE id = ? RETURNING id`, id)).length > 0,
 
     /** The endpoints a job may call, without keys: OpenRouter on OpenMerit's key first, then the customer's. */
-    endpointsForJob: async (c, projectId: string): Promise<EndpointInfo[]> => (await jobEndpoints(c.db, c.key[0]!, projectId, false)).map(({ apiKey: _key, ...info }) => info),
+    endpointsForJob: async (c): Promise<EndpointInfo[]> => (await jobEndpoints(c.db, c.key[0]!, false)).map(({ apiKey: _key, ...info }) => info),
 
     /** The same endpoints with their keys, for the job's model client. Returned only to the job, held in its memory, never stored. */
-    endpointSecrets: async (c, projectId: string): Promise<EndpointConfig[]> => jobEndpoints(c.db, c.key[0]!, projectId, true),
+    endpointSecrets: async (c): Promise<EndpointConfig[]> => jobEndpoints(c.db, c.key[0]!, true),
 
-    // Guardrails, per project and level: environment (a name), agent (`environment:agent`; environment names hold no colon) and task (task ID).
-    setGuardrails: async (c, input: { projectId: string; level: Level; scope: string; settings: Guardrails }): Promise<{ rejected: { key: string; reason: string }[] }> => {
+    // Guardrails, per level: environment (its name) and task (its ID).
+    setGuardrails: async (c, input: { level: Level; scope: string; settings: Guardrails }): Promise<{ rejected: { key: string; reason: string }[] }> => {
       const rejected = Object.keys(input.settings).filter(key => !Object.hasOwn(GUARDRAIL_KINDS, key)).map(key => ({ key, reason: "not a guardrail" }));
       const kept = Object.fromEntries(Object.entries(input.settings).filter(([key, value]) => Object.hasOwn(GUARDRAIL_KINDS, key) && value !== null && value !== undefined));
-      await c.db.execute(`INSERT INTO guardrails (project_id, level, scope, settings) VALUES (?, ?, ?, ?) ON CONFLICT (project_id, level, scope) DO UPDATE SET settings = excluded.settings`, input.projectId, input.level, input.scope, JSON.stringify(kept));
+      await c.db.execute(`INSERT INTO guardrails (level, scope, settings) VALUES (?, ?, ?) ON CONFLICT (level, scope) DO UPDATE SET settings = excluded.settings`, input.level, input.scope, JSON.stringify(kept));
       return { rejected };
     },
 
-    guardrails: async (c, input: { projectId: string; level: Level; scope: string }): Promise<GuardrailSetting[]> => {
-      const settings = await levelSettings(c.db, input.projectId, input.level, input.scope);
+    guardrails: async (c, input: { level: Level; scope: string }): Promise<GuardrailSetting[]> => {
+      const settings = await levelSettings(c.db, input.level, input.scope);
       return Object.entries(settings).map(([key, value]) => ({ key, value, kind: GUARDRAIL_KINDS[key as GuardrailKey] }));
     },
 
     /** A task's effective guardrails, which level set each, and the settings refused. */
-    resolveGuardrails: async (c, input: { projectId: string; environment: string; agent?: string | null; taskId?: string }): Promise<ResolvedGuardrails> => {
+    resolveGuardrails: async (c, input: { environment: string; agent?: string | null; taskId?: string }): Promise<ResolvedGuardrails> => {
       const levels: Partial<Record<Level, Guardrails>> = {};
       for (const level of LEVELS) {
-        if (level === "agent" && !input.agent) continue;
         if (level === "task" && !input.taskId) continue;
-        levels[level] = await levelSettings(c.db, input.projectId, level, scopeKey(level, input));
+        levels[level] = await levelSettings(c.db, level, scopeKey(level, input));
       }
       return resolveGuardrails(levels);
     },
@@ -559,20 +392,19 @@ export const account = actor({
     // The task index, which the task actors keep current.
     // A recommend call (lastRecommendAt) brings a retired task back; retired is set only by openmerit_retire.
     // Status `switched` (the user approved the pick, now the current model) clears the pick.
-    upsertTask: async (c, row: Pick<TaskRow, "id" | "projectId" | "environment" | "agent" | "name" | "currentModel" | "pick" | "status"> & { lastRunAt?: number; lastJobId?: string; lastRecommendAt?: number; retired?: boolean; monthlySavingUsd?: number | null }): Promise<void> => {
+    upsertTask: async (c, row: Pick<TaskRow, "id" | "environment" | "agent" | "name" | "currentModel" | "pick" | "status"> & { lastRunAt?: number; lastJobId?: string; lastRecommendAt?: number; retired?: boolean; monthlySavingUsd?: number | null }): Promise<void> => {
       const retired = row.retired === undefined ? (row.lastRecommendAt === undefined ? null : 0) : row.retired ? 1 : 0;
-      await c.db.execute(`INSERT INTO tasks (id, project_id, environment, agent, name, current_model, pick, status, last_run_at, last_job_id, monthly_saving_usd, retired, last_recommend_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0), ?) ON CONFLICT (id) DO UPDATE SET agent = excluded.agent, current_model = excluded.current_model,
+      await c.db.execute(`INSERT INTO tasks (id, environment, agent, name, current_model, pick, status, last_run_at, last_job_id, monthly_saving_usd, retired, last_recommend_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0), ?) ON CONFLICT (id) DO UPDATE SET agent = excluded.agent, current_model = excluded.current_model,
         pick = CASE WHEN excluded.status = 'switched' THEN NULL ELSE COALESCE(excluded.pick, tasks.pick) END, status = excluded.status, last_run_at = COALESCE(excluded.last_run_at, tasks.last_run_at),
         last_job_id = COALESCE(excluded.last_job_id, tasks.last_job_id), monthly_saving_usd = COALESCE(excluded.monthly_saving_usd, tasks.monthly_saving_usd),
         retired = COALESCE(?, tasks.retired), last_recommend_at = COALESCE(excluded.last_recommend_at, tasks.last_recommend_at)`,
-      row.id, row.projectId, row.environment, row.agent, row.name, row.currentModel, row.pick, row.status, row.lastRunAt ?? null, row.lastJobId ?? null, row.monthlySavingUsd ?? null,
+      row.id, row.environment, row.agent, row.name, row.currentModel, row.pick, row.status, row.lastRunAt ?? null, row.lastJobId ?? null, row.monthlySavingUsd ?? null,
       retired, row.lastRecommendAt ?? null, retired);
     },
 
-    /** One project's tasks, or every project's. */
-    tasks: async (c, projectId?: string): Promise<TaskRow[]> => {
-      const rows = await c.db.execute(`SELECT t.*, ${REVIEWING} AS eval_review FROM tasks t WHERE ? IS NULL OR project_id = ? ORDER BY COALESCE(last_run_at, 0) DESC`, projectId ?? null, projectId ?? null);
+    tasks: async (c): Promise<TaskRow[]> => {
+      const rows = await c.db.execute(`SELECT t.*, ${REVIEWING} AS eval_review FROM tasks t ORDER BY COALESCE(last_run_at, 0) DESC`);
       const watch = await watchGuardrails(c.db);
       return rows.map(row => taskRow(row, watch(row)));
     },
@@ -589,35 +421,25 @@ export const account = actor({
      * Records who deleted which task, without its content.
      */
     deleteTask: async (c, input: { taskId: string; userId: string }): Promise<{ jobs: number }> => c.db.transaction(async tx => {
-      const [task] = await tx.execute(`SELECT name, environment, project_id FROM tasks WHERE id = ?`, input.taskId);
+      const [task] = await tx.execute(`SELECT name, environment FROM tasks WHERE id = ?`, input.taskId);
       if (!task) return { jobs: 0 };
       const [jobs] = await tx.execute(`SELECT count(*) AS n FROM jobs WHERE task_id = ? AND deleted_at IS NULL`, input.taskId);
       const now = Date.now();
       await tx.execute(`UPDATE jobs SET deleted_at = ?, asked_by = NULL WHERE task_id = ? AND deleted_at IS NULL`, now, input.taskId);
       await tx.execute(`DELETE FROM reports WHERE task_id = ?`, input.taskId);
       await tx.execute(`DELETE FROM decisions WHERE task_id = ?`, input.taskId);
-      await tx.execute(`DELETE FROM guardrails WHERE project_id = ? AND level = 'task' AND scope = ?`, String(task.project_id), input.taskId);
-      const [synced] = await tx.execute(`SELECT version FROM eval_sync WHERE task_id = ?`, input.taskId);
+      await tx.execute(`DELETE FROM guardrails WHERE level = 'task' AND scope = ?`, input.taskId);
       await tx.execute(`DELETE FROM tasks WHERE id = ?`, input.taskId);
-      // Its eval goes with it, with any draft and the record of the repository copy. A review draft it was approved from keeps no content.
+      // Its eval and eval command go with it.
       await tx.execute(`DELETE FROM evals WHERE task_id = ?`, input.taskId);
-      await tx.execute(`DELETE FROM eval_sync WHERE task_id = ?`, input.taskId);
-      await tx.execute(`UPDATE eval_drafts SET bundle = '{}', cases = '[]' WHERE task_id = ?`, input.taskId);
-      // The repository copy stays until the coding agent removes it: its directory is kept here until then, and the agent is asked on its next call.
-      const repoCopy = synced ? evalDir(String(task.name)) : null;
-      await tx.execute(`INSERT INTO deletions (project_id, task_id, name, environment, user_id, jobs, deleted_at, repo_copy) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, String(task.project_id), input.taskId, String(task.name), String(task.environment), input.userId, Number(jobs?.n ?? 0), now, repoCopy);
+      await tx.execute(`DELETE FROM eval_commands WHERE task_id = ?`, input.taskId);
+      await tx.execute(`INSERT INTO deletions (task_id, name, environment, user_id, jobs, deleted_at) VALUES (?, ?, ?, ?, ?, ?)`, input.taskId, String(task.name), String(task.environment), input.userId, Number(jobs?.n ?? 0), now);
       return { jobs: Number(jobs?.n ?? 0) };
     }, { name: "delete_task" }),
 
     /** Tasks deleted from this account: who, when, and the task's ID and name. */
-    deletions: async (c, projectId: string): Promise<{ taskId: string; name: string; environment: string; userId: string; jobs: number; deletedAt: string; repoCopy: string | null }[]> =>
-      (await c.db.execute(`SELECT * FROM deletions WHERE project_id = ? ORDER BY deleted_at DESC`, projectId)).map(row => ({ taskId: String(row.task_id), name: String(row.name), environment: String(row.environment), userId: String(row.user_id), jobs: Number(row.jobs), deletedAt: iso(row.deleted_at)!, repoCopy: (row.repo_copy as string | null) ?? null })),
-
-    /** Repository copies of deleted tasks' evals, which the coding agent offers to remove. */
-    staleEvalCopies: async (c): Promise<{ taskId: string; name: string; environment: string; dir: string }[]> =>
-      (await c.db.execute(`SELECT task_id, name, environment, repo_copy FROM deletions WHERE repo_copy IS NOT NULL ORDER BY deleted_at`)).map(row => ({ taskId: String(row.task_id), name: String(row.name), environment: String(row.environment), dir: String(row.repo_copy) })),
-    /** The coding agent removed a deleted task's repository copy, or the user chose to keep it. */
-    forgetEvalCopy: async (c, taskId: string): Promise<boolean> => (await c.db.execute(`UPDATE deletions SET repo_copy = NULL WHERE task_id = ? AND repo_copy IS NOT NULL RETURNING task_id`, taskId)).length > 0,
+    deletions: async (c): Promise<{ taskId: string; name: string; environment: string; userId: string; jobs: number; deletedAt: string }[]> =>
+      (await c.db.execute(`SELECT * FROM deletions ORDER BY deleted_at DESC`)).map(row => ({ taskId: String(row.task_id), name: String(row.name), environment: String(row.environment), userId: String(row.user_id), jobs: Number(row.jobs), deletedAt: iso(row.deleted_at)! })),
 
     // Reports.
     saveReport: async (c, input: { jobId: string; taskId: string; json: unknown; markdown: string }): Promise<void> => {
@@ -667,16 +489,16 @@ export const account = actor({
       else await c.db.execute(`INSERT INTO eval_commands (task_id, spec, confirmed_by, confirmed_at) VALUES (?, ?, ?, ?) ON CONFLICT (task_id) DO UPDATE SET spec = excluded.spec, confirmed_by = excluded.confirmed_by, confirmed_at = excluded.confirmed_at`, input.taskId, JSON.stringify(input.spec), input.by, Date.now());
     },
     /** Creates a task's row before its first run, so a person can confirm its eval command first. */
-    createTask: async (c, input: { taskId: string; projectId: string; environment: string; agent: string | null; name: string; currentModel: string }): Promise<void> => {
-      await c.db.execute(`INSERT INTO tasks (id, project_id, environment, agent, name, current_model, pick, status, retired) VALUES (?, ?, ?, ?, ?, ?, NULL, 'new', 0) ON CONFLICT (id) DO NOTHING`, input.taskId, input.projectId, input.environment, input.agent, input.name, input.currentModel);
+    createTask: async (c, input: { taskId: string; environment: string; agent: string | null; name: string; currentModel: string }): Promise<void> => {
+      await c.db.execute(`INSERT INTO tasks (id, environment, agent, name, current_model, pick, status, retired) VALUES (?, ?, ?, ?, ?, NULL, 'new', 0) ON CONFLICT (id) DO NOTHING`, input.taskId, input.environment, input.agent, input.name, input.currentModel);
     },
 
     /** Saves a coding agent's critical request until a person confirms or declines it. */
-    requestConfirmation: async (c, input: { projectId: string; method: string; path: string; body: string; checks: "person" | "reverify"; title: string; items: string[]; requestedBy: string; requestedVia: string | null }): Promise<ConfirmationView> => {
+    requestConfirmation: async (c, input: { method: string; path: string; body: string; checks: "person" | "reverify"; title: string; items: string[]; requestedBy: string; requestedVia: string | null }): Promise<ConfirmationView> => {
       const id = randomBytes(18).toString("base64url"), now = Date.now(), key = services().config.keyEncryptionKey;
       const body = key && input.body ? `sealed:${encryptKey(key, c.key[0]!, input.body)}` : input.body;
-      await c.db.execute(`INSERT INTO confirmations (id, nonce, project_id, method, path, body, checks, title, items, requested_by, requested_via, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-        id, randomBytes(18).toString("base64url"), input.projectId, input.method, input.path, body, input.checks, input.title, JSON.stringify(input.items), input.requestedBy, input.requestedVia, now, now + CONFIRM_HOURS * 3600_000);
+      await c.db.execute(`INSERT INTO confirmations (id, nonce, method, path, body, checks, title, items, requested_by, requested_via, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+        id, randomBytes(18).toString("base64url"), input.method, input.path, body, input.checks, input.title, JSON.stringify(input.items), input.requestedBy, input.requestedVia, now, now + CONFIRM_HOURS * 3600_000);
       const [row] = await c.db.execute(`SELECT * FROM confirmations WHERE id = ?`, id);
       return confirmationRow(row!);
     },
@@ -715,13 +537,13 @@ export const account = actor({
       return Object.fromEntries(rows.map(row => [String(row.task_id), decisionRow(row)]));
     },
 
-    // Evals. The cloud holds each task's accepted eval and any draft under review; the coding agent writes the accepted one to the repository when the user agrees.
+    // Evals. The server holds each task's accepted eval and any draft under review.
     eval: async (c, taskId: string): Promise<EvalView | null> => evalView(c.db, taskId),
 
-    /** Each task's accepted eval version, the version in its repository, and whether a draft waits for review, for the coding agent's task list. */
-    evalHeads: async (c): Promise<Record<string, { version: number; repo: number | null; review: boolean }>> =>
-      Object.fromEntries((await c.db.execute(`SELECT e.task_id, e.version, e.draft_reason, s.version AS repo FROM evals e LEFT JOIN eval_sync s ON s.task_id = e.task_id`))
-        .map(row => [String(row.task_id), { version: Number(row.version), repo: row.repo === null || row.repo === undefined ? null : Number(row.repo), review: row.draft_reason !== null && row.draft_reason !== undefined }])),
+    /** Each task's accepted eval version and whether a draft waits for review, for the coding agent's task list. */
+    evalHeads: async (c): Promise<Record<string, { version: number; review: boolean }>> =>
+      Object.fromEntries((await c.db.execute(`SELECT task_id, version, draft_reason FROM evals`))
+        .map(row => [String(row.task_id), { version: Number(row.version), review: row.draft_reason !== null && row.draft_reason !== undefined }])),
 
     /** The accepted eval a job runs on, unchanged, and the bar it was accepted against; null before the task has one. */
     evalFor: async (c, taskId: string): Promise<{ version: number; spec: EvalSpec; cases: Case[]; bar: EvalBar } | null> => {
@@ -759,9 +581,9 @@ export const account = actor({
      * A run whose answers a person graded accepts it once they agree with it, against the bar they graded to.
      * An eval accepted meanwhile stays; the version returned is the one the job ran on.
      */
-    acceptFirstEval: async (c, input: { taskId: string; projectId: string; bundle: TaskBundle; spec: EvalSpec; cases: Case[]; source: EvalSource; by: string | null; bar?: EvalBar }): Promise<number> => {
-      await c.db.execute(`INSERT INTO evals (task_id, project_id, version, spec, cases, shape, source, accepted_by, accepted_at, bar) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (task_id) DO NOTHING`,
-        input.taskId, input.projectId, JSON.stringify(input.spec), JSON.stringify(input.cases), JSON.stringify(shapeOf(input.bundle)), input.source, input.by, Date.now(), input.bar === "criteria" ? "criteria" : null);
+    acceptFirstEval: async (c, input: { taskId: string; bundle: TaskBundle; spec: EvalSpec; cases: Case[]; source: EvalSource; by: string | null; bar?: EvalBar }): Promise<number> => {
+      await c.db.execute(`INSERT INTO evals (task_id, version, spec, cases, shape, source, accepted_by, accepted_at, bar) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (task_id) DO NOTHING`,
+        input.taskId, JSON.stringify(input.spec), JSON.stringify(input.cases), JSON.stringify(shapeOf(input.bundle)), input.source, input.by, Date.now(), input.bar === "criteria" ? "criteria" : null);
       const [row] = await c.db.execute(`SELECT version FROM evals WHERE task_id = ?`, input.taskId);
       return Number(row?.version ?? 1);
     },
@@ -784,7 +606,7 @@ export const account = actor({
 
     /**
      * Accepts the draft, with the reviewer's last edits, as the next version: runs and the watch resume on it,
-     * and the coding agent offers to write it to the repository. Returns the changed task's bundle, which the
+     * and returns the changed task's bundle, which the
      * caller gives the task actor, or null when only the eval changed.
      */
     acceptEval: async (c, input: { taskId: string; spec: EvalSpec; cases: Case[]; by: string; base?: string | null }): Promise<{ ok: true; version: number; bundle: TaskBundle | null } | { ok: false; status: 409; error: string }> => c.db.transaction(async tx => {
@@ -812,56 +634,15 @@ export const account = actor({
       await c.db.execute(`UPDATE jobs SET eval_version = ? WHERE id = ?`, input.version, input.jobId);
     },
 
-    /** The coding agent wrote the accepted version to the repository. */
-    syncEval: async (c, input: { taskId: string; version: number; by: string; client: string | null }): Promise<{ ok: true } | { ok: false; error: string }> => {
-      const [found] = await c.db.execute(`SELECT version FROM evals WHERE task_id = ?`, input.taskId);
-      if (!found || Number(found.version) !== input.version) return { ok: false, error: found ? `The accepted eval is version ${Number(found.version)}, not ${input.version}: call openmerit_eval for its files.` : "This task has no eval yet." };
-      await c.db.execute(`INSERT INTO eval_sync (task_id, version, synced_by, client, synced_at) VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT (task_id) DO UPDATE SET version = excluded.version, synced_by = excluded.synced_by, client = excluded.client, synced_at = excluded.synced_at`, input.taskId, input.version, input.by, input.client, Date.now());
-      return { ok: true };
-    },
-
-    /**
-     * Evals a repository review wrote. A new review replaces the pending draft of the same task; a task
-     * the project already has, or a draft someone approved or dismissed, is not offered again.
-     */
-    addEvalDrafts: async (c, input: { projectId: string; repoId: string | null; environment: string; drafts: { bundle: TaskBundle; cases: Case[] }[] }): Promise<number> => addDrafts(c.db, input),
-
-    evalDrafts: async (c, input: { projectId?: string; status?: EvalDraft["status"] } = {}): Promise<EvalDraft[]> =>
-      (await c.db.execute(`SELECT * FROM eval_drafts WHERE (? IS NULL OR project_id = ?) AND (? IS NULL OR status = ?) ORDER BY created_at`, input.projectId ?? null, input.projectId ?? null, input.status ?? null, input.status ?? null)).map(draftRow),
-
-    /**
-     * Approves a pending draft: the task joins the project, not run yet, with the draft accepted as its eval's
-     * version 1, which its first run measures on instead of writing cases. The caller creates the task actor with the bundle.
-     */
-    approveDraft: async (c, input: { id: string; taskId: string; userId: string; bundle: TaskBundle; cases: Case[] }): Promise<{ ok: true } | { ok: false; status: 404 | 409; error: string }> => c.db.transaction(async tx => {
-      const [row] = await tx.execute(`SELECT * FROM eval_drafts WHERE id = ?`, input.id);
-      if (!row) return { ok: false, status: 404, error: "No such draft in this account." };
-      if (row.status !== "pending") return { ok: false, status: 409, error: `This draft was already ${String(row.status)}.` };
-      const [task] = await tx.execute(`SELECT id FROM tasks WHERE id = ?`, input.taskId);
-      if (task) return { ok: false, status: 409, error: "This project already has a task by that name. Dismiss the draft, or edit the task's eval." };
-      const now = Date.now();
-      await tx.execute(`INSERT INTO tasks (id, project_id, environment, agent, name, current_model, pick, status, retired) VALUES (?, ?, ?, NULL, ?, ?, NULL, 'new', 0)`,
-        input.taskId, String(row.project_id), String(row.environment), input.bundle.task, input.bundle.current.model);
-      await tx.execute(`INSERT INTO evals (task_id, project_id, version, spec, cases, shape, source, accepted_by, accepted_at) VALUES (?, ?, 1, ?, ?, ?, 'review', ?, ?)`,
-        input.taskId, String(row.project_id), JSON.stringify(specOf(input.bundle)), JSON.stringify(input.cases), JSON.stringify(shapeOf(input.bundle)), input.userId, now);
-      await tx.execute(`UPDATE eval_drafts SET status = 'approved', decided_by = ?, decided_at = ?, task_id = ? WHERE id = ?`, input.userId, now, input.taskId, input.id);
-      return { ok: true };
-    }, { name: "approve_draft" }),
-
-    dismissDraft: async (c, input: { id: string; userId: string }): Promise<boolean> =>
-      (await c.db.execute(`UPDATE eval_drafts SET status = 'dismissed', decided_by = ?, decided_at = ?, bundle = '{}', cases = '[]' WHERE id = ? AND status = 'pending' RETURNING id`, input.userId, Date.now(), input.id)).length > 0,
-
-    /** Everything the account holds, except keys and repository tokens. */
+    /** Everything the account holds, except keys. */
     export: async (c): Promise<Record<string, unknown>> => {
       const all = async (table: string) => c.db.execute(`SELECT * FROM ${table}`);
       return {
-        account: c.key[0], exportedAt: new Date().toISOString(), plan: await plan(c.db), members: await all("members"), projects: await projectViews(c.db),
-        endpoints: (await all("endpoints")).map(row => ({ id: row.id, projectId: row.project_id, kind: row.kind, baseUrl: row.base_url, allowedModels: JSON.parse(String(row.allowed_models)) as unknown, keyLast4: row.key_last4 })),
+        account: c.key[0], exportedAt: new Date().toISOString(), plan: await plan(c.db), members: await all("members"),
+        endpoints: (await all("endpoints")).map(row => ({ id: row.id, kind: row.kind, baseUrl: row.base_url, allowedModels: JSON.parse(String(row.allowed_models)) as unknown, keyLast4: row.key_last4 })),
         guardrails: (await all("guardrails")).map(row => ({ ...row, settings: JSON.parse(String(row.settings)) as unknown })), tasks: await (async () => { const watch = await watchGuardrails(c.db); return (await c.db.execute(`SELECT t.*, ${REVIEWING} AS eval_review FROM tasks t`)).map(row => taskRow(row, watch(row))); })(),
-        decisions: (await all("decisions")).map(decisionRow), repos: await repoViews(c.db),
+        decisions: (await all("decisions")).map(decisionRow),
         evals: await Promise.all((await all("evals")).map(async row => evalView(c.db, String(row.task_id)))),
-        evalSync: await all("eval_sync"), evalDrafts: (await all("eval_drafts")).map(draftRow),
         jobs: (await c.db.execute(`SELECT * FROM jobs WHERE deleted_at IS NULL`)).map(jobRow), deletions: await all("deletions"), ledger: await all("ledger"), reports: (await all("reports")).map(row => ({ jobId: row.job_id, taskId: row.task_id, report: JSON.parse(String(row.json)) as unknown })),
       };
     },
@@ -892,16 +673,14 @@ async function plan(database: Database): Promise<Plan | null> {
   if (!row) return null;
   const start = typeof row.period_start === "number" ? row.period_start * 1000 : startOfMonth(Date.now());
   const [used] = await database.execute(`SELECT COALESCE(sum(counted), 0) AS n FROM jobs WHERE counted > 0 AND finished_at >= ?`, start);
-  const [reviews] = EVALUATIONS_PER_REVIEW ? await database.execute(`SELECT count(*) AS n FROM ledger WHERE key LIKE '${REVIEW_LEDGER}%' AND status = 'settled' AND created_at >= ?`, start) : [];
   return {
     name: String(row.name ?? "OpenMerit"), status: String(row.status ?? "incomplete"), periodStart: (row.period_start as number | null) ?? null, periodEnd: (row.period_end as number | null) ?? null,
-    includedEvals: Number(row.included_evals ?? 0), usedEvals: Number(used?.n ?? 0) + EVALUATIONS_PER_REVIEW * Number(reviews?.n ?? 0), overage: row.overage === "metered" ? "metered" : "refuse", customerId: (row.customer_id as string | null) ?? null,
+    includedEvals: Number(row.included_evals ?? 0), usedEvals: Number(used?.n ?? 0), overage: row.overage === "metered" ? "metered" : "refuse", customerId: (row.customer_id as string | null) ?? null,
   };
 }
 
 /**
- * Why the account cannot start paid work, or null: on the hosted server, every evaluation and every repository
- * review needs a plan that Stripe says is active or trialing. There is no free hosted plan; a self-hosted
+ * Why the account cannot start paid work, or null: on the hosted server, every evaluation needs a plan that Stripe says is active or trialing. There is no free hosted plan; a self-hosted
  * server needs no plan, and its spend caps still apply.
  */
 function planRefusal(current: Plan | null): string | null {
@@ -940,154 +719,32 @@ async function meterOverage(database: Database): Promise<void> {
   }
 }
 
-async function levelSettings(database: Database, projectId: string, level: Level, scope: string): Promise<Guardrails> {
-  const [row] = await database.execute(`SELECT settings FROM guardrails WHERE project_id = ? AND level = ? AND scope = ?`, projectId, level, scope);
+async function levelSettings(database: Database, level: Level, scope: string): Promise<Guardrails> {
+  const [row] = await database.execute(`SELECT settings FROM guardrails WHERE level = ? AND scope = ?`, level, scope);
   return row ? JSON.parse(String(row.settings)) as Guardrails : {};
 }
 
 /** Each task's effective `watch` guardrail, from one read of every level's settings. */
 async function watchGuardrails(database: Database): Promise<(row: Row) => boolean | undefined> {
-  const settings = new Map((await database.execute(`SELECT project_id, level, scope, settings FROM guardrails`)).map(item => [`${String(item.project_id)}\0${String(item.level)}\0${String(item.scope)}`, JSON.parse(String(item.settings)) as Guardrails]));
+  const settings = new Map((await database.execute(`SELECT level, scope, settings FROM guardrails`)).map(item => [`${String(item.level)}\0${String(item.scope)}`, JSON.parse(String(item.settings)) as Guardrails]));
   return row => {
-    const input = { environment: String(row.environment), agent: (row.agent as string | null) ?? null, taskId: String(row.id) };
+    const input = { environment: String(row.environment), taskId: String(row.id) };
     const levels: Partial<Record<Level, Guardrails>> = {};
-    for (const level of LEVELS) if (level !== "agent" || input.agent) levels[level] = settings.get(`${String(row.project_id)}\0${level}\0${scopeKey(level, input)}`) ?? {};
+    for (const level of LEVELS) levels[level] = settings.get(`${level}\0${scopeKey(level, input)}`) ?? {};
     return resolveGuardrails(levels).effective.watch;
   };
 }
 
-const MAX_PROJECTS = 50;
-const projectNameProblem = (name: unknown): string | null =>
-  typeof name !== "string" || !name.trim() ? "Name the project." : name.trim().length > 64 ? "A project's name is at most 64 characters." : null;
-async function nameTaken(database: Database, name: string, except: string | null): Promise<string | null> {
-  const [row] = await database.execute(`SELECT id FROM projects WHERE lower(name) = lower(?) AND id IS NOT ?`, name, except);
-  return row ? `This account already has a project named ${name}.` : null;
-}
-
-/** The account's projects, default first, then by creation, with what each holds. */
-async function projectViews(database: Database, id?: string): Promise<Project[]> {
-  const rows = await database.execute(`SELECT p.id, p.name, p.created_at,
-      (SELECT count(*) FROM tasks t WHERE t.project_id = p.id) AS tasks,
-      (SELECT count(*) FROM endpoints e WHERE e.project_id = p.id) AS endpoints,
-      (SELECT json_group_array(full_name) FROM (SELECT full_name FROM repos r WHERE r.project_id = p.id ORDER BY added_at)) AS repos
-    FROM projects p ${id ? "WHERE p.id = ?" : ""} ORDER BY p.id = '${DEFAULT_PROJECT}' DESC, p.created_at`, ...(id ? [id] : []));
-  return rows.map(row => ({ id: String(row.id), name: String(row.name), createdAt: iso(row.created_at)!, tasks: Number(row.tasks), endpoints: Number(row.endpoints), repos: JSON.parse(String(row.repos)) as string[] }));
-}
-
-async function endpointViews(database: Database, project: string): Promise<EndpointView[]> {
-  const rows = await database.execute(`SELECT id, kind, base_url, allowed_models, key_last4, verified_at FROM endpoints WHERE project_id = ? ORDER BY created_at`, project);
+async function endpointViews(database: Database): Promise<EndpointView[]> {
+  const rows = await database.execute(`SELECT id, kind, base_url, allowed_models, key_last4, verified_at FROM endpoints ORDER BY created_at`);
   return rows.map(row => ({ id: String(row.id), kind: row.kind as EndpointKind, baseUrl: String(row.base_url), allowedModels: JSON.parse(String(row.allowed_models)) as string[] | "all", keyLast4: String(row.key_last4), verifiedAt: iso(row.verified_at), builtIn: false }));
 }
 
-/** Why the account cannot start another review this hour, or null. */
-async function reviewsRefusal(database: Database): Promise<string | null> {
-  const { reviewsPerHour } = services().config.limits;
-  const [row] = await database.execute(`SELECT count(*) AS n FROM repo_reviews WHERE requested_at > ?`, Date.now() - 3_600_000);
-  return Number(row?.n) >= reviewsPerHour ? `This account started ${reviewsPerHour} repository reviews in the last hour, its limit. Try again later.` : null;
-}
-
-/** A review queued or running for longer than this stopped with its node, such as in a deploy, and can start again. */
-const reviewStaleMs = () => services().config.github.cloneTimeoutMs + (services().config.limits.reviewMinutes + 5) * 60_000;
-
-/** Ledger keys, and job IDs, of repository reviews: `review/<repo id>/<requested at>`. */
-const REVIEW_LEDGER = "review/";
-
-/**
- * Evaluations one repository review counts against the plan. None for now: whether a review is one is
- * undecided, and this is the only place to change it. Its spend always goes into the ledger.
- */
-const EVALUATIONS_PER_REVIEW = 0;
-
-/** Reserves a review's budget as OpenMerit-paid spend, or says which monthly cap refuses it. */
-async function reserveReview(database: Transactional, key: string, model: string, usd: number): Promise<string | null> {
-  return database.transaction(async tx => {
-    const cap = services().config.limits.monthlyCapUsd;
-    const [row] = await tx.execute(`SELECT COALESCE(sum(${COUNTED}), 0) AS usd FROM ledger WHERE funding = 'openmerit' AND created_at >= ?`, await periodStart(tx));
-    const used = Number(row?.usd ?? 0);
-    if (used + usd > cap + 1e-9) return `The review needs up to $${usd.toFixed(2)}, and this account has used or reserved $${used.toFixed(4)} of its $${cap.toFixed(2)} monthly OpenMerit-paid cap. Try again next period.`;
-    await tx.execute(`INSERT INTO ledger (key, job_id, funding, model, status, reserved_usd, created_at) VALUES (?, ?, 'openmerit', ?, 'reserved', ?, ?)`, key, key, model, usd, Date.now());
-    return null;
-  }, { name: "review_reserve" });
-}
-
-/**
- * Queues a review and runs it after the action returns: the clone and scan take longer than an
- * action may. The request time tells this review's result from a later one's: a review whose
- * repository was added again or removed meanwhile saves nothing.
- */
-async function startReview(c: { db: Transactional; key: readonly string[]; keepAwake: <T>(promise: Promise<T>) => Promise<T> }, id: string, catalogue: () => Promise<Catalogue>): Promise<void> {
-  const requestedAt = Date.now();
-  await c.db.execute(`UPDATE repos SET review_status = 'queued', review_requested_at = ? WHERE id = ?`, requestedAt, id);
-  await c.db.execute(`DELETE FROM repo_reviews WHERE requested_at < ?`, requestedAt - 3_600_000);
-  await c.db.execute(`INSERT INTO repo_reviews (repo_id, requested_at) VALUES (?, ?)`, id, requestedAt);
-  const current = `id = ? AND review_requested_at = ?`;
-  const run = async () => {
-    const [row] = await c.db.execute(`SELECT full_name, default_branch, sealed_token, github_user FROM repos WHERE ${current}`, id, requestedAt);
-    if (!row) return;
-    await c.db.execute(`UPDATE repos SET review_status = 'reviewing' WHERE ${current}`, id, requestedAt);
-    const { config } = services();
-    const { limits, models, openrouter } = config;
-    // The review's model calls are OpenMerit-paid spend: its budget is reserved against the monthly cap before
-    // the clone, and settled at what the calls cost. It starts no job, so it is not one of the plan's evaluations.
-    const key = `${REVIEW_LEDGER}${id}/${requestedAt}`;
-    const reviewer = openrouter.apiKey ? { model: models.reviewer, apiKey: openrouter.apiKey, baseUrl: openrouter.baseUrl, budgetUsd: limits.reviewBudgetUsd, timeoutMs: limits.reviewMinutes * 60_000 } : null;
-    let reserved = false;
-    try {
-      let token: string | null = null;
-      if (row.sealed_token) {
-        try { token = decryptKey(config.keyEncryptionKey!, c.key[0]!, String(row.sealed_token)); } catch { throw new Error("OpenMerit can no longer read this repository's token. Add the repository again with its token."); }
-      } else if (row.github_user) {
-        // The adding member's GitHub token, fresh from Clerk: it lasts 8 hours and Clerk renews it.
-        token = await services().githubToken(String(row.github_user)).catch(() => null);
-        if (!token) throw new Error("The member who added this repository through GitHub sign-in no longer has a GitHub account on OpenMerit. Add it again from Coding agents with your GitHub sign-in, or with a fine-grained token.");
-      }
-      if (reviewer) {
-        const refused = await reserveReview(c.db, key, reviewer.model, reviewer.budgetUsd);
-        if (refused) throw new Error(refused);
-        reserved = true;
-      }
-      // The evals it found are drafts, not part of the saved review, which keeps the model calls and task specs.
-      const { evals, ...review } = await reviewRepository({ fullName: String(row.full_name), branch: String(row.default_branch), token, config: config.github, catalogue: await catalogue(), reviewer });
-      if (reserved) await c.db.execute(`UPDATE ledger SET status = 'settled', actual_usd = ? WHERE key = ? AND status = 'reserved'`, review.costUsd, key);
-      const saved = await c.db.execute(`UPDATE repos SET review_status = 'done', review_finished_at = ?, review_error = NULL, review = ? WHERE ${current} RETURNING project_id`, Date.now(), JSON.stringify(review), id, requestedAt);
-      // Each task spec the review wrote, and each eval Scout wrote in the repository, becomes a draft for a person to approve; a spec's
-      // examples are its first cases. Scout's evals come last, so for the same task the one with written cases is offered.
-      const drafts = [...review.tasks.map(bundle => ({ bundle, cases: (bundle.examples ?? []).map((example, index): Case => ({ id: `example-${index + 1}`, input: example.input, expected: example.expected, origin: "example", ...(example.toolResults ? { toolResults: example.toolResults } : {}) })) })),
-        ...evals.map(item => ({ bundle: item.bundle, cases: item.cases }))];
-      if (saved[0] && drafts.length) await addDrafts(c.db, { projectId: String(saved[0].project_id), repoId: id, environment: String(row.full_name), drafts });
-    } catch (error) {
-      // Only the clone or the scan throws, before any model call: nothing was spent.
-      if (reserved) await c.db.execute(`UPDATE ledger SET status = 'released' WHERE key = ? AND status = 'reserved'`, key);
-      await c.db.execute(`UPDATE repos SET review_status = 'failed', review_finished_at = ?, review_error = ? WHERE ${current}`, Date.now(), error instanceof Error ? error.message : "The review failed.", id, requestedAt);
-    }
-  };
-  void c.keepAwake(run()).catch(() => undefined);
-}
-
-async function repoViews(database: Database, input: { id?: string; projectId?: string } = {}): Promise<RepoView[]> {
-  const rows = await database.execute(`SELECT * FROM repos WHERE (? IS NULL OR id = ?) AND (? IS NULL OR project_id = ?) ORDER BY added_at`, input.id ?? null, input.id ?? null, input.projectId ?? null, input.projectId ?? null);
-  const stale = Date.now() - reviewStaleMs();
-  return rows.map(row => {
-    const active = row.review_status === "queued" || row.review_status === "reviewing";
-    const stopped = active && Number(row.review_requested_at) < stale;
-    return {
-      id: String(row.id), projectId: String(row.project_id), fullName: String(row.full_name), url: `https://github.com/${String(row.full_name)}`, private: row.private === 1, defaultBranch: String(row.default_branch),
-      tokenLast4: (row.token_last4 as string | null) ?? null, addedAt: iso(row.added_at)!, checkedAt: iso(row.checked_at)!,
-      access: row.sealed_token ? "token" : row.github_user ? "github" : "public", githubUser: (row.github_user as string | null) ?? null,
-      review: {
-        status: stopped ? "failed" : row.review_status as RepoView["review"]["status"], requestedAt: iso(row.review_requested_at)!, finishedAt: iso(row.review_finished_at),
-        error: stopped ? "The review stopped before it finished. Review the repository again." : (row.review_error as string | null) ?? null,
-        result: typeof row.review === "string" ? JSON.parse(row.review) as RepoReview : null,
-      },
-    };
-  });
-}
-
-async function jobEndpoints(database: Database, accountId: string, projectId: string, withKeys: boolean): Promise<(EndpointConfig & EndpointInfo)[]> {
+async function jobEndpoints(database: Database, accountId: string, withKeys: boolean): Promise<(EndpointConfig & EndpointInfo)[]> {
   const { openrouter, keyEncryptionKey } = services().config;
   const out: (EndpointConfig & EndpointInfo)[] = [];
   if (openrouter.apiKey) out.push({ id: OPENROUTER, kind: "openrouter", baseUrl: openrouter.baseUrl, allowedModels: "all", funding: "openmerit", apiKey: withKeys ? openrouter.apiKey : "" });
-  const rows = await database.execute(`SELECT id, kind, base_url, allowed_models, sealed_key FROM endpoints WHERE project_id = ? ORDER BY created_at`, projectId);
+  const rows = await database.execute(`SELECT id, kind, base_url, allowed_models, sealed_key FROM endpoints ORDER BY created_at`);
   for (const row of rows) {
     // An endpoint whose key no longer decrypts, such as after a key rotation, is left out rather than failing the job.
     let apiKey = "";
@@ -1097,41 +754,17 @@ async function jobEndpoints(database: Database, accountId: string, projectId: st
   return out;
 }
 
-function draftRow(row: Row): EvalDraft {
-  return {
-    id: String(row.id), projectId: String(row.project_id), repoId: (row.repo_id as string | null) ?? null, environment: String(row.environment), name: String(row.name),
-    bundle: JSON.parse(String(row.bundle)) as TaskBundle, cases: JSON.parse(String(row.cases)) as Case[], status: row.status as EvalDraft["status"], createdAt: iso(row.created_at)!, taskId: (row.task_id as string | null) ?? null,
-  };
-}
-
-async function addDrafts(database: Database, input: { projectId: string; repoId: string | null; environment: string; drafts: { bundle: TaskBundle; cases: Case[] }[] }): Promise<number> {
-  const now = Date.now();
-  let added = 0;
-  for (const draft of input.drafts) {
-    const [decided] = await database.execute(`SELECT 1 FROM eval_drafts WHERE project_id = ? AND environment = ? AND lower(name) = lower(?) AND status <> 'pending'
-      UNION SELECT 1 FROM tasks WHERE project_id = ? AND environment = ? AND lower(name) = lower(?)`, input.projectId, input.environment, draft.bundle.task, input.projectId, input.environment, draft.bundle.task);
-    if (decided) continue;
-    added++;
-    await database.execute(`DELETE FROM eval_drafts WHERE project_id = ? AND environment = ? AND lower(name) = lower(?) AND status = 'pending'`, input.projectId, input.environment, draft.bundle.task);
-    await database.execute(`INSERT INTO eval_drafts (id, project_id, repo_id, environment, name, bundle, cases, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-      `draft_${randomBytes(6).toString("hex")}`, input.projectId, input.repoId, input.environment, draft.bundle.task, JSON.stringify(draft.bundle), JSON.stringify(draft.cases), now);
-  }
-  return added;
-}
-
 async function evalView(database: Database, taskId: string): Promise<EvalView | null> {
-  const [task] = await database.execute(`SELECT project_id FROM tasks WHERE id = ?`, taskId);
+  const [task] = await database.execute(`SELECT id FROM tasks WHERE id = ?`, taskId);
   if (!task) return null;
   const [row] = await database.execute(`SELECT e.*, (SELECT count(*) FROM jobs j WHERE j.task_id = e.task_id AND j.eval_version = e.version AND j.deleted_at IS NULL) AS runs FROM evals e WHERE task_id = ?`, taskId);
-  const [sync] = await database.execute(`SELECT * FROM eval_sync WHERE task_id = ?`, taskId);
   const draftBundle = row?.draft_bundle ? JSON.parse(String(row.draft_bundle)) as TaskBundle : null;
   return {
-    taskId, projectId: String(task.project_id),
+    taskId,
     accepted: row ? { version: Number(row.version), spec: JSON.parse(String(row.spec)) as EvalSpec, cases: JSON.parse(String(row.cases)) as Case[], source: row.source as EvalSource, by: (row.accepted_by as string | null) ?? null, at: iso(row.accepted_at)!, runs: Number(row.runs), bar: row.bar === "criteria" ? "criteria" : "current" } : null,
     draft: row?.draft_reason ? {
       reason: row.draft_reason as "task_changed" | "revise", changed: JSON.parse(String(row.draft_changed ?? "[]")) as TaskPart[], spec: JSON.parse(String(row.draft_spec)) as EvalSpec, cases: JSON.parse(String(row.draft_cases)) as Case[],
       output: draftBundle?.output ?? null, by: (row.draft_by as string | null) ?? null, at: iso(row.draft_at)!,
     } : null,
-    repo: sync ? { version: Number(sync.version), by: String(sync.synced_by), client: (sync.client as string | null) ?? null, at: iso(sync.synced_at)! } : null,
   };
 }

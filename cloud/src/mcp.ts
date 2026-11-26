@@ -10,7 +10,7 @@ import { explain, nearMissLine, paybackLine, reasonFor, type Fix, type JobResult
 import type { AppClient } from "./registry.ts";
 import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 import { bundleProblem, DEFAULT_ENVIRONMENT, redactBundle, rerunJob, runTask, startJob, taskIdFor } from "./start.ts";
-import { evalDir, type Decision } from "./actors/account.ts";
+import type { Decision } from "./actors/account.ts";
 import { evalCommandSpec, heldReply, HOSTED_EVAL_COMMAND } from "./api.ts";
 import { estimateLine } from "../../openmerit-core/src/job/workflow.ts";
 
@@ -54,7 +54,7 @@ export const TOOLS = [
     description: "Starts measuring cheaper models for one model call in the user's code. Send an idempotency_key, and the same one on a retry, so a retried call does not start a second paid job. Send a task bundle: the task, the current model, the prompt, tools, output shape, examples and where the code names the model. Or, to run a past job's task again on the bundle OpenMerit saved, as a result's Fix line says, send its job_id instead, with budget_usd to raise the task's budget per job first. Returns a provisional pick from the catalogue at once, and a job_id; call openmerit_result with it later for the measured pick. A task whose prompt, tools or output changed since its eval was accepted is refused until the user reviews the eval in the app; tell them. Measuring makes paid model calls within the account's plan and budget: ask the user before a rerun. A higher budget needs the user's confirmation on a page this tool links to.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       bundle: BUNDLE_SCHEMA, environment: { type: "string", description: "The repository or workspace, such as owner/repo. Default: default" },
-      project: { type: "string", description: "The OpenMerit project, by name, when the user names one. Default: the project whose GitHub repository the environment names, else the default project" }, agent: { type: "string", description: "The agent this task belongs to, when the code groups calls into agents" },
+      agent: { type: "string", description: "The agent this task belongs to, when the code groups calls into agents" },
       job_id: { type: "string", description: "Instead of a bundle: a past job whose task runs again on its saved bundle, environment and agent" },
       task_id: { type: "string", description: "Instead of a bundle: a task to run on its saved bundle and eval, such as one approved in the app that has not run yet" },
       budget_usd: { type: "number", description: "With job_id: the task's new budget per job in US dollars, set before the run starts" },
@@ -84,7 +84,7 @@ export const TOOLS = [
     name: "openmerit_eval_command", title: "OpenMerit: measure with the repository's eval",
     description: "On a self-hosted OpenMerit server, makes a task's own eval command, from the user's repository, what measures each model, instead of cases OpenMerit writes. The command follows the eval contract: it reads the model from $OPENMERIT_MODEL, sends its model calls to $OPENAI_BASE_URL with $OPENAI_API_KEY, runs only the $OPENMERIT_ITEMS items when set, and writes {\"items\":[{\"id\",\"pass\"}]} to $OPENMERIT_RESULT. Name the task by task_id, or, for a task that has not run, send its bundle and environment as openmerit_recommend takes them. It runs a command on the user's machine, so the user confirms it on a page this tool links to; then call openmerit_recommend with the task_id. clear true stops using it. The hosted server refuses it for now.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
-      task_id: string, bundle: BUNDLE_SCHEMA, environment: { type: "string", description: "With bundle: the repository or workspace, as openmerit_recommend takes it" }, agent: string, project: string,
+      task_id: string, bundle: BUNDLE_SCHEMA, environment: { type: "string", description: "With bundle: the repository or workspace, as openmerit_recommend takes it" }, agent: string,
       command: { type: "string", description: "The shell command that runs the eval, such as 'node evals/classify.mjs'" },
       root: { type: "string", description: "The repository's absolute path on the machine the server runs on" },
       cwd: { type: "string", description: "The directory to run it in, relative to root. Default: root" },
@@ -103,12 +103,9 @@ export const TOOLS = [
   },
   {
     name: "openmerit_eval", title: "OpenMerit: a task's eval",
-    description: "A task's eval lives at app.openmerit.ai, where the user reviews and accepts it; it stays as accepted until the task changes or the user revises it. the repository keeps a copy in .openmerit/evals/<task>/ that Scout and `openmerit eval` run. When openmerit_tasks or a result says the copy is behind, call this with the task_id for the files, ask the user, write them as given (never edit them: changes are made in the app), then call it again with action synced and the version. For a task deleted in the app, ask the user whether to remove its copy, remove it, and call with action removed.",
-    inputSchema: { type: "object", required: ["task_id"], additionalProperties: false, properties: {
-      task_id: string, action: { enum: ["get", "synced", "removed"], description: "get (default): the files of the accepted version. synced: you wrote version to the repository. removed: you removed a deleted task's copy, or the user chose to keep it" },
-      version: { type: "integer", description: "With synced: the version you wrote" },
-    } },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description: "A task's accepted eval: its version, the spec the judge checks each case on, and its cases. OpenMerit keeps it; it stays as accepted until the task changes or the user revises it in the app. Use it to show the user what their task is measured on.",
+    inputSchema: { type: "object", required: ["task_id"], additionalProperties: false, properties: { task_id: string } },
+    annotations: { readOnlyHint: true, openWorldHint: false },
   },
   {
     name: "openmerit_retire", title: "OpenMerit: retire a task",
@@ -229,13 +226,13 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
     return client.job.get([row.id]).status();
   };
   /** Holds a critical request for the user to confirm; it runs, as the /api request it names, once they do. */
-  const hold = async (input: { projectId: string; method: string; path: string; body: Json; checks: "person" | "reverify"; title: string; items: string[] }): Promise<ToolResult> => {
+  const hold = async (input: { method: string; path: string; body: Json; checks: "person" | "reverify"; title: string; items: string[] }): Promise<ToolResult> => {
     const view = await account.requestConfirmation({ ...input, body: JSON.stringify(input.body), requestedBy: identity.userId, requestedVia: askedBy });
     const reply = heldReply(deps.config, view);
     return { text: `${reply.text} Then call openmerit_confirmation with confirmation_id "${view.id}" for the outcome.`, data: { status: reply.status, confirmation: reply.confirmation } };
   };
   if (name === "openmerit_recommend") {
-    const unknown = Object.keys(args).filter(key => !["bundle", "environment", "agent", "project", "job_id", "task_id", "budget_usd", "idempotency_key"].includes(key));
+    const unknown = Object.keys(args).filter(key => !["bundle", "environment", "agent", "job_id", "task_id", "budget_usd", "idempotency_key"].includes(key));
     if (unknown.length) return { text: `Unknown argument ${unknown.join(", ")}. No tool takes keys: the user adds endpoint keys at ${deps.config.appUrl}.`, data: {}, isError: true };
     if (args.idempotency_key !== undefined && (typeof args.idempotency_key !== "string" || !args.idempotency_key.trim() || args.idempotency_key.length > 200)) return { text: "idempotency_key must be a non-empty string of at most 200 characters.", data: {}, isError: true };
     const key = typeof args.idempotency_key === "string" ? args.idempotency_key.trim() : null;
@@ -243,13 +240,13 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
     if (args.budget_usd !== undefined && (args.job_id !== undefined || args.task_id !== undefined)) {
       if (typeof args.budget_usd !== "number" || !Number.isFinite(args.budget_usd) || args.budget_usd <= 0) return { text: "budget_usd must be a positive number of US dollars.", data: {}, isError: true };
       const viaTask = args.task_id !== undefined;
-      if (viaTask && (args.bundle !== undefined || args.job_id !== undefined || args.environment !== undefined || args.agent !== undefined || args.project !== undefined)) return { text: "Send task_id on its own: the task keeps its project, environment, agent and bundle.", data: {}, isError: true };
-      if (!viaTask && (args.bundle !== undefined || args.environment !== undefined || args.agent !== undefined || args.project !== undefined)) return { text: "Send either a bundle, or the job_id of a past job to run its task again, not both: a rerun keeps the job's project, environment and agent.", data: {}, isError: true };
+      if (viaTask && (args.bundle !== undefined || args.job_id !== undefined || args.environment !== undefined || args.agent !== undefined)) return { text: "Send task_id on its own: the task keeps its environment, agent and bundle.", data: {}, isError: true };
+      if (!viaTask && (args.bundle !== undefined || args.environment !== undefined || args.agent !== undefined)) return { text: "Send either a bundle, or the job_id of a past job to run its task again, not both: a rerun keeps the job's environment and agent.", data: {}, isError: true };
       const job = viaTask ? null : await account.job(String(args.job_id));
       const task = await account.task(viaTask ? String(args.task_id) : job?.taskId ?? "");
       if (!task) return { text: viaTask ? `No task ${String(args.task_id)} in this account.` : `No run ${String(args.job_id)} in this account.`, data: {}, isError: true };
       return hold({
-        projectId: task.projectId, method: "POST", path: viaTask ? `/api/tasks/${task.id}/run` : `/api/runs/${job!.id}/rerun`, body: { budgetUsd: args.budget_usd }, checks: "reverify",
+        method: "POST", path: viaTask ? `/api/tasks/${task.id}/run` : `/api/runs/${job!.id}/rerun`, body: { budgetUsd: args.budget_usd }, checks: "reverify",
         title: `Run ${task.name} ${viaTask ? "" : "again "}with a budget of $${args.budget_usd} per job`, items: [`Raises the task's budget per job to $${args.budget_usd}, then starts a paid run`],
       });
     }
@@ -264,10 +261,10 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
     let started;
     try {
     if (args.task_id !== undefined) {
-      if (args.bundle !== undefined || args.job_id !== undefined || args.environment !== undefined || args.agent !== undefined || args.project !== undefined) return { text: "Send task_id on its own: the task keeps its project, environment, agent and bundle.", data: {}, isError: true };
+      if (args.bundle !== undefined || args.job_id !== undefined || args.environment !== undefined || args.agent !== undefined) return { text: "Send task_id on its own: the task keeps its environment, agent and bundle.", data: {}, isError: true };
       started = await runTask(client, { accountId: identity.accountId, userId: identity.userId, taskId: String(args.task_id), budgetUsd: typeof args.budget_usd === "number" ? args.budget_usd : null, trigger: "mcp", askedBy });
     } else if (args.job_id !== undefined) {
-      if (args.bundle !== undefined || args.environment !== undefined || args.agent !== undefined || args.project !== undefined) return { text: "Send either a bundle, or the job_id of a past job to run its task again, not both: a rerun keeps the job's project, environment and agent.", data: {}, isError: true };
+      if (args.bundle !== undefined || args.environment !== undefined || args.agent !== undefined) return { text: "Send either a bundle, or the job_id of a past job to run its task again, not both: a rerun keeps the job's environment and agent.", data: {}, isError: true };
       if (args.budget_usd !== undefined && typeof args.budget_usd !== "number") return { text: "budget_usd must be a number of US dollars.", data: {}, isError: true };
       started = await rerunJob(client, { accountId: identity.accountId, userId: identity.userId, jobId: String(args.job_id), budgetUsd: typeof args.budget_usd === "number" ? args.budget_usd : null, trigger: "mcp", askedBy });
     } else {
@@ -276,15 +273,7 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
       if (problem) return { text: `The task bundle is not usable: ${problem}.`, data: {}, isError: true };
       const environment = typeof args.environment === "string" && args.environment.trim() ? args.environment.trim().replaceAll(":", "-").slice(0, 200) : DEFAULT_ENVIRONMENT;
       const agent = typeof args.agent === "string" && args.agent.trim() ? args.agent.trim().slice(0, 200) : null;
-      let projectId = await account.projectForEnvironment(environment);
-      if (typeof args.project === "string" && args.project.trim()) {
-        const wanted = args.project.trim().toLowerCase();
-        const projects = await account.projects();
-        const found = projects.find(item => item.id === args.project || item.name.toLowerCase() === wanted);
-        if (!found) return { text: `No project ${args.project} in this account. Its projects: ${projects.map(item => item.name).join(", ")}.`, data: {}, isError: true };
-        projectId = found.id;
-      }
-      started = await startJob(client, { accountId: identity.accountId, projectId, environment, agent, bundle: args.bundle as TaskBundle, kind: "run", trigger: "mcp", userId: identity.userId, askedBy });
+      started = await startJob(client, { accountId: identity.accountId, environment, agent, bundle: args.bundle as TaskBundle, kind: "run", trigger: "mcp", userId: identity.userId, askedBy });
     }
     } finally {
       if (key) await account.settleRecommendKey({ key, jobId: started?.ok ? started.jobId : null });
@@ -300,9 +289,8 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
     const view = await jobView(args.job_id);
     if (!("jobId" in view)) return view;
     const decision = await account.decision(view.jobId);
-    const copy = view.result ? (await account.evalHeads())[view.taskId] : undefined;
-    const behind = copy && copy.repo !== copy.version ? `\n${behindLine(view.task, view.taskId, copy)}` : "";
-    return { text: describeJob(view, decision) + behind, data: { ...jobData(view, decision), eval: copy ?? null }, ...(view.status === "failed" ? { isError: true } : {}) };
+    const head = view.result ? (await account.evalHeads())[view.taskId] : undefined;
+    return { text: describeJob(view, decision), data: { ...jobData(view, decision), eval: head ?? null }, ...(view.status === "failed" ? { isError: true } : {}) };
   }
   if (name === "openmerit_answer") {
     const view = await jobView(args.job_id);
@@ -311,13 +299,13 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
     if (!answers || typeof answers !== "object" || Array.isArray(answers)) return { text: "answers must be an object keyed by question id.", data: {}, isError: true };
     // The user's decision on a finished result's change: recorded once, and an approval moves the task onto the pick.
     const approval = view.result?.approval;
-    if (approval && Object.hasOwn(answers, approval.id)) return decide(view, (answers as Answers)[approval.id], { decision: await account.decision(view.jobId), projectId: (await account.job(view.jobId))!.projectId }, hold);
+    if (approval && Object.hasOwn(answers, approval.id)) return decide(view, (answers as Answers)[approval.id], await account.decision(view.jobId), hold);
     if (!view.questions.length) return { text: `Job ${view.jobId} has no open questions.\n${describeJob(view, await account.decision(view.jobId))}`, data: jobData(view) };
     // Grades are the user's judgment of the answers: they confirm the grades you relay.
     const grades = view.questions.filter(question => question.id.startsWith("grade_") && Object.hasOwn(answers, question.id));
     if (grades.length) {
       const row = await account.job(view.jobId);
-      return hold({ projectId: row!.projectId, method: "POST", path: `/api/runs/${view.jobId}/answers`, body: { answers }, checks: "person", title: `Grades for ${view.task}`,
+      return hold({ method: "POST", path: `/api/runs/${view.jobId}/answers`, body: { answers }, checks: "person", title: `Grades for ${view.task}`,
         items: grades.map(question => `${question.prompt.replace(/: does it look right\?$/, "")}: ${String((answers as Answers)[question.id])}`) });
     }
     const handle = client.job.get([view.jobId]);
@@ -341,20 +329,19 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
       const bundle = redactBundle(args.bundle as TaskBundle);
       const environment = typeof args.environment === "string" && args.environment.trim() ? args.environment.trim().replaceAll(":", "-").slice(0, 200) : DEFAULT_ENVIRONMENT;
       const agent = typeof args.agent === "string" && args.agent.trim() ? args.agent.trim().slice(0, 200) : null;
-      const projectId = await account.projectForEnvironment(environment);
-      const taskId = taskIdFor(projectId, environment, bundle.task);
-      await account.createTask({ taskId, projectId, environment, agent, name: bundle.task, currentModel: bundle.current.model });
-      const handle = client.task.getOrCreate([identity.accountId, taskId], { createWithInput: { accountId: identity.accountId, taskId, projectId, environment, name: bundle.task } });
+      const taskId = taskIdFor(environment, bundle.task);
+      await account.createTask({ taskId, environment, agent, name: bundle.task, currentModel: bundle.current.model });
+      const handle = client.task.getOrCreate([identity.accountId, taskId], { createWithInput: { accountId: identity.accountId, taskId, environment, name: bundle.task } });
       if (!(await handle.info()).bundle) await handle.prepare(bundle);
       task = await account.task(taskId);
     }
     const row = task!;
-    if (args.clear === true) return hold({ projectId: row.projectId, method: "DELETE", path: `/api/tasks/${row.id}/eval-command`, body: {}, checks: "person", title: `Stop measuring ${row.name} with its eval command`, items: ["Its next run measures on OpenMerit's own cases"] });
+    if (args.clear === true) return hold({ method: "DELETE", path: `/api/tasks/${row.id}/eval-command`, body: {}, checks: "person", title: `Stop measuring ${row.name} with its eval command`, items: ["Its next run measures on OpenMerit's own cases"] });
     const body: Json = { command: args.command, root: args.root, cwd: args.cwd, env: args.env, threshold: args.threshold ?? null, timeoutSeconds: args.timeout_seconds ?? null };
     const checked = evalCommandSpec(body);
     if (!checked.ok) return { text: checked.error, data: {}, isError: true };
     const { spec } = checked;
-    const held = await hold({ projectId: row.projectId, method: "PUT", path: `/api/tasks/${row.id}/eval-command`, body, checks: "person", title: `Measure ${row.name} by running a command on this machine`,
+    const held = await hold({ method: "PUT", path: `/api/tasks/${row.id}/eval-command`, body, checks: "person", title: `Measure ${row.name} by running a command on this machine`,
       items: [`Command: ${spec.command}`, `In: ${spec.cwd ? `${spec.root}/${spec.cwd}` : spec.root}`, ...(spec.env ? [`Environment: ${Object.entries(spec.env).map(([key, value]) => `${key}=${value}`).join(", ")}`] : []), `It runs once per model measured, with its model calls through OpenMerit's proxy${spec.threshold != null ? `; models need a pass rate of at least ${spec.threshold}` : ""}`] });
     return { ...held, text: `${held.text} Once it is confirmed, call openmerit_recommend with task_id "${row.id}" to measure.`, data: { ...held.data, task_id: row.id } };
   }
@@ -373,54 +360,30 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
     return { text, data: { confirmation: view }, ...(view.status === "failed" ? { isError: true } : {}) };
   }
   if (name === "openmerit_tasks") {
-    const [tasks, ready, decisions, projects, heads] = await Promise.all([account.tasks(), account.readySince(identity.userId), account.taskDecisions(), account.projects(), account.evalHeads()]);
-    const stale = await account.staleEvalCopies();
-    // Tasks outside the default project say which project they are in.
-    const projectName = new Map(projects.map(item => [item.id, item.name]));
-    const inProject = (item: (typeof tasks)[number]) => (projects.length > 1 ? `project ${projectName.get(item.projectId) ?? item.projectId}, ` : "");
+    const [tasks, ready, decisions, heads] = await Promise.all([account.tasks(), account.readySince(identity.userId), account.taskDecisions(), account.evalHeads()]);
     const decided = (item: (typeof tasks)[number]) => {
       const decision = decisions[item.id];
       if (decision && (decision.jobId === item.lastJobId || decision.decision === "approved")) return `, ${decision.decision === "approved" ? "switched" : "declined"}: ${decisionLine(decision).replace(/^Decision: /, "").replace(/\.$/, "")}`;
       return item.pick ? ", waiting for a decision" : "";
     };
     const text = tasks.length
-      ? [`${tasks.length} task${tasks.length === 1 ? "" : "s"}:`, ...tasks.map(item => `- ${item.name} [${item.id}] (${inProject(item)}${item.environment}${item.agent ? `, agent ${item.agent}` : ""}): ${item.currentModel}${item.pick ? ` → ${item.pick}` : ""}, ${item.lastRunAt ? `${item.status}, ${item.state}` : "not run yet; ask the user, then call openmerit_recommend with its task_id"}${item.idleSince ? ` since ${item.idleSince.slice(0, 10)}` : ""}${decided(item)}${heads[item.id] ? `, eval v${heads[item.id]!.version}${heads[item.id]!.review ? " (a draft waits for review in the app)" : ""}` : ""}`),
-        ...tasks.flatMap(item => heads[item.id] && heads[item.id]!.repo !== heads[item.id]!.version ? [behindLine(item.name, item.id, heads[item.id]!)] : []),
-        ...stale.map(item => `${item.name} was deleted at ${deps.config.appUrl}; its eval copy at ${item.dir} in ${item.environment} stays. Ask the user whether to remove it, then call openmerit_eval with task_id "${item.taskId}" and action removed.`),
+      ? [`${tasks.length} task${tasks.length === 1 ? "" : "s"}:`, ...tasks.map(item => `- ${item.name} [${item.id}] (${item.environment}${item.agent ? `, agent ${item.agent}` : ""}): ${item.currentModel}${item.pick ? ` → ${item.pick}` : ""}, ${item.lastRunAt ? `${item.status}, ${item.state}` : "not run yet; ask the user, then call openmerit_recommend with its task_id"}${item.idleSince ? ` since ${item.idleSince.slice(0, 10)}` : ""}${decided(item)}${heads[item.id] ? `, eval v${heads[item.id]!.version}${heads[item.id]!.review ? " (a draft waits for review in the app)" : ""}` : ""}`),
         ready.length ? `Ready since the last session: ${ready.map(item => `${item.id} (${item.status})`).join(", ")}. Call openmerit_result for each.` : "Nothing new since the last session."].join("\n")
-      : ["No tasks yet. Call openmerit_recommend with a task bundle to start one.", ...stale.map(item => `${item.name} was deleted at ${deps.config.appUrl}; its eval copy at ${item.dir} in ${item.environment} stays. Ask the user whether to remove it, then call openmerit_eval with task_id "${item.taskId}" and action removed.`)].join("\n");
-    return { text, data: { tasks: tasks.map(item => ({ ...item, decision: decisions[item.id] ?? null, eval: heads[item.id] ?? null })), readySinceLastSession: ready, deletedEvalCopies: stale } };
+      : "No tasks yet. Call openmerit_recommend with a task bundle to start one.";
+    return { text, data: { tasks: tasks.map(item => ({ ...item, decision: decisions[item.id] ?? null, eval: heads[item.id] ?? null })), readySinceLastSession: ready } };
   }
   if (name === "openmerit_eval") {
     const taskId = typeof args.task_id === "string" ? args.task_id : "";
-    const action = args.action ?? "get";
-    if (action === "removed") {
-      return (await account.forgetEvalCopy(taskId)) ? { text: "Recorded: OpenMerit no longer asks about that copy.", data: { task_id: taskId } } : { text: `No deleted task ${taskId} with a repository copy.`, data: {}, isError: true };
-    }
     const row = await account.task(taskId);
     if (!row) return { text: `No task ${taskId} in this account. openmerit_tasks lists the task ids.`, data: {}, isError: true };
-    if (action === "synced") {
-      if (typeof args.version !== "number") return { text: "synced takes the version you wrote.", data: {}, isError: true };
-      const synced = await account.syncEval({ taskId, version: args.version, by: identity.userId, client: askedBy });
-      return synced.ok ? { text: `Recorded: the repository has version ${args.version} of ${row.name}'s eval.`, data: { task_id: taskId, version: args.version } } : { text: synced.error, data: {}, isError: true };
-    }
-    if (action !== "get") return { text: "action is get, synced or removed.", data: {}, isError: true };
-    const [view, info] = await Promise.all([account.eval(taskId), client.task.get([identity.accountId, taskId]).info()]);
+    const view = await account.eval(taskId);
     const latest = view?.accepted;
-    if (!latest || !info.bundle) return { text: `${row.name} has no eval yet: its first run writes one.`, data: {}, isError: true };
-    const dir = evalDir(row.name), url = `${deps.config.appUrl}/tasks/?task=${encodeURIComponent(taskId)}&tab=eval`;
-    const files = {
-      [`${dir}/bundle.json`]: `${JSON.stringify({ ...info.bundle, ...latest.spec, examples: undefined }, null, 2)}\n`,
-      [`${dir}/cases.json`]: `${JSON.stringify(latest.cases, null, 2)}\n`,
-      // Scout reads the version from eval.json, as for an Eval a person accepted in the terminal.
-      [`${dir}/eval.json`]: `${JSON.stringify({ version: latest.version, bar: latest.bar, acceptedAt: latest.at }, null, 2)}\n`,
-      [`${dir}/MANAGED.md`]: `# ${row.name}: eval version ${latest.version}\n\nManaged by app.openmerit.ai, the source of truth for this eval. Do not edit these files: revise the eval at ${url}, and once it is accepted your coding agent writes the new version here.\n\nTask: ${taskId}\n`,
-    };
+    if (!latest) return { text: `${row.name} has no eval yet: its first run writes one.`, data: {}, isError: true };
+    const url = `${deps.config.appUrl}/tasks/?task=${encodeURIComponent(taskId)}&tab=eval`;
     return {
-      text: [`${row.name}'s accepted eval, version ${latest.version} (${latest.cases.length} cases). The repository has ${view.repo ? `version ${view.repo.version}` : "no copy"}.${view.draft ? " A draft of the next version waits for review in the app; these files are the accepted one." : ""}`,
-        `Ask the user before writing these files, write them exactly as given, then call openmerit_eval with task_id "${taskId}", action synced and version ${latest.version}.`,
-        ...Object.entries(files).map(([file, content]) => `--- ${file}\n${content}`)].join("\n"),
-      data: { task_id: taskId, version: latest.version, dir, files },
+      text: [`${row.name}'s accepted eval, version ${latest.version}: ${latest.cases.length} cases, measured against ${latest.bar === "criteria" ? "the eval's checks" : "the current model's score"}.${view.draft ? ` A draft of the next version waits for review at ${url}.` : ""}`,
+        `Spec: ${JSON.stringify(latest.spec)}`, ...latest.cases.map(item => `- ${item.id}: ${JSON.stringify(item.input)} → ${JSON.stringify(item.expected)}`)].join("\n"),
+      data: { task_id: taskId, version: latest.version, bar: latest.bar, spec: latest.spec, cases: latest.cases, draft: view.draft !== null, url },
     };
   }
   if (name === "openmerit_retire") {
@@ -437,12 +400,12 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
  * approval question. The user confirms it; an approval means the agent applied the edit, so the task's
  * later runs measure the pick as its current model.
  */
-async function decide(view: JobView, value: unknown, known: { decision: Decision | null; projectId: string }, hold: (input: { projectId: string; method: string; path: string; body: Json; checks: "person" | "reverify"; title: string; items: string[] }) => Promise<ToolResult>): Promise<ToolResult> {
+async function decide(view: JobView, value: unknown, decision: Decision | null, hold: (input: { method: string; path: string; body: Json; checks: "person" | "reverify"; title: string; items: string[] }) => Promise<ToolResult>): Promise<ToolResult> {
   const result = view.result!, approval = result.approval!, pick = result.pick;
   if (typeof value !== "boolean") return { text: `${approval.id} takes true (the user approved and you applied the edit) or false (they declined).`, data: {}, isError: true };
   if (!pick) return { text: `Job ${view.jobId} proposes no change to decide on.`, data: jobData(view), isError: true };
-  if (known.decision) return { text: `The decision on job ${view.jobId} was already recorded. ${decisionLine(known.decision)}`, data: jobData(view, known.decision), isError: true };
-  return hold({ projectId: known.projectId, method: "POST", path: `/api/runs/${view.jobId}/decision`, body: { approved: value }, checks: "person",
+  if (decision) return { text: `The decision on job ${view.jobId} was already recorded. ${decisionLine(decision)}`, data: jobData(view, decision), isError: true };
+  return hold({ method: "POST", path: `/api/runs/${view.jobId}/decision`, body: { approved: value }, checks: "person",
     title: `${value ? "Approve" : "Decline"} the switch for ${view.task}`, items: [`${result.baseline?.model ?? view.task} → ${pick.model} (${pick.endpoint})`, ...result.edit.edits.map(edit => `${edit.file}:${edit.line}: ${edit.before} → ${edit.after}`)] });
 }
 
@@ -502,9 +465,4 @@ export async function handleMcp(request: Request, deps: McpDeps): Promise<Respon
   }
   if (!replies.length) return new Response(null, { status: 202 });
   return json(200, Array.isArray(body) ? replies : replies[0], session ? { "mcp-session-id": session } : {});
-}
-
-/** The line that asks the coding agent to bring a task's repository copy of its eval up to date. */
-function behindLine(task: string, taskId: string, copy: { version: number; repo: number | null }): string {
-  return `${task}'s accepted eval is version ${copy.version}; the repository has ${copy.repo === null ? "no copy" : `version ${copy.repo}`}. Ask the user whether to write it, then call openmerit_eval with task_id "${taskId}".`;
 }

@@ -1,8 +1,7 @@
 // A task's eval end to end: the first run's label check makes the accepted version 1, later runs
 // measure on the accepted eval unchanged, a person revises it into a draft that pauses runs until they
 // accept it as the next version, a task whose prompt changed reopens it the same way, the coding agent
-// writes the accepted version to the repository, and deleting the task deletes the eval and asks the
-// agent about the copy. Drafts from repository reviews are in github.test.ts.
+// reads the accepted version, and deleting the task deletes the eval.
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 import type { EvalView, JobRow } from "../src/actors/account.ts";
@@ -27,7 +26,6 @@ describe("evals", () => {
     await me.tool("openmerit_answer", { job_id: firstJob, answers: { "label_example-7": "billing", label_check: ["written-1"] } });
     const done = await untilDone(me, firstJob);
     assert.equal(done.data.status, "done", done.text);
-    assert.match(done.text, /eval classifier's accepted eval is version 1; the repository has no copy/);
 
     const [task] = (await me.api<{ id: string }[]>("/api/tasks")).body;
     const evalUrl = `/api/tasks/${task!.id}/eval`;
@@ -61,19 +59,11 @@ describe("evals", () => {
     assert.deepEqual([accepted.body.accepted!.version, accepted.body.accepted!.source, accepted.body.accepted!.by, accepted.body.accepted!.byName, accepted.body.draft], [2, "app", "user_e", "User E", null]);
     assert.equal((await me.api<{ state: string }[]>("/api/tasks")).body[0]!.state, "watching");
 
-    // The coding agent writes the accepted copy it is given, read-only, and reports the version.
-    assert.match((await me.tool("openmerit_tasks", {})).text, /eval classifier's accepted eval is version 2; the repository has no copy/);
-    const files = await me.tool("openmerit_eval", { task_id: task!.id });
-    const written = files.data.files as Record<string, string>;
-    assert.deepEqual(Object.keys(written), [".openmerit/evals/eval-classifier/bundle.json", ".openmerit/evals/eval-classifier/cases.json", ".openmerit/evals/eval-classifier/eval.json", ".openmerit/evals/eval-classifier/MANAGED.md"]);
-    assert.match(written[".openmerit/evals/eval-classifier/MANAGED.md"]!, /Do not edit these files/);
-    assert.equal((JSON.parse(written[".openmerit/evals/eval-classifier/eval.json"]!) as { version: number }).version, 2);
-    assert.deepEqual((JSON.parse(written[".openmerit/evals/eval-classifier/bundle.json"]!) as { criteria: string[] }).criteria, spec.criteria);
-    assert.equal((JSON.parse(written[".openmerit/evals/eval-classifier/cases.json"]!) as Case[]).length, edited.length);
-    assert.equal((await me.tool("openmerit_eval", { task_id: task!.id, action: "synced", version: 1 })).isError, true, "only the accepted version can be in the repository");
-    assert.equal((await me.tool("openmerit_eval", { task_id: task!.id, action: "synced", version: 2 })).isError, false);
-    assert.deepEqual((await me.api<EvalView>(evalUrl)).body.repo!.version, 2);
-    assert.doesNotMatch((await me.tool("openmerit_tasks", {})).text, /the repository has/);
+    // The coding agent reads the accepted eval as the app edited it.
+    const read = await me.tool("openmerit_eval", { task_id: task!.id });
+    assert.equal(read.isError, false, read.text);
+    assert.match(read.text, /eval classifier's accepted eval, version 2: \d+ cases/);
+    assert.deepEqual([read.data.version, (read.data.spec as { criteria: string[] }).criteria, (read.data.cases as Case[]).length], [2, spec.criteria, edited.length]);
 
     // The next run measures on version 2 as accepted: it asks nothing, writes no cases, sends the app's criteria to
     // the judge in place of the agent's, and leaves out an example the agent added without changing the eval.
@@ -113,15 +103,13 @@ describe("evals", () => {
     assert.equal((await me.api<{ evalVersion: number }>(`/api/runs/${String(third.data.job_id)}`)).body.evalVersion, 3);
     assert.equal((await me.api<{ bundle: { prompt: { system: string } } }>(`/api/tasks/${task!.id}`)).body.bundle.prompt.system, "You route support tickets for the EU team.", "the run used the changed prompt");
 
-    // Deleting the task deletes its eval; the coding agent is asked about the repository copy until it answers.
+    // Deleting the task deletes its eval.
     const deleted = await me.api(`/api/tasks/${task!.id}`, { method: "DELETE" });
     assert.equal(deleted.status, 200);
     assert.equal((await me.api(`/api/tasks/${task!.id}/eval`)).status, 404);
     const exported = JSON.stringify((await me.api<{ evals: unknown[] }>("/api/account/export", { method: "POST" })).body.evals);
     assert.equal(exported, "[]");
-    const asked = await me.tool("openmerit_tasks", {});
-    assert.match(asked.text, /eval classifier was deleted at .*; its eval copy at \.openmerit\/evals\/eval-classifier in acme\/app stays/);
-    assert.equal((await me.tool("openmerit_eval", { task_id: task!.id, action: "removed" })).isError, false);
-    assert.doesNotMatch((await me.tool("openmerit_tasks", {})).text, /eval copy/);
+    assert.equal((await me.tool("openmerit_eval", { task_id: task!.id })).isError, true);
+    assert.match((await me.tool("openmerit_tasks", {})).text, /^No tasks yet/);
   });
 });

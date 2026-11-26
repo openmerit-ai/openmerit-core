@@ -151,26 +151,24 @@ test("MemoryLedger caps and reports each funding apart", async () => {
 test("guardrails: the Sahra Health example resolves with where each value came from", () => {
   const resolved = resolveGuardrails({
     // Lower levels first, to show the order comes from the levels, not the object.
-    task: { allowedProviders: ["workers-ai"], budgetUsd: 25 },
-    agent: { minPassRate: 0.95, actionPolicy: "ask_first", agentEvalRequired: "required" },
+    task: { allowedProviders: ["workers-ai"], budgetUsd: 25, minPassRate: 0.95, actionPolicy: "ask_first", agentEvalRequired: "required" },
     environment: { region: "uae", allowedProviders: ["workers-ai", "openrouter"], budgetUsd: 10, actionPolicy: "open_pr", agentEvalRequired: "warn" },
   });
   assert.deepEqual(resolved.rejected, []);
-  assert.deepEqual(resolved.effective, { region: "uae", allowedProviders: ["workers-ai"], budgetUsd: 25, minPassRate: 0.95, actionPolicy: "ask_first", agentEvalRequired: "required" });
-  assert.deepEqual(resolved.from, { region: "environment", allowedProviders: "task", budgetUsd: "task", minPassRate: "agent", actionPolicy: "agent", agentEvalRequired: "agent" });
+  assert.deepEqual(resolved.effective, { region: "uae", allowedProviders: ["workers-ai"], budgetUsd: 25, actionPolicy: "ask_first", agentEvalRequired: "required", minPassRate: 0.95 });
+  assert.deepEqual(resolved.from, { region: "environment", allowedProviders: "task", budgetUsd: "task", actionPolicy: "task", agentEvalRequired: "task", minPassRate: "task" });
 });
 
 test("guardrails: constraints only narrow, against the nearest level that set them; defaults move either way", () => {
   const resolved = resolveGuardrails({
-    environment: { allowedProviders: ["workers-ai", "openrouter"], spendCapUsd: 20, budgetUsd: 10, repeats: 3 },
-    agent: { allowedProviders: ["workers-ai"], spendCapUsd: 10, budgetUsd: 5 },
-    // openrouter is in the environment's list but the agent removed it; region is set for the first time.
+    environment: { allowedProviders: ["workers-ai"], spendCapUsd: 10, budgetUsd: 10, repeats: 3 },
+    // openrouter is not in the environment's list; region is set for the first time.
     task: { allowedProviders: ["workers-ai", "openrouter"], spendCapUsd: 15, budgetUsd: 30, region: "uae", repeats: 1 },
   });
   assert.deepEqual(resolved.effective, { allowedProviders: ["workers-ai"], spendCapUsd: 10, budgetUsd: 30, region: "uae", repeats: 1 });
-  assert.deepEqual(resolved.from, { allowedProviders: "agent", spendCapUsd: "agent", budgetUsd: "task", region: "task", repeats: "task" });
+  assert.deepEqual(resolved.from, { allowedProviders: "environment", spendCapUsd: "environment", budgetUsd: "task", region: "task", repeats: "task" });
   assert.deepEqual(resolved.rejected.map(item => [item.key, item.level]), [["allowedProviders", "task"], ["spendCapUsd", "task"]]);
-  assert.match(resolved.rejected[0]!.reason, /agent.*adds openrouter/);
+  assert.match(resolved.rejected[0]!.reason, /environment.*adds openrouter/);
 
   const changed = resolveGuardrails({ environment: { region: "uae", minPassRate: 0.9 }, task: { region: "eu", minPassRate: 95, ...({ colour: "red" } as object) } });
   assert.deepEqual(changed.effective, { region: "uae", minPassRate: 0.9 });

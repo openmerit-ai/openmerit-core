@@ -2,7 +2,6 @@
 // the app starts without it; the feature that needs it answers 503 until it is set.
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { GitHubConfig } from "./github.ts";
 
 export type Env = Record<string, string | undefined>;
 
@@ -38,13 +37,6 @@ export interface Limits {
   monthlyCapUsd: number;
   /** Monthly cap on customer-paid spend, when the customer set none. */
   customerCapUsd: number;
-  /** GitHub repositories an account can add, and reviews it can start in an hour. */
-  repos: number;
-  reviewsPerHour: number;
-  /** Most a repository review's model calls may cost on OpenMerit's OpenRouter key; the review stops there. */
-  reviewBudgetUsd: number;
-  /** Longest a repository review's model calls may take, after the clone. */
-  reviewMinutes: number;
 }
 
 /**
@@ -83,8 +75,8 @@ export interface Config {
   /** Lets customer endpoints use http:// and private hosts. Tests only. */
   allowPrivateEndpoints: boolean;
   limits: Limits;
-  /** Models on OpenMerit's OpenRouter key that write a task's cases, judge text answers and review a repository's code. */
-  models: { caseWriter: string; judge: string; reviewer: string };
+  /** Models on OpenMerit's OpenRouter key that write a task's cases and judge text answers. */
+  models: { caseWriter: string; judge: string };
   /** How often a watched task checks the catalogue. */
   watchIntervalMs: number;
   /** A job still queued or running this long without a job actor had its start fail, and is marked failed. */
@@ -93,8 +85,6 @@ export interface Config {
   idleAfterMs: number;
   /** Null without POSTHOG_PROJECT_TOKEN, and always self-hosted: no event is sent. */
   posthog: PostHogConfig | null;
-  /** GitHub's API and git host, and the clone limits (github.ts). */
-  github: GitHubConfig;
   subscriptions: SubscriptionsConfig;
 }
 
@@ -146,18 +136,6 @@ export function loadConfig(env: Env = process.env): Config {
       defaultJobBudgetUsd: number(env.OPENMERIT_JOB_BUDGET_USD, 5),
       monthlyCapUsd: number(env.OPENMERIT_MONTHLY_CAP_USD, 100),
       customerCapUsd: number(env.OPENMERIT_CUSTOMER_CAP_USD, 100),
-      repos: number(env.OPENMERIT_REPOS, 20),
-      reviewsPerHour: number(env.OPENMERIT_REVIEWS_PER_HOUR, 20),
-      reviewBudgetUsd: number(env.OPENMERIT_REVIEW_BUDGET_USD, 2),
-      reviewMinutes: number(env.OPENMERIT_REVIEW_MINUTES, 15),
-    },
-    github: {
-      apiUrl: (env.OPENMERIT_GITHUB_API_URL || "https://api.github.com").replace(/\/$/, ""),
-      gitUrl: (env.OPENMERIT_GITHUB_URL || "https://github.com").replace(/\/$/, ""),
-      maxBytes: number(env.OPENMERIT_REPO_MAX_MB, 200) * 1024 * 1024,
-      cloneTimeoutMs: number(env.OPENMERIT_REPO_CLONE_SECONDS, 120) * 1000,
-      // An empty OPENMERIT_GITHUB_APP_SLUG turns the GitHub App way of adding a repository off.
-      appSlug: (env.OPENMERIT_GITHUB_APP_SLUG ?? "openmeritai").trim() || null,
     },
     subscriptions: {
       chatgpt: {
@@ -166,7 +144,7 @@ export function loadConfig(env: Env = process.env): Config {
         apiUrl: env.OPENMERIT_CODEX_API_URL || null,
       },
     },
-    models: { caseWriter: env.OPENMERIT_CASE_WRITER_MODEL || "anthropic/claude-sonnet-5.5", judge: env.OPENMERIT_JUDGE_MODEL || "anthropic/claude-sonnet-5.5", reviewer: env.OPENMERIT_REVIEWER_MODEL || "anthropic/claude-sonnet-5.5" },
+    models: { caseWriter: env.OPENMERIT_CASE_WRITER_MODEL || "anthropic/claude-sonnet-5.5", judge: env.OPENMERIT_JUDGE_MODEL || "anthropic/claude-sonnet-5.5" },
     watchIntervalMs: number(env.OPENMERIT_WATCH_INTERVAL_MS, 24 * 60 * 60 * 1000),
     orphanAfterMs: number(env.OPENMERIT_ORPHAN_AFTER_MS, 2 * 60 * 1000),
     idleAfterMs: number(env.OPENMERIT_IDLE_DAYS, 30) * 24 * 60 * 60 * 1000,

@@ -1,6 +1,5 @@
 // Sidebar for the app.openmerit.ai mockup: Fixed (default) or Expand on hover, toggled by
-// the icon beside the logo or Ctrl/⌘+B and saved in localStorage. The project switcher opens a
-// menu of the organization's projects, which app/main.ts fills; the profile button opens a menu
+// the icon beside the logo or Ctrl/⌘+B and saved in localStorage. The profile button opens a menu
 // upward with the account pages. The app has no narrow-screen layout.
 type Mode = "fixed" | "hover";
 
@@ -8,7 +7,6 @@ const root = document.documentElement;
 const toggle = document.querySelector<HTMLButtonElement>(".sidebar-toggle");
 // Each menu and the button that opens it. The class keeps an Expand-on-hover sidebar open while one is.
 const menus = [
-  { button: document.querySelector<HTMLButtonElement>(".project-switch"), menu: document.querySelector<HTMLElement>(".project-menu") },
   { button: document.querySelector<HTMLButtonElement>(".profile"), menu: document.querySelector<HTMLElement>(".profile-menu") },
 ];
 

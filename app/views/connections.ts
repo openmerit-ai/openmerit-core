@@ -1,9 +1,7 @@
-// Coding agents: adding OpenMerit to a coding agent, and signing every one out; and GitHub: a member
-// signed in with GitHub picks repositories from installations of the OpenMerit GitHub App, whose Setup
-// URL returns here. A project's repositories and model endpoints are on its Project settings page.
-import { ApiError, type GitHubAccess, type Project, type Repo } from "../api.ts";
-import { clerkGlobals } from "../auth.ts";
-import { html, logo, plural, type Html } from "../html.ts";
+// Coding agents and endpoints: adding OpenMerit to a coding agent and signing every one out, and the
+// organization's model endpoints OpenMerit measures on (#endpoints), besides OpenRouter on its own key.
+import { ApiError, type Endpoint, type EndpointKind } from "../api.ts";
+import { date, html, logo, plural, provider, type Html } from "../html.ts";
 import type { View } from "../view.ts";
 import { header, install } from "./common.ts";
 
@@ -20,47 +18,38 @@ export async function retried<T>(load: () => Promise<T>, delays: readonly number
   }
 }
 
-type Data = { github: GitHubAccess; repos: Repo[]; project: Project };
+const kinds: Record<EndpointKind, { label: string; baseUrl: string }> = {
+  "openai-compatible": { label: "OpenAI-compatible", baseUrl: "https://api.openai.com/v1" },
+  anthropic: { label: "Anthropic", baseUrl: "https://api.anthropic.com" },
+  openrouter: { label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1" },
+};
+const isKind = (value: string): value is EndpointKind => value in kinds;
 
-// The cloud app's plan check: repository reviews need a plan Stripe says is active or trialing.
-const paid = (me: { plan: { status: string } }): boolean => me.plan.status === "active" || me.plan.status === "trialing";
+// OpenRouter on OpenMerit's key is always there; /api/endpoints lists only the customer's own.
+const builtIn = (): Html => html`<div class="row">
+          <span>${logo("openrouter")}OpenRouter<span class="sub">https://openrouter.ai/api/v1 · OpenRouter API</span><span class="sub">Every model</span></span>
+          <span class="endpoint-meta"><span class="pill tag">OpenMerit's key · OpenMerit pays</span></span>
+          <span></span>
+        </div>`;
 
-function githubSection({ github, repos, project }: Data, admin: boolean, canAdd: boolean, params: URLSearchParams): Html {
-  if (!github.app) return html``;
-  const added = new Set(repos.map((repo) => repo.fullName.toLowerCase()));
-  const install = (label: string) => html`<a class="btn${github.installations.length ? "" : " primary"}" href="${github.installUrl}" target="_blank" rel="noreferrer">${label}</a>`;
-  // GitHub's Setup URL brings the member back here with installation_id and setup_action (install or update).
-  const back = params.get("installation_id") ? html`<div class="card notice" role="status" style="margin: 0 0 12px"><p>${params.get("setup_action") === "update" ? "The OpenMerit GitHub App's repositories were updated." : "The OpenMerit GitHub App is installed."} Its repositories are below.</p></div>` : "";
-  const body = !github.signedIn
-    ? html`<div class="card"><p>Sign in with GitHub to pick repositories, private ones included, without making a token.</p>
-        <p class="sub">OpenMerit then reads the repositories you give its GitHub App, with Contents read-only, through your GitHub sign-in.</p>
-        <p style="margin-top: 10px"><button class="btn primary" type="button" data-action="connectGithub">Connect GitHub</button></p></div>`
-    : github.error ? html`<div class="card notice bad" role="alert"><p>${github.error}</p></div>`
-    : !github.installations.length ? html`<div class="card"><p>Install the OpenMerit GitHub App on your account or an organization, and choose the repositories OpenMerit may read. GitHub brings you back here.</p><p style="margin-top: 10px">${install("Install the GitHub App")}</p></div>`
-    : html`<div class="card">${github.installations.map((item) => html`<div class="repo">
-          <div class="row"><span>${logo("github")}${item.account}<span class="sub">${item.selection === "all" ? "Every repository" : plural(item.repos.length, "repository", "repositories")} · <a href="${item.manageUrl}" target="_blank" rel="noreferrer">Choose repositories on GitHub</a></span></span><span></span><span></span></div>
-          ${item.repos.length ? html`<table class="calls"><tbody>${item.repos.map((repo) => html`<tr><td>${repo.fullName}</td><td>${repo.private ? html`<span class="pill tag">Private</span>` : ""}</td><td>${added.has(repo.fullName.toLowerCase()) ? html`<span class="sub">In ${project.name}</span>`
-            : admin ? html`<button class="btn" type="button" data-action="addGithubRepo" data-repo="${repo.fullName}"${canAdd ? "" : html` disabled`} aria-label="Add ${repo.fullName} to ${project.name}">Add to ${project.name}</button>` : ""}</td></tr>`)}</tbody></table>` : html`<p class="sub">No repositories selected yet.</p>`}
-        </div>`)}
-        <p style="margin-top: 12px">${install("Install on another account or organization")}</p></div>`;
-  return html`<section aria-labelledby="github">
-      <h2 id="github">GitHub</h2>
-      <p class="note" style="margin: -2px 0 8px">The OpenMerit GitHub App reads code only: Contents read-only. OpenMerit never pushes or opens a pull request. Public repositories and fine-grained tokens still work on <a href="/project/">Project settings</a>.</p>
-      ${back}
-      ${body}
-      ${github.signedIn && !canAdd && admin ? html`<p class="note">Reviewing a repository needs an active plan. <a href="/plan/">Choose a plan</a> to add one.</p>` : ""}
-      ${github.signedIn && !admin ? html`<p class="note">Only an admin can add repositories.</p>` : ""}
-    </section>`;
+function endpointRow(endpoint: Endpoint, admin: boolean): Html {
+  const models = endpoint.allowedModels === "all" ? "Every model" : endpoint.allowedModels.join(", ");
+  const found = provider(endpoint.baseUrl);
+  return html`<div class="row">
+          <span>${logo(found.logo)}${found.name}<span class="sub">${endpoint.baseUrl} · ${kinds[endpoint.kind]?.label ?? endpoint.kind} API</span><span class="sub">${models}</span></span>
+          <span class="endpoint-meta"><span class="pill tag">Key ending ${endpoint.keyLast4} · you pay</span><span class="sub">${endpoint.verifiedAt ? `Checked ${date(endpoint.verifiedAt)}` : "Not checked yet"}</span></span>
+          ${admin ? html`<button class="btn danger" type="button" data-action="remove" data-id="${endpoint.id}" aria-label="Remove ${endpoint.baseUrl}">Remove</button>` : html`<span></span>`}
+        </div>`;
 }
 
-export const connectionsView: View<Data> = {
-  async load({ api, project }) {
-    const [github, repos] = await Promise.all([retried(() => api.get<GitHubAccess>("/api/github")), retried(() => api.get<Repo[]>("/api/repos"))]);
-    return { github, repos, project };
-  },
-  render(data, { me, params }) {
+export const connectionsView: View<Endpoint[]> = {
+  load: ({ api }) => retried(() => api.get<Endpoint[]>("/api/endpoints")),
+  title: () => "Coding agents and endpoints",
+  bind(root) { bindKindSelect(root); },
+  render(endpoints, { me }) {
+    const own = endpoints.filter((endpoint) => !endpoint.builtIn);
     const admin = me.role === "admin";
-    return html`${header(me, "Coding agents", "Your coding agents are how OpenMerit gets its work: each asks which model a call should use, and gets the result with its evidence. A project's GitHub repositories and model endpoints are on its Project settings page.")}
+    return html`${header(me, "Coding agents and endpoints", "Your coding agents are how OpenMerit gets its work: each asks which model a call should use, and gets the result with its evidence. OpenMerit measures the candidates on the endpoints below.", [`${plural(own.length, "endpoint")} of yours`])}
 
     <section aria-labelledby="agents">
       <h2 id="agents">Coding Agents</h2>
@@ -72,32 +61,66 @@ export const connectionsView: View<Data> = {
       <p class="note">To write your tasks' test cases on your own ChatGPT plan, sign in on <a href="/account/">Account settings</a>.</p>
     </section>
 
-    ${githubSection(data, admin, paid(me), params)}`;
+    <section aria-labelledby="endpoints">
+      <h2 id="endpoints">Measuring Endpoints</h2>
+      <p class="note" style="margin: -2px 0 8px">Calls on your own endpoints use your key and bill your provider account. Add the endpoint your app calls so its current model is measured where it really runs.</p>
+      <div class="card">${builtIn()}${own.map((endpoint) => endpointRow(endpoint, admin))}</div>
+    </section>
+
+    ${admin ? html`<section aria-labelledby="add">
+      <h2 id="add">Add an Endpoint</h2>
+      <form class="card form" data-action="add" autocomplete="off">
+        <label>Kind
+          <select name="kind">${Object.entries(kinds).map(([kind, { label }]) => html`<option value="${kind}">${label}</option>`)}</select>
+        </label>
+        <label>Base URL
+          <input name="baseUrl" type="url" required value="${kinds["openai-compatible"].baseUrl}" spellcheck="false">
+        </label>
+        <label>API key
+          <input name="apiKey" type="password" required autocomplete="off" spellcheck="false" placeholder="Paste the key">
+          <span class="sub">Sent only to OpenMerit, which stores it encrypted. It is never shown again; this page shows only its last four characters.</span>
+        </label>
+        <label>Allowed models
+          <input name="allowedModels" type="text" spellcheck="false" placeholder="gpt-5-mini, gpt-5-nano">
+          <span class="sub">Comma-separated model IDs this endpoint may run. Only an OpenRouter endpoint may leave this empty to allow every model.</span>
+        </label>
+        <p class="form-error" role="alert" hidden></p>
+        <p><button class="btn primary" type="submit">Add endpoint</button></p>
+      </form>
+    </section>` : html`<p class="note">Only an admin of ${me.account.name} can add or remove endpoints.</p>`}`;
   },
   actions: {
-    async addGithubRepo(target, { project }, { api, refresh, toast }) {
-      const name = target.dataset.repo ?? "";
+    async add(form, _data, { api, refresh, toast }) {
+      if (!(form instanceof HTMLFormElement)) return;
+      const fields = new FormData(form);
+      const kind = String(fields.get("kind"));
+      const error = form.querySelector<HTMLElement>(".form-error");
+      if (!isKind(kind)) return;
+      const models = String(fields.get("allowedModels")).split(",").map((name) => name.trim()).filter(Boolean);
       try {
-        await api.send<Repo>("POST", "/api/repos", { url: `https://github.com/${name}`, via: "github" });
+        await api.send("POST", "/api/endpoints", {
+          kind,
+          baseUrl: String(fields.get("baseUrl")).trim(),
+          apiKey: String(fields.get("apiKey")).trim(),
+          allowedModels: models.length ? models : "all",
+        });
       } catch (failure) {
-        if (!(failure instanceof ApiError) || failure.status !== 400) throw failure;
-        toast(failure.message);
+        if (!(failure instanceof ApiError) || failure.status !== 400 || !error) throw failure;
+        error.textContent = failure.message;
+        error.hidden = false;
         return;
       }
+      // The key leaves the page with the form; the list shows only its last four characters.
+      form.reset();
       await refresh();
-      toast(`${name} added to ${project.name}. OpenMerit is reviewing its code; see Project settings.`);
+      toast("Endpoint added. Its key will not be shown again.");
     },
-    // Links GitHub to the member's sign-in through Clerk, which sends the browser to GitHub and back here.
-    async connectGithub(_target, _data, { toast }) {
-      const user = clerkGlobals.Clerk?.user;
-      const fallback = "Sign out, then sign in with GitHub to pick repositories.";
-      if (!user?.createExternalAccount) { toast(fallback); return; }
-      try {
-        const linked = await user.createExternalAccount({ strategy: "oauth_github", redirectUrl: location.href });
-        const next = linked.verification?.externalVerificationRedirectURL;
-        if (next) { location.href = String(next); return; }
-      } catch { /* such as GitHub already linked to another user */ }
-      toast(fallback);
+    async remove(target, endpoints, { api, refresh, toast, confirm }) {
+      const endpoint = endpoints.find((item) => item.id === target.dataset.id);
+      if (!endpoint || !await confirm({ title: "Remove this endpoint?", body: `OpenMerit deletes the key ending ${endpoint.keyLast4} and stops measuring on ${endpoint.baseUrl}. Past runs keep their results.`, confirm: "Remove endpoint", danger: true })) return;
+      await api.send("DELETE", `/api/endpoints/${encodeURIComponent(endpoint.id)}`);
+      await refresh();
+      toast("Endpoint removed.");
     },
     async disconnect(_target, _data, { api, toast, confirm, me }) {
       if (!await confirm({ title: "Disconnect every coding agent?", body: `Every coding agent signed in to ${me.account.name} loses access to OpenMerit's tools until it signs in again. Tasks, runs and watches are kept.`, confirm: "Disconnect", danger: true })) return;
@@ -106,3 +129,15 @@ export const connectionsView: View<Data> = {
     },
   },
 };
+
+// Changing the kind fills in its usual base URL unless the user has typed their own.
+function bindKindSelect(root: HTMLElement): void {
+  const form = root.querySelector<HTMLFormElement>("form[data-action=add]");
+  const select = form?.querySelector<HTMLSelectElement>("select[name=kind]");
+  const base = form?.querySelector<HTMLInputElement>("input[name=baseUrl]");
+  if (!select || !base) return;
+  select.addEventListener("change", () => {
+    const defaults = Object.values(kinds).map((kind) => kind.baseUrl);
+    if (isKind(select.value) && (!base.value || defaults.includes(base.value))) base.value = kinds[select.value].baseUrl;
+  });
+}

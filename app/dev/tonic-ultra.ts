@@ -1,12 +1,12 @@
 // Tonic Ultra: a fictional growth marketing agency that runs leads, ads, reviews and booking
 // for home and office maintenance companies. It is the preview's fully populated account for
-// product work (?preview=tonic): six repositories, three agents, 19 tasks across most
+// product work (?preview=tonic): six environments, four agents, 19 tasks across most
 // providers, three months of runs in every state, five endpoints of its own, and spend near its
 // caps. The fake API's other scenarios keep the smaller Sahra Health account, which the tests
 // use. Every name, number and price is fictional.
 import { resolveGuardrails, type Guardrails, type Level } from "../../openmerit-core/src/engine/guardrails.ts";
 import type { Endpoint, JobView, MeasuredModel, Report, Run, Task, TaskState } from "../api.ts";
-import { repo, repoReview, type State } from "./fake-api.ts";
+import type { State } from "./fake-api.ts";
 
 // Per call, on the task's typical prompt. eci is the catalogue's capability index; null is a model
 // outside the catalogue.
@@ -138,7 +138,6 @@ const AGENTS: Record<string, string[]> = {
 const LIVE = new Set<Outcome>(["running", "queued", "needs_input", "failed", "stopped"]);
 const guardrailsFor = (spec: Spec): Report["guardrails"] => resolveGuardrails({
   environment: environmentGuardrails[spec.env] ?? {},
-  ...(spec.agent ? { agent: agentGuardrails[`${spec.env}:${spec.agent}`] ?? {} } : {}),
   task: taskGuardrails[spec.id] ?? {},
 });
 
@@ -210,12 +209,6 @@ const environmentGuardrails: Record<string, Guardrails> = {
   [ENV.hvac]: { allowedProviders: ["openai", "anthropic", "google", "x-ai", "mistralai", "openrouter"], spendCapUsd: 20, latencyMs: 1500, watch: true, actionPolicy: "ask_first" },
   [ENV.clean]: { region: "eu", spendCapUsd: 10, actionPolicy: "ask_first" },
 };
-const agentGuardrails: Record<string, Guardrails> = {
-  [`${ENV.leads}:lead desk`]: { agentEvalRequired: "required", minAgentPassRate: 0.9 },
-  [`${ENV.ads}:ads studio`]: { agentEvalRequired: "warn", repeats: 3 },
-  [`${ENV.reports}:client reporting`]: { agentEvalRequired: "required", minAgentPassRate: 0.95 },
-  [`${ENV.hvac}:booking concierge`]: { agentEvalRequired: "required", minAgentPassRate: 0.9, latencyMs: 1200 },
-};
 const taskGuardrails: Record<string, Guardrails> = {
   "emergency-triage": { minPassRate: 1, latencyMs: 2000, allowedProviders: ["openai", "anthropic", "openrouter"] },
   "quote-estimator": { budgetUsd: 12, repeats: 2 },
@@ -247,13 +240,8 @@ export function tonicUltra(): State {
   return {
     me: { user: { id: "user_jordan" }, account: { id: "org_tonic", name: "Tonic Ultra" }, role: "admin", plan: { name: "Cloud", status: "active", periodEnd: "2026-12-01T00:00:00Z", includedEvals: 100, usedEvals: 87 } },
     tasks: ordered, runs, reports, jobs, endpoints: endpoints.map((item) => ({ ...item })),
-    // Each repository the agency's tasks come from, reviewed: every task's model call. The reporting repository is private.
-    repos: Object.values(ENV).map((env, index) => repo(env, {
-      private: env === ENV.reports, tokenLast4: env === ENV.reports ? "7d0a" : null, addedAt: `2026-09-0${index + 1}T09:00:00Z`,
-      result: repoReview({ files: 60 + index * 37, modelCalls: specs.filter((spec) => spec.env === env).map((spec) => ({ file: spec.file, line: spec.line, value: spec.model, catalogueId: spec.model, dynamic: false, envVar: null })) }),
-    })),
     spend: { openmeritUsd: 211.4, customerUsd: 143.85, monthlyCapUsd: 250, customerCapUsd: 200, period: { start: "2026-11-01T00:00:00.000Z", end: "2026-12-01T00:00:00.000Z" } },
-    guardrails: { environment: structuredClone(environmentGuardrails), agent: structuredClone(agentGuardrails), task: structuredClone(taskGuardrails) } satisfies Record<Level, Record<string, Guardrails>>,
-    disconnected: 0, deleted: [], evals: {}, drafts: [],
+    guardrails: { environment: structuredClone(environmentGuardrails), task: structuredClone(taskGuardrails) } satisfies Record<Level, Record<string, Guardrails>>,
+    disconnected: 0, deleted: [], evals: {},
   };
 }
