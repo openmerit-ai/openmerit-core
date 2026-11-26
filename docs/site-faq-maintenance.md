@@ -2,7 +2,7 @@
 
 ## Contact-sales form — unreleased, 26 November 2026
 
-The owner asked for a form like Profound's instead of a `mailto:` link. Every "contact us" link on the buyer-question pages and `/vs-routers/` now goes to `/contact-sales/`, which asks for name, work email, company, company size, what they want OpenMerit for and how they heard about it, and says the details are used only to reply. It says running OpenMerit yourself is free and gives no hosted price. The homepage has no FAQ block, so nothing else changed.
+The owner asked for a form like Profound's instead of a `mailto:` link. Every "contact us" link on the buyer-question pages and `/vs-routers/` now goes to `/contact-sales/`, which asks for name, work email, company, company size, monthly LLM spend, what they want OpenMerit for and how they heard about it, and says the details are used only to reply. It says running OpenMerit yourself is free and gives no OpenMerit Cloud price. At the owner's request the pages call the version OpenMerit runs for you "OpenMerit Cloud" instead of "hosted OpenMerit". The homepage has no FAQ block, so nothing else changed.
 
 ## Buyer-question pages, free self-hosting and hosted pricing — unreleased, 26 November 2026
 

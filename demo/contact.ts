@@ -73,7 +73,7 @@ export async function contactSubmit(request: Request, env: ContactEnv): Promise<
       from: { name: 'OpenMerit website', email: env.CONTACT_FROM },
       to: [to],
       replyTo: { name, email: entry.email },
-      subject: `Hosted OpenMerit enquiry: ${entry.company.replace(/[\r\n]+/g, ' ')}`.slice(0, 200),
+      subject: `OpenMerit Cloud enquiry: ${entry.company.replace(/[\r\n]+/g, ' ')}`.slice(0, 200),
       text: [
         `Name: ${name}`, `Work email: ${entry.email}`, `Company: ${entry.company}`, `Company size: ${entry.size}`, `Monthly LLM spend: ${entry.spend}`,
         '', 'What they want OpenMerit for:', entry.use || '(not given)',
