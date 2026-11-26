@@ -1,5 +1,7 @@
 // Static pages that answer buyers' questions, one directory each under site/.
 export const contentPages = ['/vs-routers/', '/find-a-cheaper-llm/', '/evals-from-your-code/', '/claude-code-and-codex/', '/run-locally/', '/contact-sales/'];
+// Pages also served as Markdown, from an index.md the build writes beside each index.html.
+export const markdownPages = ['/', ...contentPages];
 
 // Keep the public boundary identical at the domain router and the web Worker:
 // the landing page, the playground walkthrough, the content pages and the Clerk sign-in.
