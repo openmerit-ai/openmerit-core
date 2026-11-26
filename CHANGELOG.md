@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A case the judge's provider refuses to grade (a content filter, as a `rm -rf` guardrail case did in testing) is left out for every model in the run, the current one included, with a notice, instead of failing the candidate whose answer reached it. Scout and the cloud app both.
+- The label check shows each written case's input and expected answer in full; it cut them at about 100 characters, so people unticked cases they could not read.
+- In Scout, a run on an accepted eval says it runs version N of the eval you accepted, with no review or grading, instead of describing a new eval to accept; it no longer shows "pass rate ≥ null"; a run paused mid-search no longer says it "stopped before screening"; and the comparison no longer gives a count of eval runs that left out screens.
 - In Scout, an eval that exits 0 while OpenMerit's proxy refused some of its requests (HTTP 403, a model outside the allowed pool) now says so in history, in that model's note and in the stop message; it used to show only as failed items.
 - OpenMerit's evals ask for a JSON task's answer in its schema (`response_format`), as the application does, so models no longer fail every case by answering in prose. Scout and the cloud app both.
 - In Scout, a request the eval budget would refuse only because other requests are reserved at their maximum waits for them to settle instead of pausing the run, and an answer cut off part-way or without usage is priced by what the model wrote, not by the stream's bytes, which booked failed calls at their whole reservation.

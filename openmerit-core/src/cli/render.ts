@@ -25,7 +25,7 @@ export function renderComparison(task: TaskComparison, runId?: string): string {
   if (others.length) lines.push("  Other candidates:", pad([header, ...others.map(item => row("", item))]).split("\n").slice(1).map(line => `  ${line}`).join("\n"));
   lines.push(`  ${task.status === "ranked" ? "Top 3 cheapest models at least as good as the current model, measured on the same eval." : task.status === "no_qualified" ? "No finalist performed at least as well as the current model." : task.status === "non_discriminating" ? "The eval did not separate the models." : ""} ${task.note}`.trimEnd());
   if (task.top.some(item => item.costIsEstimate) || task.baseline?.costIsEstimate) lines.push("  ~ cost estimated from list prices and reported tokens; the endpoint does not report cost.");
-  lines.push(`  Evidence: openmerit history ${runId ?? "<run id>"} lists every eval run (${[task.baseline, ...task.candidates].filter(Boolean).reduce((sum, item) => sum + item!.evidence.length, 0)} recorded).`);
+  lines.push(`  Evidence: openmerit history ${runId ?? "<run id>"} lists every eval run: screens, retries and full runs.`);
   return lines.join("\n");
 }
 

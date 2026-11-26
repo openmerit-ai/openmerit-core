@@ -668,6 +668,9 @@ test("Scout always writes an eval from its review of the code, runs the reposito
   const again = await advance(ctx, next.runId, { model: "openai/gpt-4.1-mini", tasks: ["ticket classifier"] });
   assert.deepEqual(again.questions.map(question => question.id), ["approve_evals"]);
   assert.deepEqual(harness.calls, ["map"]);
+  // It says it runs the accepted eval as it is, not that it wrote one to accept.
+  assert.match(again.questions[0]!.detail!, /Eval: version 1 of the eval you accepted, saved in \.openmerit\/evals\/ticket-classifier\/, 10 cases \(10 typical\): run as it is, with no review and no grading/);
+  assert.doesNotMatch(again.questions[0]!.detail!, /once you accept it|pass rate ≥ null/);
 });
 
 test("an eval app.openmerit.ai manages is run as the coding agent wrote it: Scout neither reviews the task nor writes over the copy", async () => {

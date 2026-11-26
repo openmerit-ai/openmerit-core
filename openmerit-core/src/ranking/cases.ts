@@ -162,7 +162,8 @@ export function labelCheck(bundle: TaskBundle, cases: readonly Case[]): Question
     detail: "OpenMerit wrote these cases to measure models on. Untick any whose expected answer is wrong: those cases are dropped.",
     options: written.map(item => ({
       value: item.id,
-      label: `${shorten(Object.values(item.input).join(" · ").replace(/\s+/g, " "), 100)} → ${shorten(typeof item.expected === "string" ? item.expected : JSON.stringify(item.expected), 80)}`,
+      // A person can only judge an expected answer they can read whole, so only inputs past any real case's length are cut.
+      label: `${shorten(Object.values(item.input).join(" · ").replace(/\s+/g, " "), 1000)} → ${shorten(typeof item.expected === "string" ? item.expected : JSON.stringify(item.expected), 300)}`,
     })),
     default: written.map(item => item.id),
   };

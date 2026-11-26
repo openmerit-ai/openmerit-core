@@ -33,7 +33,7 @@ const toolResults = (body: Record<string, unknown>, anthropic: boolean): string[
 };
 
 /** What one scripted model says: text, or a tool call. */
-function script(model: string, body: Record<string, unknown>, anthropic: boolean): { text?: string; tool?: { name: string; args: object }; cost: number } {
+function script(model: string, body: Record<string, unknown>, anthropic: boolean): { text?: string; tool?: { name: string; args: object }; cost: number; filtered?: boolean } {
   const user = lastUser(body);
   switch (model) {
     case "good": return { text: LABELS[user] ?? "other", cost: 0.001 };
@@ -85,6 +85,8 @@ function script(model: string, body: Record<string, unknown>, anthropic: boolean
       { kind: "edge", input: { ticket: "Parcel arrived broken and I was charged twice" }, expected: "billing" },
       { kind: "made-up", input: { ticket: "My login code never comes" }, expected: "technical" },
     ] }), cost: 0.1 };
+    // A judge whose provider filters one case's content, as it did a `rm -rf` guardrail case.
+    case "prudish-judge": return user.includes("crashes") ? { text: "", cost: 0.01, filtered: true } : { text: "{\"pass\": true, \"reason\": \"fine\"}", cost: 0.01 };
     case "judge": return { text: user.includes("Answer to grade:\nbilling") ? "{\"pass\": true, \"reason\": \"right queue\"}" : "{\"pass\": false, \"reason\": \"wrong\"}", cost: 0.01 };
     case "writer": return {
       text: JSON.stringify({ cases: [
@@ -155,7 +157,7 @@ before(async () => {
         : { role: "assistant", content: answer.text };
       // OpenRouter reports what the call cost; OpenAI-style endpoints report only tokens.
       const usage = { prompt_tokens: 1000, completion_tokens: 100, ...(path.startsWith("/openrouter") ? { cost: answer.cost, is_byok: false } : {}) };
-      events(res, [{ choices: [{ index: 0, delta, finish_reason: answer.tool ? "tool_calls" : "stop" }] }, { choices: [], usage }], false);
+      events(res, [{ choices: [{ index: 0, delta, finish_reason: answer.tool ? "tool_calls" : answer.filtered ? "content_filter" : "stop" }] }, { choices: [], usage }], false);
     });
   });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -224,6 +226,15 @@ test("a replayed measure is charged once in the ledger; a deliberate repeat is c
   near((await ledger.spent()).openmeritUsd, 0.003);
   await measure({ model: "good", endpoint: "openrouter" }, ids, { run: "repeat-2" });
   near((await ledger.spent()).openmeritUsd, 0.006);
+});
+
+test("a case the judge's provider filters is ungradable, not failed, and the other cases are graded", async () => {
+  const textBundle: TaskBundle = { ...bundle, output: { kind: "text" } };
+  const grader = judge({ client: client(), endpoint: "openrouter", model: "prudish-judge", rubric: "Names the right queue." });
+  const result = await createMeasure({ bundle: textBundle, cases, client: client(), grader, ledger: memoryLedger(), key: "filtered" })({ model: "good", endpoint: "acme" }, ids);
+  const filtered = cases.find(item => JSON.stringify(item.input).includes("crashes"))!.id;
+  assert.deepEqual(result.results.map(item => [item.caseId, item.pass, item.failure ?? null]), ids.map(id => [id, id !== filtered, id === filtered ? "ungradable" : null]));
+  assert.match(result.results.find(item => item.caseId === filtered)!.reason!, /prudish-judge's provider refused to grade case .* \(content filter\)/);
 });
 
 test("the judge's cost is metered but not charged to the candidate", async () => {

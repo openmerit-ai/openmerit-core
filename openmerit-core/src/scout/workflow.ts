@@ -17,7 +17,7 @@ import { basename, dirname, isAbsolute, join, normalize, relative, resolve } fro
 import { catalogueIndex, type Catalogue, type CatalogueModel } from "../engine/catalogue.ts";
 import { blendedPrice, eligible, ladder } from "../engine/pool.ts";
 import { redact } from "../engine/redact.ts";
-import { EVAL_FLOOR, evaluateTask as runPolicy, floorNote, meetsCriteria, MIN_SAVING, rankTop, regressions, shortfall, SMALL_EVAL, stableSample, type Criteria, type Measurement } from "../engine/evaluate.ts";
+import { EVAL_FLOOR, evaluateTask as runPolicy, ungradableNotice, floorNote, meetsCriteria, MIN_SAVING, rankTop, regressions, shortfall, SMALL_EVAL, stableSample, type Criteria, type Measurement } from "../engine/evaluate.ts";
 import { APPROVAL_PROMPT, approvalQuestion as configureQuestion } from "../engine/connector.ts";
 import { chosenTask, repoScan } from "../connectors/repo-scan.ts";
 import { evalCommand, evalEvidence } from "../connectors/eval-command.ts";
@@ -73,6 +73,8 @@ export interface UnitResult {
   errored?: string[];
   /** Answers cut off by their token limit before any text (absent in runs saved before it was counted). */
   cutOff?: number;
+  /** Items no grader could grade, left out of `items`: the evaluation leaves them out for every model. */
+  ungradable?: string[];
   /** Models the eval asked for that the proxy refused with HTTP 403, as outside the allowed pool: those calls failed. */
   refused?: string[];
   /** For a generated eval: why each failed item failed, in one redacted sentence. */
@@ -766,7 +768,10 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
     const ids = expected ?? [...reported.keys()];
     const absent = ids.filter(item => !reported.has(item));
     if (absent.length) return fail(`The eval reported no result for ${absent.length} requested item(s): ${absent.slice(0, 10).join(", ")}.`);
-    const results: Record<string, boolean> = Object.fromEntries(ids.map(item => [item, reported.get(item)!]));
+    // Cases no grader could grade count for no model: out of this run's items, and the engine leaves them out for the others.
+    const ungradable = (outcome.ungradable ?? []).filter(item => ids.includes(item));
+    if (ungradable.length) state.event(runId, "judge", `${label}: ${ungradableNotice(ungradable)}`);
+    const results: Record<string, boolean> = Object.fromEntries(ids.filter(item => !ungradable.includes(item)).map(item => [item, reported.get(item)!]));
     const passes = Object.values(results).filter(Boolean).length, total = Object.keys(results).length;
     // A generated eval says which items' calls failed. The repository's own eval does not, so when any of its
     // calls failed, each of its failed items may have been a failed call rather than a wrong answer.
@@ -775,7 +780,7 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
       ...(outcome.errored ?? []).filter(item => results[item] === false),
       ...(callsFailed ? ids.filter(item => !results[item] && (!plan.generated || item.startsWith(REPO_ITEM))) : []),
     ];
-    const result: UnitResult = { items: results, passes, total, source: "eval", requests: tally.requests, durationMs: outcome.durationMs, cutOff: tally.cutOff, ...(errored.length ? { errored } : {}), ...(tally.poolViolations.length ? { refused: [...new Set(tally.poolViolations)] } : {}), ...(outcome.reasons && Object.keys(outcome.reasons).length ? { reasons: outcome.reasons } : {}), ...(outcome.checks && Object.keys(outcome.checks).length ? { checks: outcome.checks } : {}), ...(outcome.answers?.length ? { answers: outcome.answers } : {}) };
+    const result: UnitResult = { items: results, passes, total, source: "eval", requests: tally.requests, durationMs: outcome.durationMs, cutOff: tally.cutOff, ...(errored.length ? { errored } : {}), ...(ungradable.length ? { ungradable } : {}), ...(tally.poolViolations.length ? { refused: [...new Set(tally.poolViolations)] } : {}), ...(outcome.reasons && Object.keys(outcome.reasons).length ? { reasons: outcome.reasons } : {}), ...(outcome.checks && Object.keys(outcome.checks).length ? { checks: outcome.checks } : {}), ...(outcome.answers?.length ? { answers: outcome.answers } : {}) };
     // An eval that sends no request through the proxy did not use the model under test, and its spend was neither metered nor capped.
     if (!tally.requests) {
       const violations = [...new Set(tally.poolViolations)];
@@ -820,12 +825,14 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
           throw error;
         }
         if (call.role === "baseline") baselineRuns.push(result);
+        // The first screen's items are the screening items: a run that pauses mid-search shows them, not "stopped before screening".
+        if (call.role === "screen" && call.repeat === 1 && !summary.sampleIds.length) { summary.sampleIds = [...(items ?? [])]; save(); }
         const id = unitId(runId, taskKey(data, task), call.role, entry, call.repeat, call.attempt ?? 1);
-        return { items: result.items, costUsd: unitCost(ctx, runId, state.units(runId).filter(unit => unit.id === id))?.cost ?? null, ...(result.checks ? { checks: result.checks } : {}), ...(result.errored?.length ? { errored: result.errored } : {}) };
+        return { items: result.items, costUsd: unitCost(ctx, runId, state.units(runId).filter(unit => unit.id === id))?.cost ?? null, ...(result.checks ? { checks: result.checks } : {}), ...(result.errored?.length ? { errored: result.errored } : {}), ...(result.ungradable?.length ? { ungradable: result.ungradable } : {}) };
       },
       sample: (reliable, count) => {
-        // Screens draw from items the current model passes in every run, so a 5/5 screen asks whether a candidate keeps up with it;
-        // the next five retry a screen that missed one. The same items for the same eval (stableSample), so its runs search the same way.
+        // Screens draw from items the current model passes in every run, so a screen asks whether a candidate keeps up with it.
+        // The same items for the same eval (stableSample), so its runs search the same way.
         if (!data.samples![task]) {
           data.samples![task] = stableSample(reliable, count, item => `${task}\n${item}`);
           save();
@@ -1012,13 +1019,17 @@ function approvalQuestion(ctx: Context, runId: string, data: RunState): Question
     for (const candidate of candidates) destinations.add(endpointLabel(candidate.endpoint));
     const runs = estimate(candidates.length, repeats);
     const own = plan.generated ? plan.repoEval : plan;
-    const generated = plan.generated ? data.generated?.[name] ?? null : null;
+    const accepted = data.loop?.[name]?.status === "accepted";
+    // A saved Eval is read from the repository, so its cases are counted too.
+    const generated = plan.generated ? data.generated?.[name] ?? (accepted ? loadGeneratedEval(ctx.repo.root, plan.generated) : null) : null;
     if (plan.generated) destinations.add(endpointLabel(judgeRef(ctx, data).endpoint));
     const kinds = generated ? Object.entries(generated.cases.reduce<Record<string, number>>((counts, item) => ({ ...counts, [caseKind(item)]: (counts[caseKind(item)] ?? 0) + 1 }), {})).map(([kind, count]) => `${count} ${kind}`).join(", ") : "";
     return [
       `${name}`,
       ...(plan.generated ? [
-        `  Eval: written by OpenMerit from its review of the code${generated ? `, ${generated.cases.length} cases (${kinds})` : ""}, saved in ${plan.generated}/ once you accept it: after the run you grade sampled answers, and OpenMerit writes the eval again where you disagree`,
+        accepted
+          ? `  Eval: version ${data.loop?.[name]?.savedVersion ?? 1} of the eval you accepted, saved in ${plan.generated}/${generated ? `, ${generated.cases.length} cases (${kinds})` : ""}: run as it is, with no review and no grading`
+          : `  Eval: written by OpenMerit from its review of the code${generated ? `, ${generated.cases.length} cases (${kinds})` : ""}, saved in ${plan.generated}/ once you accept it: after the run you grade sampled answers, and OpenMerit writes the eval again where you disagree`,
         ...(generated?.bundle.criteria?.length ? [`  Criteria: ${generated.bundle.criteria.join("; ")}`] : []),
         ...(generated?.bundle.guardrails?.length ? [`  Guardrails: ${generated.bundle.guardrails.join("; ")}`] : []),
         `  Judge: ${judgeRef(ctx, data).model}, for text answers and guardrails; its calls count in the budget, not in a model's cost per item`,
@@ -1027,7 +1038,7 @@ function approvalQuestion(ctx: Context, runId: string, data: RunState): Question
       ...(own ? [
         `  ${plan.generated ? "Also the repository's eval, as extra evidence (items repo:…)" : "Command"}: ${own.command}${own.cwd ? ` (in ${own.cwd})` : ""}`,
         ...(own.env && Object.keys(own.env).length ? [`  Env: ${Object.entries(own.env).map(([key, value]) => `${key}=${value}`).join(" ")}`] : []),
-        `  Results: $OPENMERIT_RESULT${own.threshold !== undefined && !plan.generated ? `; pass rate ≥ ${own.threshold}` : ""}`,
+        `  Results: $OPENMERIT_RESULT${own.threshold != null && !plan.generated ? `; pass rate ≥ ${own.threshold}` : ""}`,
       ] : []),
       `  Candidates: ${candidates.length} cheaper than ${data.model}${candidates.length ? `, ECI ${candidates[0]!.eci.toFixed(1)}–${candidates.at(-1)!.eci.toFixed(1)}` : ""}${data.unranked?.[name] ? ` (${data.unranked[name]} without ECI left out)` : ""}`,
       `  Runs: at most ${runs.fullRuns} full and ${runs.screens} screens, each on every item the current model passes, or ${SMALL_EVAL} of them in a larger eval`,
@@ -1124,16 +1135,22 @@ function repeatsOf(units: readonly UnitRow[]): UnitRow[] {
     if (second.status !== "done") return { ...unit, status: second.status, error: second.error };
     const first = unit.result as unknown as UnitResult, retry = second.result as unknown as UnitResult;
     const items = { ...first.items, ...retry.items };
-    const result: UnitResult = { ...first, items, passes: Object.values(items).filter(Boolean).length, errored: (retry.errored ?? []).filter(item => !items[item]), ...(first.checks || retry.checks ? { checks: { ...first.checks, ...retry.checks } } : {}) };
+    const result: UnitResult = { ...first, items, passes: Object.values(items).filter(Boolean).length, errored: (retry.errored ?? []).filter(item => !items[item]), ...(first.ungradable || retry.ungradable ? { ungradable: [...new Set([...first.ungradable ?? [], ...retry.ungradable ?? []])] } : {}), ...(first.checks || retry.checks ? { checks: { ...first.checks, ...retry.checks } } : {}) };
     return { ...unit, result: result as unknown as Record<string, unknown> };
   });
 }
 
-function measure(ctx: Context, runId: string, all: UnitRow[], repeats: number, role: ModelResult["role"], entry: ModelRef, eci: number | null): ModelResult {
+/** The items no grader could grade in any of a task's units: they count for no model. */
+const ungradableOf = (units: readonly UnitRow[]) => new Set(units.flatMap(unit => (unit.status === "done" ? (unit.result as unknown as UnitResult).ungradable ?? [] : [])));
+/** A unit's items without those that count for no model. */
+const scoredItems = (result: UnitResult, excluded: ReadonlySet<string>) => Object.fromEntries(Object.entries(result.items).filter(([item]) => !excluded.has(item)));
+
+function measure(ctx: Context, runId: string, all: UnitRow[], repeats: number, role: ModelResult["role"], entry: ModelRef, eci: number | null, excluded: ReadonlySet<string>): ModelResult {
   const units = repeatsOf(all);
   const done = units.filter(unit => unit.status === "done");
   const results = done.map(unit => unit.result as unknown as UnitResult);
-  const passes = results.reduce((sum, item) => sum + item.passes, 0), total = results.reduce((sum, item) => sum + item.total, 0);
+  const scored = results.map(item => Object.values(scoredItems(item, excluded)));
+  const passes = scored.reduce((sum, item) => sum + item.filter(Boolean).length, 0), total = scored.reduce((sum, item) => sum + item.length, 0);
   const usage = all.map(unit => ctx.state.usage(runId, unit.id));
   const requests = usage.reduce((sum, item) => sum + item.requests, 0);
   const status: ModelResult["status"] = !units.length ? "not_run" : done.length === repeats && units.length === repeats ? "measured" : units.some(unit => unit.status === "unavailable") ? "unavailable"
@@ -1169,14 +1186,15 @@ function compareTask(ctx: Context, runId: string, data: RunState, name: string, 
   const base = baselineRef(ctx, data);
   const baseEci = ctx.catalogue.models.find(model => model.id === base.model)?.eci ?? null;
   const baseUnits = units.filter(unit => unit.role === "baseline");
+  const excluded = ungradableOf(units);
   // A search that stopped on the baseline ran only the baseline runs it needed.
-  const baseline = measure(ctx, runId, baseUnits, data.stopped?.[name] && !data.samples?.[name] ? baseUnits.length : repeats, "baseline", base, baseEci);
+  const baseline = measure(ctx, runId, baseUnits, data.stopped?.[name] && !data.samples?.[name] ? baseUnits.length : repeats, "baseline", base, baseEci, excluded);
   const summary = data.search?.[name];
   const criteria = data.loop?.[name]?.bar === "criteria" && plan.generated ? criteriaOf((data.generated?.[name] ?? loadGeneratedEval(ctx.repo.root, plan.generated)).bundle, plan.criteriaPassRate) : null;
   // The pool the search ran on: against the criteria, every model that can run the task.
   const byModel = new Map((criteria ? widePool(ctx, data, name) : data.pool?.[name] ?? []).map(entry => [entry.model, entry]));
   const finals = [...(summary?.finalists ?? []), ...(summary?.challengers ?? [])].map(model => byModel.get(model)!).filter(Boolean);
-  const candidates = finals.map(entry => measure(ctx, runId, units.filter(unit => unit.role === "final" && unit.model === entry.model), repeats, "candidate", entry, entry.eci));
+  const candidates = finals.map(entry => measure(ctx, runId, units.filter(unit => unit.role === "final" && unit.model === entry.model), repeats, "candidate", entry, entry.eci, excluded));
   const comparison: TaskComparison = {
     task: name, eval: { command: redact(plan.command), source: plan.source, threshold: plan.threshold ?? null },
     baseline, candidates, top: [], status: "incomplete", note: "", ...(summary ? { search: summary } : {}),
@@ -1200,7 +1218,7 @@ function compareTask(ctx: Context, runId: string, data: RunState, name: string, 
 /** A model's done runs of `role`, as the engine's measurements. */
 const runsOf = (units: readonly UnitRow[], role: UnitRow["role"], model: string): Measurement[] => repeatsOf(units.filter(unit => unit.role === role && unit.model === model)).filter(unit => unit.status === "done").map(unit => {
   const result = unit.result as unknown as UnitResult;
-  return { items: result.items, costUsd: null, ...(result.checks ? { checks: result.checks } : {}) };
+  return { items: scoredItems(result, ungradableOf(units)), costUsd: null, ...(result.checks ? { checks: result.checks } : {}) };
 });
 
 /** The switch to propose: the cheapest qualified model that saves at least MIN_SAVING per item, as the engine's `cheaper`. */

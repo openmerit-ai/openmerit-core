@@ -19,7 +19,7 @@
 import { createHash } from "node:crypto";
 import { Loop } from "@rivet-dev/workflows";
 import { applyLabelCheck, BudgetRefused, caseKind, checksBasedOn, completeWith, createClient, createMeasure, flow, graderFor, invalidCases, labelCheck, LABEL_CHECK_QUESTION, writeCases, WRITTEN_CASES, type Case, type Complete, type EndpointConfig, type MeasureResult, type TaskBundle } from "../ranking/index.ts";
-import { approvalQuestion, basedOn, baselineResult, byKind, CandidateUnavailable, catalogueIndex, CHALLENGERS, checkAgent, DEFAULT_REPEATS, EndChallengers, evaluateTask, stableSample, FINALISTS, floorNote, mergeEvidence, modelResult, newProgress, redact, SAMPLE_SIZE, score, SMALL_EVAL, strongest, taskResult, type AgentRun, type Catalogue, type CatalogueModel, type Funding, type Ledger, type ModelResult, type ReserveResult, type ResolvedGuardrails, type Settlement } from "../engine/index.ts";
+import { approvalQuestion, basedOn, baselineResult, byKind, CandidateUnavailable, catalogueIndex, CHALLENGERS, checkAgent, DEFAULT_REPEATS, EndChallengers, evaluateTask, stableSample, ungradableNotice, FINALISTS, floorNote, mergeEvidence, modelResult, newProgress, redact, SAMPLE_SIZE, score, SMALL_EVAL, strongest, taskResult, type AgentRun, type Catalogue, type CatalogueModel, type Funding, type Ledger, type ModelResult, type ReserveResult, type ResolvedGuardrails, type Settlement } from "../engine/index.ts";
 import { agentBundle, caseEvidence } from "../connectors/agent-bundle.ts";
 import { advanceLoop, completeHarness, criteriaOf, feedbackOf, gradeQuestions, MAX_ROUNDS, pickSamples, readGrade, reviseEval, startLoop, type CaseAnswer, type LoopState, type SampleGrade } from "../eval/loop.ts";
 import { buildPool, OPENROUTER, regionNotice, type EndpointInfo, type Option, type Pool, type Provisional } from "./pool.ts";
@@ -701,13 +701,15 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
               if (call.stage === "challenger") { endedFix = stop.fix; throw new EndChallengers(stop.message); }
               throw stop;
             }
-            if (!option) for (const item of result.results) if (!item.pass && item.reason && !failedCases.has(item.caseId)) failedCases.set(item.caseId, { caseId: item.caseId, kind: kinds[item.caseId] ?? "case", reason: item.reason });
+            if (!option) for (const item of result.results) if (!item.pass && item.failure !== "ungradable" && item.reason && !failedCases.has(item.caseId)) failedCases.set(item.caseId, { caseId: item.caseId, kind: kinds[item.caseId] ?? "case", reason: item.reason });
             if (result.answers && !answersOf.has(target.key)) answersOf.set(target.key, result.answers);
             // The checks a failed case missed, for the criteria bar (meetsCriteria).
             const checks = Object.fromEntries(result.results.flatMap(item => (item.failedChecks?.length ? [[item.caseId, item.failedChecks]] : [])));
             // Cases lost to a failed or timed-out call, not a wrong answer: the engine measures them once more.
             const errored = result.results.flatMap(item => (!item.pass && item.failure === "error" ? [item.caseId] : []));
-            return { items: Object.fromEntries(result.results.map(item => [item.caseId, item.pass])), checks, errored, costUsd: result.costUsd, costIsEstimate: result.costIsEstimate, latencyMs: result.latencyMs };
+            // Cases no grader could grade are left out for every model (the engine's Measurement.ungradable).
+            const ungradable = result.results.flatMap(item => (item.failure === "ungradable" ? [item.caseId] : []));
+            return { items: Object.fromEntries(result.results.filter(item => item.failure !== "ungradable").map(item => [item.caseId, item.pass])), checks, errored, ungradable, costUsd: result.costUsd, costIsEstimate: result.costIsEstimate, latencyMs: result.latencyMs };
           },
           // The same cases for the same eval, placed by their content (stableSample), and recorded in a step, so a replay screens on the same cases.
           sample: (reliable, count) => ctx.step(round === 1 ? "samples" : `samples-r${round}`, async () => {
@@ -840,6 +842,7 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
       const switches = result.failedChecks?.length ? top : cheaper;
       const notices: string[] = [], fixes: Fix[] = [];
       const { ended } = evaluated;
+      if (evaluated.ungradable.length) notices.push(ungradableNotice(evaluated.ungradable));
       if (ended && !ended.provisional) {
         const notice = `${ended.left.length === 1 ? "Challenger" : "Challengers"} not measured: ${ended.left.map(item => item.model).join(", ")}. ${ended.reason}`;
         notices.push(notice); fixes.push(...tie(endedFix, notice));

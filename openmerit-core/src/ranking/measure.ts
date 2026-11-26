@@ -99,7 +99,15 @@ export function createMeasure(input: {
           settle(index, { ...base, result: { caseId: caseItem.id, pass: false, failure: ran.failure ?? "error", reason: failureReason(ran) }, graderCostUsd: 0, ...(ran.failure === "error" && rejects(ran.status ?? 0) ? { rejected: ran.error ?? `HTTP ${ran.status}` } : {}) }, ran);
           continue;
         }
-        const grade = await input.grader.grade({ bundle: input.bundle, caseItem, output: ran.output, toolCalls: ran.toolCalls, transcript: ran.transcript, refused: ran.refused, ledger: input.ledger, key, ...(input.signal ? { signal: input.signal } : {}) });
+        let grade;
+        try {
+          grade = await input.grader.grade({ bundle: input.bundle, caseItem, output: ran.output, toolCalls: ran.toolCalls, transcript: ran.transcript, refused: ran.refused, ledger: input.ledger, key, ...(input.signal ? { signal: input.signal } : {}) });
+        } catch (error) {
+          // By name, as the engine's errors are, since a host may load its own copy.
+          if (!(error instanceof Error && error.name === "Ungradable")) throw error;
+          settle(index, { ...base, result: { caseId: caseItem.id, pass: false, failure: "ungradable", reason: oneSentence(error.message) }, graderCostUsd: 0 }, ran);
+          continue;
+        }
         settle(index, { ...base, result: { caseId: caseItem.id, pass: grade.pass, ...(grade.pass ? {} : { reason: grade.reason ?? "The grader failed the answer.", ...(grade.failed?.length ? { failedChecks: grade.failed } : {}) }) }, graderCostUsd: grade.costUsd }, ran);
       }
     };

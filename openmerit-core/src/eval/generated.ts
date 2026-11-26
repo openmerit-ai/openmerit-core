@@ -99,7 +99,8 @@ export interface GeneratedRun {
 
 /** What a generated eval keeps of one model's run beyond pass or fail: why each failed item failed, the checks it failed, and each answer for grading. */
 /** `errored`: the failed items whose model call failed, rather than answered wrongly. */
-export interface GeneratedOutcome { reasons: Record<string, string>; checks: Record<string, string[]>; answers: CaseAnswer[]; errored: string[] }
+/** `ungradable`: the items no grader could grade, such as when the judge's provider filtered the case; they count for no model. */
+export interface GeneratedOutcome { reasons: Record<string, string>; checks: Record<string, string[]>; answers: CaseAnswer[]; errored: string[]; ungradable: string[] }
 
 /** Runs a generated eval for one model, with the eval contract's result: pass or fail per item, and why a failed item failed. */
 export async function runGeneratedEval(value: GeneratedEval, input: GeneratedRun): Promise<EvalOutcome & GeneratedOutcome> {
@@ -127,10 +128,11 @@ export async function runGeneratedEval(value: GeneratedEval, input: GeneratedRun
       checks: Object.fromEntries(result.results.flatMap(item => (item.failedChecks?.length ? [[item.caseId, item.failedChecks]] : []))),
       answers: ids.flatMap(id => answers.filter(answer => answer.caseId === id)),
       errored: result.results.filter(item => !item.pass && item.failure === "error").map(item => item.caseId),
+      ungradable: result.results.filter(item => item.failure === "ungradable").map(item => item.caseId),
     };
   } catch (error) {
     const unavailable = error instanceof CandidateUnavailable;
-    return { ok: false, exitCode: 1, durationMs: Date.now() - started, items: null, reasons: {}, checks: {}, answers: [], errored: [], error: unavailable ? `the endpoint refused ${input.model}: ${error.message}` : (error as Error).message };
+    return { ok: false, exitCode: 1, durationMs: Date.now() - started, items: null, reasons: {}, checks: {}, answers: [], errored: [], ungradable: [], error: unavailable ? `the endpoint refused ${input.model}: ${error.message}` : (error as Error).message };
   }
 }
 

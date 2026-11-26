@@ -204,6 +204,11 @@ export function readVerdict(text: string, checks: readonly { id: string }[] = []
 /** A grader's reason as stored: redacted, on one line, at most 200 characters. */
 export const oneSentence = (text: string) => { const line = redact(text).replace(/\s+/g, " ").trim(); return line.length > 200 ? `${line.slice(0, 199)}…` : line; };
 
+/** Thrown by a grader that cannot grade a case at all, such as when the judge's provider filters it: the case is left out for every model. */
+export class Ungradable extends Error {
+  override readonly name = "Ungradable";
+}
+
 /**
  * Passes when the judge model says the output meets the task's rubric and every check: one per
  * criterion and per guardrail in the bundle's spec. Throws when the judge cannot answer.
@@ -225,6 +230,8 @@ export function judge(options: JudgeOptions): Grader {
       const answer = await options.client.complete({
         endpoint: options.endpoint, model: options.model, system: JUDGE_SYSTEM, messages: [{ role: "user", content: prompt }], maxTokens: options.maxTokens ?? 2048,
       }, { ledger, key: `${key}/judge${options.only ? "-guardrails" : ""}`, ...(signal ? { signal } : {}) });
+      // The judge's provider refused the case itself, as it does for some guardrail cases: asking again gets the same refusal.
+      if (!answer.ok && /content_filter/i.test(answer.error ?? "")) throw new Ungradable(`The judge ${options.model}'s provider refused to grade case ${caseItem.id} (content filter)`);
       const verdict = answer.ok ? readVerdict(answer.text, checks) : null;
       if (verdict === null) throw new Error(`The judge ${options.model} gave no verdict for case ${caseItem.id}${answer.error ? `: ${answer.error}` : ""}`);
       return { pass: verdict.pass, costUsd: answer.costUsd, costIsEstimate: answer.costIsEstimate, ...(verdict.pass ? {} : { reason: verdict.reason || "The judge failed the answer without a reason.", ...(verdict.failed.length ? { failed: verdict.failed } : {}) }) };
