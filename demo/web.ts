@@ -1,5 +1,5 @@
-// The web Worker (openmerit-scout-alpha): the landing page, the playground
-// walkthrough, the content pages and the contact-sales form. /scout, Scout's
+// The web Worker (openmerit-scout-alpha): the landing page, the content pages
+// and the contact-sales form. The retired playground walkthrough redirects home. /scout, Scout's
 // retired sign-in page, redirects to /contact-sales/. The domain router sends
 // /memo to the site Worker instead.
 import { contentPages, markdownPages, publicSiteResponse } from './public-site.ts';
@@ -20,7 +20,7 @@ export default {
     if (unavailable) return unavailable;
     // Scout's sign-in page and its APIs are gone; old links go to the demo request form.
     if (path === '/scout' || path.startsWith('/scout/')) return Response.redirect(`${url.origin}/contact-sales/`, 308);
-    if (path === '/playground/scout') return Response.redirect(`${url.origin}/playground/scout/${url.search}`, 308);
+    if (path === '/playground/scout' || path === '/playground/scout/') return Response.redirect(`${url.origin}/`, 308);
     if (contentPages.includes(`${path}/`)) return Response.redirect(`${url.origin}${path}/${url.search}`, 308);
     if (path === '/contact-sales/api') return contactSubmit(request, env);
     if (!['GET', 'HEAD'].includes(request.method)) return json({ error: 'Not found.' }, 404);

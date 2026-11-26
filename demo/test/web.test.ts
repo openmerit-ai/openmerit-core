@@ -4,21 +4,23 @@ import web, { type WebEnv } from '../web.ts';
 
 const assets: WebEnv['ASSETS'] = { fetch: async request => {
   const path = new URL(request.url).pathname;
-  const pages: Record<string, string> = { '/': 'Landing page', '/playground/scout/': 'Walkthrough', '/vs-routers/': 'Comparison', '/vs-routers/index.md': '# Comparison' };
+  const pages: Record<string, string> = { '/': 'Landing page', '/vs-routers/': 'Comparison', '/vs-routers/index.md': '# Comparison' };
   return new Response(pages[path] ?? 'Not found', { status: pages[path] ? 200 : 404 });
 } };
 
 const webEnv: WebEnv = { ASSETS: assets };
 
-test('the landing page stays at root, the walkthrough keeps its page and /scout goes to the demo form', async () => {
+test('the landing page stays at root, the retired walkthrough and /scout redirect', async () => {
   const home = await web.fetch(new Request('https://example.test/?ref=home'), webEnv);
   assert.equal(home.status, 200); assert.equal(await home.text(), 'Landing page');
   for (const path of ['/scout', '/scout/', '/scout/?q=a', '/scout/api/auth', '/scout/api/session']) {
     const scout = await web.fetch(new Request(`https://example.test${path}`), webEnv);
     assert.equal(scout.status, 308, path); assert.equal(scout.headers.get('location'), 'https://example.test/contact-sales/', path);
   }
-  const playground = await web.fetch(new Request('https://example.test/playground/scout'), webEnv);
-  assert.equal(playground.status, 308); assert.equal(playground.headers.get('location'), 'https://example.test/playground/scout/');
+  for (const path of ['/playground/scout', '/playground/scout/']) {
+    const playground = await web.fetch(new Request(`https://example.test${path}`), webEnv);
+    assert.equal(playground.status, 308, path); assert.equal(playground.headers.get('location'), 'https://example.test/', path);
+  }
   for (const page of ['vs-routers', 'run-locally']) {
     const response = await web.fetch(new Request(`https://example.test/${page}?ref=x`), webEnv);
     assert.equal(response.status, 308); assert.equal(response.headers.get('location'), `https://example.test/${page}/?ref=x`);
@@ -41,8 +43,6 @@ test('pages answer agents that ask for text/markdown with their Markdown version
     assert.equal(response.headers.get('content-signal'), null);
     assert.match(response.headers.get('vary') ?? '', /Accept/);
   }
-  // Only the listed pages negotiate; the walkthrough stays HTML.
-  assert.equal(await (await page('text/markdown', '/playground/scout/')).text(), 'Walkthrough');
 });
 
 test('retired pages and APIs return 404 without reading assets or secrets', async () => {
