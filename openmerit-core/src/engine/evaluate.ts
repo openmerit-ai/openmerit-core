@@ -43,6 +43,11 @@ export interface Measurement {
    * once more before they count; when they fail again, the option is unavailable, not failed.
    */
   errored?: readonly string[];
+  /**
+   * Items no grader could grade, such as a case the judge's provider refuses to read (a content filter):
+   * they are left out of the evaluation for every model, the current one included, from then on.
+   */
+  ungradable?: readonly string[];
 }
 
 /** The share of cases a model must pass each criterion on, unless the task sets `criteriaPassRate`. */
@@ -206,6 +211,8 @@ export interface EvaluateResult<T extends Rung> {
   challenged: T[];
   challengers: T[];
   provisionalTried: boolean;
+  /** Items left out for every model because no grader could grade them (Measurement.ungradable). */
+  ungradable: string[];
   /** Set when `measure` threw EndChallengers: what was left untried. */
   ended: { reason: string; left: T[]; provisional: boolean } | null;
 }
@@ -222,6 +229,10 @@ export function byKind(runs: readonly Measurement[], kinds: Readonly<Record<stri
   }
   return [...rates.values()];
 }
+
+/** Why some cases count for no model: the judge's provider refused to grade them. */
+export const ungradableNotice = (cases: readonly string[]) =>
+  `Left out for every model, the current one included: ${cases.join(", ")}. The judge's provider refused to grade ${cases.length === 1 ? "this case" : "these cases"} (a content filter), which asking again does not change. Reword ${cases.length === 1 ? "it" : "them"} in the eval if ${cases.length === 1 ? "it matters" : "they matter"}.`;
 
 /** The floor's verdict in words, for a result that recommends nothing. */
 export function floorNote(baseline: { passes: number; total: number; byKind: readonly KindRate[] }, current: string, floor = EVAL_FLOOR): string {
@@ -309,39 +320,49 @@ export async function evaluateTask<T extends Rung>(input: EvaluateInput<T>): Pro
    * answers. An option whose calls fail again is unavailable (a timeout must not screen a model out
    * and turn the search); the current model's count as failures.
    */
+  // Items no grader could grade: out of the evaluation for every model (Measurement.ungradable).
+  const excluded = new Set<string>();
+  const keep = <V>(record: Readonly<Record<string, V>>) => Object.fromEntries(Object.entries(record).filter(([item]) => !excluded.has(item)));
+  const strip = (run: Measurement): Measurement => (excluded.size ? { ...run, items: keep(run.items), ...(run.checks ? { checks: keep(run.checks) } : {}), ...(run.errored ? { errored: run.errored.filter(item => !excluded.has(item)) } : {}) } : run);
+  const live = (list: readonly string[]) => list.filter(item => !excluded.has(item));
   const settled = async (option: T | null, items: readonly string[] | null, call: MeasureCall): Promise<Measurement | null> => {
-    const first = await measure(option, items, call);
+    const found = await measure(option, items, call);
+    for (const item of found?.ungradable ?? []) excluded.add(item);
+    const first = found && strip(found);
     const errored = first ? (first.errored ?? []).filter(item => first.items[item] !== true) : [];
     if (!first || !errored.length) return first;
-    const again = await measure(option, errored, { ...call, attempt: 2 });
-    if (!again) return null;
+    const answered = await measure(option, errored, { ...call, attempt: 2 });
+    if (!answered) return null;
+    for (const item of answered.ungradable ?? []) excluded.add(item);
+    const again = strip(answered);
     const still = (again.errored ?? []).filter(item => again.items[item] !== true);
     if (option && still.length) throw new CandidateUnavailable(`${still.length} of its model call${still.length === 1 ? "" : "s"} failed or timed out twice, so it was not measured`);
-    return {
+    return strip({
       ...first, items: { ...first.items, ...again.items }, checks: { ...first.checks, ...again.checks }, errored: still,
       costUsd: first.costUsd === null || again.costUsd === null ? null : first.costUsd + again.costUsd, costIsEstimate: first.costIsEstimate === true || again.costIsEstimate === true,
-    };
+    });
   };
 
   // 1. The current model, with the early stop.
-  const reliableOf = () => Object.keys(progress.baseline[0]!.items).filter(item => progress.baseline.every(run => run.items[item] === true));
+  const reliableOf = () => live(Object.keys(progress.baseline[0]!.items)).filter(item => progress.baseline.every(run => run.items[item] === true));
   for (let repeat = 1; repeat <= repeats; repeat++) {
-    const run = await settled(null, repeat === 1 ? input.items : input.items ?? Object.keys(progress.baseline[0]!.items), { role: "baseline", stage: "baseline", repeat });
+    const run = await settled(null, repeat === 1 ? input.items : live(input.items ?? Object.keys(progress.baseline[0]!.items)), { role: "baseline", stage: "baseline", repeat });
     if (!run) throw new Error("The current model's run returned no measurement.");
     progress.baseline.push(run);
     if (reliableOf().length < sampleSize) break;
   }
   const items = input.items ? [...input.items] : Object.keys(progress.baseline[0]!.items);
-  const reliable = reliableOf();
+  let reliable = reliableOf();
   const criteria = input.criteria ?? null;
-  const baseline = { ...score(progress.baseline), runs: progress.baseline, byKind: byKind(progress.baseline, input.kinds), ...(criteria ? { failedChecks: meetsCriteria(progress.baseline, criteria).failed } : {}) };
+  const baselineOf = () => ({ ...score(progress.baseline), runs: progress.baseline, byKind: byKind(progress.baseline, input.kinds), ...(criteria ? { failedChecks: meetsCriteria(progress.baseline, criteria).failed } : {}) });
+  let baseline = baselineOf();
   const result = (status: EvaluateResult<T>["status"], rest: Partial<EvaluateResult<T>> = {}): EvaluateResult<T> => ({
-    status, baseline, items, reliable, samples: [], search: null, evidence: { items: items.length, repeats, reliable: reliable.length, screened: 0 }, candidates: [...tried.values()], top: [], cheaper: [], nearMisses: [], challenged: [], challengers: [], provisionalTried: false, ended: null, ...rest,
+    status, baseline, items, reliable, samples: [], search: null, evidence: { items: live(items).length, repeats, reliable: reliable.length, screened: 0 }, candidates: [...tried.values()], top: [], cheaper: [], nearMisses: [], challenged: [], challengers: [], provisionalTried: false, ended: null, ungradable: [...excluded], ...rest,
   });
   const floor = criteria ? null : input.floor === undefined ? EVAL_FLOOR : input.floor;
   if (floor !== null && baseline.score !== null && baseline.score < floor - 1e-9) return result("below_floor");
   // Against the criteria, a screen may use items the current model fails: it is not the bar.
-  const pool = criteria ? items : reliable;
+  const pool = criteria ? live(items) : reliable;
   if (pool.length < sampleSize) return result("too_few_reliable");
 
   // 2. The samples: the whole pool, or SMALL_EVAL items drawn from a larger one. Five items decided too
@@ -359,16 +380,16 @@ export async function evaluateTask<T extends Rung>(input: EvaluateInput<T>): Pro
     const tracked = entry(option, stage, provisional);
     const flag = provisional ? { provisional: true as const } : {};
     // Against the criteria a screen passes when the samples meet them, as the full runs must.
-    const passes = (run: Measurement, items: readonly string[]) => criteria ? meetsCriteria([run], criteria).meets : items.every(item => run.items[item] === true);
+    const passes = (run: Measurement, items: readonly string[]) => criteria ? meetsCriteria([run], criteria).meets : live(items).every(item => run.items[item] === true);
     const runs: Measurement[] = [];
     let accepted: boolean;
     try {
-      const first = await settled(option, samples, { role: "screen", stage, repeat: 1, ...flag });
+      const first = await settled(option, live(samples), { role: "screen", stage, repeat: 1, ...flag });
       if (!first) throw new Error(`The screen of ${option.key} returned no measurement.`);
       runs.push(first);
       accepted = passes(first, samples);
       // One miss, and not of a guardrail or step check, which every case must pass: screen once more on the item it missed.
-      const missed = samples.filter(item => first.items[item] !== true);
+      const missed = live(samples).filter(item => first.items[item] !== true);
       const broke = criteria ? meetsCriteria([first], criteria).failed.some(check => criteria.guardrails.includes(check)) : false;
       if (!accepted && missed.length === 1 && !broke) {
         const second = await settled(option, missed, { role: "screen", stage, repeat: 2, ...flag });
@@ -393,7 +414,7 @@ export async function evaluateTask<T extends Rung>(input: EvaluateInput<T>): Pro
     for (let repeat = 1; repeat <= repeats; repeat++) {
       let run: Measurement | null;
       try {
-        run = await settled(option, items, { role: "final", stage, repeat, ...(provisional ? { provisional: true as const } : {}) });
+        run = await settled(option, live(items), { role: "final", stage, repeat, ...(provisional ? { provisional: true as const } : {}) });
       } catch (error) {
         if (!unavailable(error)) throw error;
         Object.assign(tracked, { status: "unavailable", reason: error.message });
@@ -412,8 +433,19 @@ export async function evaluateTask<T extends Rung>(input: EvaluateInput<T>): Pro
   // With no model passing the search, only unplaced options and the provisional pick are left to try.
   for (const finalist of search.finalists) await full(finalist, tried.get(finalist.key)?.stage ?? "search");
 
-  const baselineScore = baseline.score!;
-  const qualifies = (item: Evaluated<T>) => shortfall({ measured: item.status === "measured", score: item.score, latencyMs: item.latencyMs, runs: item.runs }, baselineScore, rules, criteria, reliable) === null;
+  /** Leaves out of every run kept so far the items found ungradable since, so every model is scored on the same items. */
+  const restrip = () => {
+    if (!excluded.size) return;
+    progress.baseline.splice(0, progress.baseline.length, ...progress.baseline.map(strip));
+    for (const item of tried.values()) {
+      item.runs = item.runs.map(strip);
+      if (item.screen) item.screen = strip(item.screen);
+      Object.assign(item, score(item.status === "measured" ? item.runs : item.screen ? [item.screen] : []));
+    }
+    reliable = reliableOf(); baseline = baselineOf();
+  };
+  restrip();
+  const qualifies = (item: Evaluated<T>) => shortfall({ measured: item.status === "measured", score: item.score, latencyMs: item.latencyMs, runs: item.runs }, baseline.score!, rules, criteria, reliable) === null;
   const cheaperThanBaseline = (item: Evaluated<T>) => item.costPerItemUsd !== null && (baseline.costPerItemUsd === null || item.costPerItemUsd <= baseline.costPerItemUsd * (1 - MIN_SAVING));
   const finals = search.finalists.map(option => tried.get(option.key)!).filter(item => item.status === "measured");
   const leader = [...finals].sort((a, b) => b.score! - a.score! || (a.costPerItemUsd ?? Infinity) - (b.costPerItemUsd ?? Infinity) || strength(a.option) - strength(b.option))[0]?.option ?? null;
@@ -442,9 +474,10 @@ export async function evaluateTask<T extends Rung>(input: EvaluateInput<T>): Pro
     }
   }
   const rank = () => {
+    restrip();
     const candidates = [...tried.values()];
     for (const item of candidates) {
-      item.shortfall = shortfall({ measured: item.status === "measured", score: item.score, latencyMs: item.latencyMs, runs: item.runs }, baselineScore, rules, criteria, reliable);
+      item.shortfall = shortfall({ measured: item.status === "measured", score: item.score, latencyMs: item.latencyMs, runs: item.runs }, baseline.score!, rules, criteria, reliable);
       item.regressed = criteria || item.status !== "measured" ? [] : regressions(item.runs, reliable);
       item.qualified = item.shortfall === null;
     }
@@ -465,8 +498,8 @@ export async function evaluateTask<T extends Rung>(input: EvaluateInput<T>): Pro
   }
 
   // 5. Qualification and the Top 3.
-  const nearMisses = ranked.candidates.filter(item => item.shortfall === "score" && item.score !== null && (baselineScore - item.score) * items.length <= 1 + 1e-9);
+  const nearMisses = ranked.candidates.filter(item => item.shortfall === "score" && item.score !== null && (baseline.score! - item.score) * live(items).length <= 1 + 1e-9);
   return result(ranked.top.length ? "ranked" : search.selected ? "no_qualified" : "no_passing_model", {
-    samples, search, evidence: { items: items.length, repeats, reliable: reliable.length, screened: samples.length }, candidates: ranked.candidates, top: ranked.top, cheaper: ranked.cheaper, nearMisses, challenged, challengers: passed, provisionalTried, ended,
+    samples, search, evidence: { items: live(items).length, repeats, reliable: reliable.length, screened: live(samples).length }, candidates: ranked.candidates, top: ranked.top, cheaper: ranked.cheaper, nearMisses, challenged, challengers: passed, provisionalTried, ended,
   });
 }

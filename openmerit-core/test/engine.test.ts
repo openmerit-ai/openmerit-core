@@ -446,3 +446,24 @@ test("against the criteria, a current model that meets the checks with some fail
   assert.equal(criteriaSummary([], { costPerItemUsd: 0.001, passes: 49, total: 51 }, null), "Your current model meets your checks, though it fails 2 of its 51 case runs, and no cheaper model OpenMerit tried does.");
   assert.equal(criteriaSummary([], { costPerItemUsd: 0.001, passes: 51, total: 51 }, { model: "m", costPerItemUsd: 0.0005 }), "Your current model meets your checks; m meets them too, for less.");
 });
+
+test("a case no grader can grade is left out for every model, including runs measured before it was found", async () => {
+  // Twelve items; the current model passes them all. Only when grading x's answers does i4 turn out ungradable.
+  const items = Array.from({ length: 12 }, (_, index) => `i${index + 1}`);
+  const asked: string[] = [];
+  const result = await evaluateTask({
+    ladder: [{ key: "x", price: 1 }], strength: () => 1, items, repeats: 2, baselinePrice: 10,
+    sample: () => { throw new Error("a small eval is not sampled"); },
+    measure: async (option: Rung | null, ids: readonly string[] | null, call: MeasureCall) => {
+      asked.push(`${call.role}:${ids!.length}`);
+      const filtered = option !== null && ids!.includes("i4");
+      return { items: Object.fromEntries(ids!.filter(id => !(filtered && id === "i4")).map(id => [id, true])), ...(filtered ? { ungradable: ["i4"] } : {}), costUsd: ids!.length * (option ? 0.001 : 0.01) };
+    },
+  });
+  assert.deepEqual(result.ungradable, ["i4"]);
+  assert.deepEqual([result.baseline.passes, result.baseline.total], [22, 22], "the current model's runs drop i4 too");
+  assert.ok(!result.reliable.includes("i4"));
+  assert.deepEqual(asked, ["baseline:12", "baseline:12", "screen:12", "final:11", "final:11"], "later runs do not ask for i4");
+  const x = result.candidates.find(item => item.option.key === "x")!;
+  assert.deepEqual([x.status, x.passes, x.total, result.top[0]?.option.key, result.evidence.items], ["measured", 22, 22, "x", 11]);
+});

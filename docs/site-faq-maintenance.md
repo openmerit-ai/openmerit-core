@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Retest fixes: ungradable cases, the label check and second-run wording — unreleased, 26 November 2026
+
+Reviewed the homepage against cases the judge's provider refuses being left out for every model, the label check showing cases in full, and Scout's wording for runs on an accepted eval. `site/index.html` makes no claim about the judge, the label check or Scout's approval text. No homepage change.
+
 ## Retest fixes: refused requests, JSON answers and the eval budget — unreleased, 26 November 2026
 
 Reviewed the homepage against Scout reporting partly refused requests, evals asking for a JSON task's schema, requests waiting for in-flight reservations instead of pausing, and abandoned answers priced by their text. `site/index.html` makes no claim about the proxy, JSON output or the eval budget. No homepage change.

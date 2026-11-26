@@ -69,7 +69,8 @@ export function traceRequest(caseItem: Case): { system?: string; messages: Messa
   return { ...(system.length ? { system: system.join("\n\n") } : {}), messages };
 }
 
-export type CaseFailure = "error" | "tool_loop" | "truncated";
+/** `ungradable`: the model answered, but no grader could grade it, such as when the judge's provider filtered the case. */
+export type CaseFailure = "error" | "tool_loop" | "truncated" | "ungradable";
 
 /**
  * A tool call the runner refused, and why: the task offers no such tool, its arguments fail the
