@@ -189,7 +189,7 @@ test('a page GET queues one cookieless $pageview; API, asset, non-GET, bot and l
     });
     assert.doesNotMatch(JSON.stringify(body), /secret/);
     sent.length = 0;
-    await visit('https://openmerit.ai/playground/scout/');
+    await visit('https://openmerit.ai/vs-routers/');
     assert.equal(sent[0]?.body.distinct_id, body.distinct_id, 'same visitor, same day, same ID');
     sent.length = 0;
     await visit('https://openmerit.ai/api/me');

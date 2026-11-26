@@ -8,7 +8,7 @@ Domain operations: see the [primary domain migration](site-domain-migration.md) 
 
 ## Get Demo instead of Scout — unreleased source, 26 November 2026
 
-At the owner's request, the homepage's **Try Scout** button is now **Get Demo** and goes to `/contact-sales/`, and the header nav on every page reads Memo, then Get Demo, in place of Scout. The hero's second paragraph still introduces Scout but no longer links it, the playground walkthrough's footer links the homepage, and `/scout/` (the Clerk sign-in page) is removed and redirects to `/contact-sales/`. Older notes below that mention Try Scout or `/scout/` describe earlier releases.
+At the owner's request, the homepage's **Try Scout** button is now **Get Demo** and goes to `/contact-sales/`, and the header nav on every page reads Memo, then Get Demo, in place of Scout. The hero's second paragraph still introduces Scout but no longer links it, and `/scout/` (the Clerk sign-in page) is removed and redirects to `/contact-sales/`. Older notes below that mention Try Scout or `/scout/` describe earlier releases.
 
 ## Contact-sales form — unreleased source, 26 November 2026
 
@@ -28,7 +28,7 @@ The homepage and every page in `contentPages` (the `markdownPages` list in `demo
 
 ## Routers comparison page — unreleased source, 26 November 2026
 
-`site/vs-routers/index.html` is a static page in the homepage's layout: the same header, `.letter-main` width and serif lede, with `.compare-*` styles in `site/styles.css` for its table and FAQ. The table scrolls sideways under 580px. It loads no client script. `demo/public-site.ts` allows `/vs-routers` and `/vs-routers/` at both the domain router and the web Worker, which redirects the slashless path, and `scripts/build-scout.mjs` packages it. It is indexable, unlike the playground walkthrough, so assistants and search engines can cite it. Local checks do not publish it; deploy `scout-serving` and the domain router through the normal workflow.
+`site/vs-routers/index.html` is a static page in the homepage's layout: the same header, `.letter-main` width and serif lede, with `.compare-*` styles in `site/styles.css` for its table and FAQ. The table scrolls sideways under 580px. It loads no client script. `demo/public-site.ts` allows `/vs-routers` and `/vs-routers/` at both the domain router and the web Worker, which redirects the slashless path, and `scripts/build-scout.mjs` packages it. It is indexable, so assistants and search engines can cite it. Local checks do not publish it; deploy `scout-serving` and the domain router through the normal workflow.
 
 ## OpenMerit logo default — unreleased source
 

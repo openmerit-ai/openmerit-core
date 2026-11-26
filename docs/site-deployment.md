@@ -28,7 +28,7 @@ It runs the pinned Wrangler with `--strict`, which stops if someone changed the 
 | Key | Worker | Config | Serves |
 |---|---|---|---|
 | `domain-router` | `openmerit-domains` | `wrangler.domains.jsonc` | Every public host; redirects; `/memo` to `openmerit-site`; `/mcp`, `/.well-known/oauth-protected-resource` and `/api/*` to the cloud app |
-| `scout-serving` | `openmerit-scout-alpha` | `wrangler.scout-alpha.jsonc` | Landing page, `/playground/scout/`, the buyer-question pages and the contact-sales form; redirects `/scout` and everything under it to `/contact-sales/` |
+| `scout-serving` | `openmerit-scout-alpha` | `wrangler.scout-alpha.jsonc` | Landing page, the buyer-question pages and the contact-sales form; redirects `/scout` and everything under it to `/contact-sales/`, and the retired `/playground/scout/` to `/` |
 | `playground-claims` | `playground-claims` | `playground/wrangler.jsonc` | Sahra Health's customer claims and enrollment workflows |
 | `site` | `openmerit-site` | `wrangler.jsonc` | Protected memo. Code-only release with asset-retention checks and no container rollout |
 | `app` | `openmerit-app` | `wrangler.app.jsonc` | `app.openmerit.ai`: the cloud plan's run, task and account pages, built from `app/` by `scripts/build-app.ts` and served by `app/worker.ts`. Clerk sign-in; data from the cloud app's `/api/*`. Its first deploy creates the `app.openmerit.ai` custom domain |
@@ -87,7 +87,7 @@ What a Worker rollback does **not** undo:
 
 Per Worker:
 
-- **`scout-serving`:** a rollback also changes the landing page. Check `/`, `/contact-sales/`, `/playground/scout/` and that `/scout/` redirects to `/contact-sales/`. Rolling back across `remove-scout-1` cannot restore the deleted Durable Objects.
+- **`scout-serving`:** a rollback also changes the landing page. Check `/`, `/contact-sales/` and that `/scout/` redirects to `/contact-sales/`. Rolling back across `remove-scout-1` cannot restore the deleted Durable Objects.
 - **`email`:** send a real message to each alias in [Email forwarding](#email-forwarding) and confirm every recipient received it. If the Worker itself is failing, pointing the alias's rule back at a single verified destination restores delivery to that person.
 - **`app`:** a rollback before the app pages restores the static mockup. Check `/`, `/config.json` and `/r/<id>/`.
 - **`domain-router`:** check apex, `www` and legacy `.site` hosts, plus `/memo`, `/mcp` and `/api/me`. The route and pageview cases are in `demo/test/domain-migration.test.mjs`. Rolling back before the website pageviews stops them. Rolling back before the cloud app routes sends `/mcp` and `/api/*` to `openmerit-scout-alpha`, which returns 404.

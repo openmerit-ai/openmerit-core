@@ -4,12 +4,12 @@ export const contentPages = ['/vs-routers/', '/find-a-cheaper-llm/', '/evals-fro
 export const markdownPages = ['/', ...contentPages];
 
 // Keep the public boundary identical at the domain router and the web Worker:
-// the landing page, the playground walkthrough, the content pages and the Clerk sign-in.
+// the landing page, the content pages and the retired paths that redirect.
 const sharedAssets = new Set([
   '/',
   '/favicon.svg',
   '/styles.css',
-  // A shareable walkthrough of the Sahra Health playground; nothing else under /playground.
+  // The retired playground walkthrough, which redirects to the landing page.
   '/playground/scout',
   '/playground/scout/',
   ...contentPages.flatMap(page => [page, page.slice(0, -1)]),
