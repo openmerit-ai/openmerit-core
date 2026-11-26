@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="The OpenMerit CLI runs on your machine with your own keys and no OpenMerit account, and it is free. It never sits in your request path. Here is exactly where your code and data go.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f8f7f4" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#171915" media="(prefers-color-scheme: dark)">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Choose an AI model for your code without your code going through OpenMerit">
+  <meta property="og:description" content="The OpenMerit CLI runs on your machine with your own keys and no OpenMerit account, and it is free. It never sits in your request path. Here is exactly where your code and data go.">
+  <meta property="og:url" content="https://openmerit.ai/run-locally/">
+  <meta property="og:site_name" content="OpenMerit">
+  <meta property="og:image" content="https://openmerit.ai/assets/openmerit-og-v1.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <title>Choose an AI model for your code without your code going through OpenMerit · OpenMerit</title>
+  <link rel="canonical" href="https://openmerit.ai/run-locally/">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="preload" href="/assets/geist-sans.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/styles.css?v=20261126-compare-v2">
+</head>
+<body class="landing-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="letter-header">
+    <a class="brand" href="/" aria-label="OpenMerit home">
+      <svg class="brand-mark" viewBox="0 0 28 30" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M3 27V13a11 11 0 0 1 22 0v14M8 27V13a6 6 0 0 1 12 0v14M14 16v11"/></svg>
+      <span>openmerit</span>
+    </a>
+    <nav aria-label="Primary navigation"><a href="/scout/">Scout</a><a href="/memo/">Memo</a></nav>
+  </header>
+  <main id="main" class="letter-main compare-page">
+    <h1>Choose an AI model for your code without your code going through OpenMerit</h1>
+    <p class="compare-lede">The OpenMerit CLI runs on your machine, with your own keys and no OpenMerit account or service in the loop. Running it yourself is free.</p>
+
+<h2 id="data">Where your code and data go</h2>
+<ul>
+<li><strong>To the model provider you chose for the harness</strong>, to read and review code: Anthropic through Claude Code, OpenAI through your ChatGPT sign-in, or your API provider. Snippets are redacted for anything shaped like a key.</li>
+<li><strong>To the candidate endpoints you configured</strong>: eval inputs only, during evals you approved.</li>
+<li><strong>On your machine</strong>: run history and each run’s progress, never with keys or dataset contents.</li>
+<li><strong>To OpenMerit</strong>: anonymous usage data only, such as command names, success, duration and versions, never code, arguments, paths or model IDs. Turn it off with <code>OPENMERIT_TELEMETRY=0</code> or <code>DO_NOT_TRACK=1</code>.</li>
+</ul>
+
+<h2 id="request-path">Never in your request path</h2>
+<p>OpenMerit picks a model ahead of time and changes the model name in your code after you approve. Your app keeps calling its provider directly, so if OpenMerit stops, nothing in production changes. See <a href="/vs-routers/">OpenMerit vs routers and gateways</a>.</p>
+
+<h2 id="requirements">Requirements</h2>
+<ul>
+<li>Node.js 22.19 or newer.</li>
+<li>Linux (x64 and arm64, tested in CI) or macOS on Apple silicon. Windows isn’t supported.</li>
+<li>About 660 to 790 MB of disk space.</li>
+</ul>
+
+<h2 id="cost">What it costs</h2>
+<ul>
+<li><strong>OpenMerit on your machine:</strong> free.</li>
+<li><strong>Your own model spend:</strong> evals run on your keys within a budget you set ($10 per run by default). The harness runs on your Claude or ChatGPT plan, or your API key.</li>
+<li><strong>Hosted by OpenMerit:</strong> we run the reviews and evals for you. For pricing, <a href="mailto:lazim@openmerit.ai">contact us</a>.</li>
+</ul>
+
+<h2 id="start">Try it</h2>
+<pre><code>npm install -g openmerit
+cd your-repo &amp;&amp; openmerit setup &amp;&amp; openmerit scout</code></pre>
+    <h2 id="related">Related questions</h2>
+    <ul class="compare-related"><li><a href="/vs-routers/">OpenMerit vs LLM routers and gateways</a></li><li><a href="/find-a-cheaper-llm/">How to find a cheaper LLM that works as well as the one your app uses</a></li><li><a href="/evals-from-your-code/">A tool that writes evals from your codebase and tests cheaper models against them</a></li><li><a href="/claude-code-and-codex/">Compare and pick LLMs for your app from inside Claude Code or Codex</a></li></ul>
+  </main>
+</body>
+</html>

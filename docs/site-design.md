@@ -2,6 +2,10 @@
 
 Domain operations: see the [primary domain migration](site-domain-migration.md) for current routing, email, auth, and deployment constraints. Historical publication records below retain their original domains.
 
+## Buyer-question pages — unreleased source, 26 November 2026
+
+`contentPages` in `demo/public-site.ts` lists the static pages under `site/` that answer buyers' questions: `/vs-routers/`, `/find-a-cheaper-llm/`, `/evals-from-your-code/`, `/claude-code-and-codex/` and `/run-locally/`. Both Workers allow each one with and without its trailing slash, the web Worker redirects the slashless path, `scripts/build-scout.mjs` packages each directory and `scripts/docs.test.ts` checks each page's links, IDs and metadata. Add a page by creating its directory and adding it to that list. They share the `/vs-routers/` layout and `.compare-*` styles, including code blocks, and each ends with a related-questions list linking the others.
+
 ## Routers comparison page — unreleased source, 26 November 2026
 
 `site/vs-routers/index.html` is a static page in the homepage's layout: the same header, `.letter-main` width and serif lede, with `.compare-*` styles in `site/styles.css` for its table and FAQ. The table scrolls sideways under 580px. It loads no client script. `demo/public-site.ts` allows `/vs-routers` and `/vs-routers/` at both the domain router and the web Worker, which redirects the slashless path, and `scripts/build-scout.mjs` packages it. It is indexable, unlike the playground walkthrough, so assistants and search engines can cite it. Local checks do not publish it; deploy `scout-serving` and the domain router through the normal workflow.

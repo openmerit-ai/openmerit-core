@@ -35,8 +35,10 @@ test('the landing page stays at root, and sign-in and the walkthrough keep their
   assert.equal(await (await web.fetch(new Request('https://example.test/scout/'), authEnv)).text(), 'Sign in');
   const playground = await web.fetch(new Request('https://example.test/playground/scout'), authEnv);
   assert.equal(playground.status, 308); assert.equal(playground.headers.get('location'), 'https://example.test/playground/scout/');
-  const compare = await web.fetch(new Request('https://example.test/vs-routers'), authEnv);
-  assert.equal(compare.status, 308); assert.equal(compare.headers.get('location'), 'https://example.test/vs-routers/');
+  for (const page of ['vs-routers', 'run-locally']) {
+    const response = await web.fetch(new Request(`https://example.test/${page}?ref=x`), authEnv);
+    assert.equal(response.status, 308); assert.equal(response.headers.get('location'), `https://example.test/${page}/?ref=x`);
+  }
   assert.equal(await (await web.fetch(new Request('https://example.test/vs-routers/'), authEnv)).text(), 'Comparison');
 });
 
