@@ -1,6 +1,6 @@
 {
   "name": "openmerit",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Find the right model for each LLM call in your code, without sitting in your request path. Scout writes an eval from your code and finds cheaper models that pass it. Runs on your machine with your own keys and no OpenMerit account. OpenMerit Cloud at openmerit.ai.",
   "keywords": [
     "llm",

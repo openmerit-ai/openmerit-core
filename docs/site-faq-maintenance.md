@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Scout rerun fix and package description — npm 0.5.1 release preparation, 26 November 2026
+
+Reviewed the homepage against 0.5.1: a rerun of failed calls now counts as part of its run in Scout's results, and the npm package's description, keywords and homepage changed. `site/index.html` makes no claim about either. No homepage copy change.
+
 ## Get Demo replaces Try Scout — unreleased, 26 November 2026
 
 The homepage's call to action is now **Get Demo**, linking `/contact-sales/`, and Scout's sign-in page at `/scout/` redirects there. The hero copy and its Scout coverage figures are unchanged, so no claim changed; the paragraph no longer links to a Scout page. The homepage has no FAQ block.
