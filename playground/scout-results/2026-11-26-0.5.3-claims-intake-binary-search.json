@@ -1,0 +1,520 @@
+{
+  "runId": "run-20261126-190920-efb1",
+  "status": "done",
+  "phase": "done",
+  "questions": [],
+  "notices": [],
+  "spend": {
+    "settledUsd": 26.905222683150097,
+    "estimatedUsd": 0.016508000000000002,
+    "inFlightUsd": 0,
+    "inFlight": 0,
+    "unknown": 0,
+    "requests": 3217,
+    "totalUsd": 26.905222683150097
+  },
+  "budgetUsd": 27,
+  "harnessUsage": {
+    "calls": 22,
+    "costUsd": 0.6636332999999999,
+    "unknownCost": 0,
+    "inputTokens": 738655,
+    "outputTokens": 35345
+  },
+  "result": {
+    "model": "anthropic/claude-sonnet-5.5",
+    "tasks": [
+      {
+        "task": "Claims intake agent",
+        "eval": {
+          "command": "openmerit eval .openmerit/evals/claims-intake-agent",
+          "source": "generated",
+          "threshold": null
+        },
+        "baseline": {
+          "model": "anthropic/claude-sonnet-5.5",
+          "endpoint": "openrouter",
+          "endpointModel": "anthropic/claude-sonnet-5.5",
+          "role": "baseline",
+          "eci": 166.56,
+          "status": "measured",
+          "passes": 23,
+          "total": 57,
+          "runs": 3,
+          "score": 0.40350877192982454,
+          "source": "eval",
+          "costPerItemUsd": 0.01632508771929825,
+          "costIsEstimate": false,
+          "meanLatencyMs": 2344.941520467836,
+          "requests": 171,
+          "qualified": false,
+          "note": "",
+          "evidence": [
+            "run-20261126-190920-efb1|claims_intake_agent~2|baseline|openrouter|anthropic/claude-sonnet-5.5|r1",
+            "run-20261126-190920-efb1|claims_intake_agent~2|baseline|openrouter|anthropic/claude-sonnet-5.5|r2",
+            "run-20261126-190920-efb1|claims_intake_agent~2|baseline|openrouter|anthropic/claude-sonnet-5.5|r3"
+          ]
+        },
+        "candidates": [
+          {
+            "key": "meta/muse-wonder",
+            "model": "meta/muse-wonder",
+            "endpoint": "openrouter",
+            "endpointModel": "meta/muse-wonder",
+            "eci": 161.68,
+            "eciSource": "published",
+            "price": 24,
+            "role": "candidate",
+            "status": "measured",
+            "passes": 54,
+            "total": 57,
+            "runs": 3,
+            "score": 0.9473684210526315,
+            "source": "eval",
+            "costPerItemUsd": 0.030159943859649124,
+            "costIsEstimate": false,
+            "meanLatencyMs": 3359.1461988304095,
+            "requests": 171,
+            "qualified": true,
+            "note": "",
+            "evidence": [
+              "run-20261126-190920-efb1|claims_intake_agent~2|final|openrouter|meta/muse-wonder|r1",
+              "run-20261126-190920-efb1|claims_intake_agent~2|final|openrouter|meta/muse-wonder|r2",
+              "run-20261126-190920-efb1|claims_intake_agent~2|final|openrouter|meta/muse-wonder|r3"
+            ]
+          },
+          {
+            "key": "openai/gpt-6-sol",
+            "model": "openai/gpt-6-sol",
+            "endpoint": "openrouter",
+            "endpointModel": "openai/gpt-6-sol",
+            "eci": 163.75,
+            "eciSource": "published",
+            "price": 12,
+            "role": "candidate",
+            "status": "measured",
+            "passes": 54,
+            "total": 57,
+            "runs": 3,
+            "score": 0.9473684210526315,
+            "source": "eval",
+            "costPerItemUsd": 0.0066934736842105295,
+            "costIsEstimate": false,
+            "meanLatencyMs": 1750.6959064327486,
+            "requests": 171,
+            "qualified": true,
+            "note": "",
+            "evidence": [
+              "run-20261126-190920-efb1|claims_intake_agent~2|final|openrouter|openai/gpt-6-sol|r1",
+              "run-20261126-190920-efb1|claims_intake_agent~2|final|openrouter|openai/gpt-6-sol|r2",
+              "run-20261126-190920-efb1|claims_intake_agent~2|final|openrouter|openai/gpt-6-sol|r3"
+            ]
+          },
+          {
+            "key": "google/gemini-4-argon",
+            "model": "google/gemini-4-argon",
+            "endpoint": "openrouter",
+            "endpointModel": "google/gemini-4-argon",
+            "eci": 166.48,
+            "eciSource": "published",
+            "price": 12,
+            "role": "candidate",
+            "status": "measured",
+            "passes": 54,
+            "total": 57,
+            "runs": 3,
+            "score": 0.9473684210526315,
+            "source": "eval",
+            "costPerItemUsd": 0.008821824561403508,
+            "costIsEstimate": false,
+            "meanLatencyMs": 6725.187134502924,
+            "requests": 171,
+            "qualified": true,
+            "note": "",
+            "evidence": [
+              "run-20261126-190920-efb1|claims_intake_agent~2|final|openrouter|google/gemini-4-argon|r1",
+              "run-20261126-190920-efb1|claims_intake_agent~2|final|openrouter|google/gemini-4-argon|r2",
+              "run-20261126-190920-efb1|claims_intake_agent~2|final|openrouter|google/gemini-4-argon|r3"
+            ]
+          },
+          {
+            "key": "openai/gpt-6.1-terra",
+            "model": "openai/gpt-6.1-terra",
+            "endpoint": "openrouter",
+            "endpointModel": "openai/gpt-6.1-terra",
+            "eci": 167.67,
+            "eciSource": "published",
+            "price": 6,
+            "role": "candidate",
+            "status": "measured",
+            "passes": 54,
+            "total": 57,
+            "runs": 3,
+            "score": 0.9473684210526315,
+            "source": "eval",
+            "costPerItemUsd": 0.003277122807017545,
+            "costIsEstimate": false,
+            "meanLatencyMs": 2338.035087719298,
+            "requests": 171,
+            "qualified": true,
+            "note": "",
+            "evidence": [
+              "run-20261126-190920-efb1|claims_intake_agent~2|final|openrouter|openai/gpt-6.1-terra|r1",
+              "run-20261126-190920-efb1|claims_intake_agent~2|final|openrouter|openai/gpt-6.1-terra|r2",
+              "run-20261126-190920-efb1|claims_intake_agent~2|final|openrouter|openai/gpt-6.1-terra|r3"
+            ]
+          },
+          {
+            "key": "google/gemini-4-carbon",
+            "model": "google/gemini-4-carbon",
+            "endpoint": "openrouter",
+            "endpointModel": "google/gemini-4-carbon",
+            "eci": 169.76,
+            "eciSource": "published",
+            "price": 12,
+            "role": "candidate",
+            "status": "measured",
+            "passes": 55,
+            "total": 57,
+            "runs": 3,
+            "score": 0.9649122807017544,
+            "source": "eval",
+            "costPerItemUsd": 0.016936140350877194,
+            "costIsEstimate": false,
+            "meanLatencyMs": 9159.668393782384,
+            "requests": 193,
+            "qualified": true,
+            "note": "",
+            "evidence": [
+              "run-20261126-190920-efb1|claims_intake_agent~2|final|openrouter|google/gemini-4-carbon|r1",
+              "run-20261126-190920-efb1|claims_intake_agent~2|final|openrouter|google/gemini-4-carbon|r2",
+              "run-20261126-190920-efb1|claims_intake_agent~2|final|openrouter|google/gemini-4-carbon|r3"
+            ]
+          }
+        ],
+        "top": [
+          {
+            "key": "openai/gpt-6.1-terra",
+            "model": "openai/gpt-6.1-terra",
+            "endpoint": "openrouter",
+            "endpointModel": "openai/gpt-6.1-terra",
+            "eci": 167.67,
+            "eciSource": "published",
+            "price": 6,
+            "role": "candidate",
+            "status": "measured",
+            "passes": 54,
+            "total": 57,
+            "runs": 3,
+            "score": 0.9473684210526315,
+            "source": "eval",
+            "costPerItemUsd": 0.003277122807017545,
+            "costIsEstimate": false,
+            "meanLatencyMs": 2338.035087719298,
+            "requests": 171,
+            "qualified": true,
+            "note": "",
+            "evidence": [
+              "run-20261126-190920-efb1|claims_intake_agent~2|final|openrouter|openai/gpt-6.1-terra|r1",
+              "run-20261126-190920-efb1|claims_intake_agent~2|final|openrouter|openai/gpt-6.1-terra|r2",
+              "run-20261126-190920-efb1|claims_intake_agent~2|final|openrouter|openai/gpt-6.1-terra|r3"
+            ]
+          },
+          {
+            "key": "openai/gpt-6-sol",
+            "model": "openai/gpt-6-sol",
+            "endpoint": "openrouter",
+            "endpointModel": "openai/gpt-6-sol",
+            "eci": 163.75,
+            "eciSource": "published",
+            "price": 12,
+            "role": "candidate",
+            "status": "measured",
+            "passes": 54,
+            "total": 57,
+            "runs": 3,
+            "score": 0.9473684210526315,
+            "source": "eval",
+            "costPerItemUsd": 0.0066934736842105295,
+            "costIsEstimate": false,
+            "meanLatencyMs": 1750.6959064327486,
+            "requests": 171,
+            "qualified": true,
+            "note": "",
+            "evidence": [
+              "run-20261126-190920-efb1|claims_intake_agent~2|final|openrouter|openai/gpt-6-sol|r1",
+              "run-20261126-190920-efb1|claims_intake_agent~2|final|openrouter|openai/gpt-6-sol|r2",
+              "run-20261126-190920-efb1|claims_intake_agent~2|final|openrouter|openai/gpt-6-sol|r3"
+            ]
+          },
+          {
+            "key": "google/gemini-4-argon",
+            "model": "google/gemini-4-argon",
+            "endpoint": "openrouter",
+            "endpointModel": "google/gemini-4-argon",
+            "eci": 166.48,
+            "eciSource": "published",
+            "price": 12,
+            "role": "candidate",
+            "status": "measured",
+            "passes": 54,
+            "total": 57,
+            "runs": 3,
+            "score": 0.9473684210526315,
+            "source": "eval",
+            "costPerItemUsd": 0.008821824561403508,
+            "costIsEstimate": false,
+            "meanLatencyMs": 6725.187134502924,
+            "requests": 171,
+            "qualified": true,
+            "note": "",
+            "evidence": [
+              "run-20261126-190920-efb1|claims_intake_agent~2|final|openrouter|google/gemini-4-argon|r1",
+              "run-20261126-190920-efb1|claims_intake_agent~2|final|openrouter|google/gemini-4-argon|r2",
+              "run-20261126-190920-efb1|claims_intake_agent~2|final|openrouter|google/gemini-4-argon|r3"
+            ]
+          }
+        ],
+        "status": "ranked",
+        "note": "Your current model fails 3 of your checks (G2, C4, C6); the cheapest model that passes them is openai/gpt-6.1-terra, at $13.05 less per 1,000 calls.",
+        "search": {
+          "status": "selected",
+          "pool": 220,
+          "unranked": 46,
+          "anyPrice": true,
+          "sampleIds": [
+            "example-1",
+            "example-2",
+            "example-3",
+            "example-4",
+            "example-5",
+            "written-1",
+            "written-2",
+            "written-3",
+            "written-4",
+            "written-5",
+            "written-6",
+            "written-7",
+            "written-8",
+            "written-9",
+            "written-10",
+            "written-11",
+            "written-12",
+            "repo:FICT-CLM-1008",
+            "repo:FICT-CLM-1021"
+          ],
+          "pick": "meta/muse-wonder",
+          "trials": [
+            {
+              "stage": "search",
+              "model": "nvidia/nemotron-3-ultra-550b-a55b",
+              "eci": 146.95,
+              "passes": 6,
+              "total": 19,
+              "accepted": false
+            },
+            {
+              "stage": "search",
+              "model": "x-ai/grok-4.5",
+              "eci": 154.98,
+              "passes": 13,
+              "total": 19,
+              "accepted": false
+            },
+            {
+              "stage": "search",
+              "model": "xiaomi/mimo-v2.6-flash",
+              "eci": 158.53,
+              "passes": 4,
+              "total": 19,
+              "accepted": false
+            },
+            {
+              "stage": "search",
+              "model": "meta/muse-wonder",
+              "eci": 161.68,
+              "passes": 18,
+              "total": 19,
+              "accepted": true
+            },
+            {
+              "stage": "search",
+              "model": "openai/gpt-5.5",
+              "eci": 160.1,
+              "passes": 15,
+              "total": 19,
+              "accepted": false
+            },
+            {
+              "stage": "search",
+              "model": "tencent/hy4",
+              "eci": 160.41,
+              "passes": 5,
+              "total": 19,
+              "accepted": false
+            },
+            {
+              "stage": "search",
+              "model": "openai/gpt-5.6-terra",
+              "eci": 160.73,
+              "passes": 17,
+              "total": 19,
+              "accepted": false
+            },
+            {
+              "stage": "search",
+              "model": "moonshotai/kimi-k3.1-pro",
+              "eci": 161.37,
+              "passes": 10,
+              "total": 19,
+              "accepted": false
+            },
+            {
+              "stage": "neighbour",
+              "model": "openai/gpt-5.6-sol",
+              "eci": 162.99,
+              "passes": 16,
+              "total": 19,
+              "accepted": false
+            },
+            {
+              "stage": "neighbour",
+              "model": "openai/gpt-6-sol",
+              "eci": 163.75,
+              "passes": 18,
+              "total": 19,
+              "accepted": true
+            },
+            {
+              "stage": "neighbour",
+              "model": "anthropic/claude-fable-5",
+              "eci": 164.13,
+              "passes": 9,
+              "total": 19,
+              "accepted": false
+            },
+            {
+              "stage": "neighbour",
+              "model": "anthropic/claude-opus-5",
+              "eci": 164.68,
+              "passes": 4,
+              "total": 19,
+              "accepted": false
+            },
+            {
+              "stage": "neighbour",
+              "model": "google/gemini-4-argon",
+              "eci": 166.48,
+              "passes": 18,
+              "total": 19,
+              "accepted": true
+            },
+            {
+              "stage": "neighbour",
+              "model": "openai/gpt-6.1-terra",
+              "eci": 167.67,
+              "passes": 18,
+              "total": 19,
+              "accepted": true
+            },
+            {
+              "stage": "neighbour",
+              "model": "openai/gpt-6.1-sol",
+              "eci": 168.48,
+              "passes": 17,
+              "total": 19,
+              "accepted": false
+            },
+            {
+              "stage": "neighbour",
+              "model": "anthropic/claude-opus-5.5",
+              "eci": 168.54,
+              "passes": 11,
+              "total": 19,
+              "accepted": false
+            },
+            {
+              "stage": "neighbour",
+              "model": "openai/gpt-6-astra",
+              "eci": 169,
+              "passes": 17,
+              "total": 19,
+              "accepted": false
+            },
+            {
+              "stage": "neighbour",
+              "model": "google/gemini-4-carbon",
+              "eci": 169.76,
+              "passes": 18,
+              "total": 19,
+              "accepted": true
+            }
+          ],
+          "skipped": [
+            {
+              "model": "openai/gpt-5.5-pro",
+              "stage": "neighbour",
+              "reason": "2 of its model calls failed or timed out twice, so it was not measured"
+            },
+            {
+              "model": "anthropic/claude-fable-5.1",
+              "stage": "neighbour",
+              "reason": "2 of its model calls failed or timed out twice, so it was not measured"
+            }
+          ],
+          "finalists": [
+            "meta/muse-wonder",
+            "openai/gpt-6-sol",
+            "google/gemini-4-argon",
+            "openai/gpt-6.1-terra",
+            "google/gemini-4-carbon"
+          ],
+          "challengers": []
+        },
+        "basedOn": [
+          "Grader: your eval's pass or fail per item, from eval-command (node .openmerit/evals/intake-eval.ts); and a judge model against each case's reference answer, on 6 criteria and 3 guardrails, from repo-review (.openmerit/evals/claims-intake-agent).",
+          "Cases: 5 example cases from repo-review (.openmerit/evals/claims-intake-agent); 12 written cases from repo-review (the case writer); 2 items of your eval from eval-command (node .openmerit/evals/intake-eval.ts).",
+          "Priority: you asked about this task, from repo-scan (the task you chose)."
+        ],
+        "pick": {
+          "key": "openai/gpt-6.1-terra",
+          "model": "openai/gpt-6.1-terra",
+          "endpoint": "openrouter",
+          "endpointModel": "openai/gpt-6.1-terra",
+          "eci": 167.67,
+          "eciSource": "published",
+          "price": 6,
+          "role": "candidate",
+          "status": "measured",
+          "passes": 54,
+          "total": 57,
+          "runs": 3,
+          "score": 0.9473684210526315,
+          "source": "eval",
+          "costPerItemUsd": 0.003277122807017545,
+          "costIsEstimate": false,
+          "meanLatencyMs": 2338.035087719298,
+          "requests": 171,
+          "qualified": true,
+          "note": "",
+          "evidence": [
+            "run-20261126-190920-efb1|claims_intake_agent~2|final|openrouter|openai/gpt-6.1-terra|r1",
+            "run-20261126-190920-efb1|claims_intake_agent~2|final|openrouter|openai/gpt-6.1-terra|r2",
+            "run-20261126-190920-efb1|claims_intake_agent~2|final|openrouter|openai/gpt-6.1-terra|r3"
+          ]
+        },
+        "bar": "criteria",
+        "failedChecks": [
+          "G2",
+          "C4",
+          "C6"
+        ]
+      }
+    ],
+    "configuration": {
+      "Claims intake agent": {
+        "decision": "no"
+      }
+    }
+  }
+}

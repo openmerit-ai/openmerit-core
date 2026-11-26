@@ -2,6 +2,20 @@
 
 Every application model choice goes through Scout first (see `AGENTS.md` and `POLICY.md`). Each entry records the task text, the policy given, what Scout recommended, what we chose, and how residency was handled. Raw Scout responses are in `scout-results/`.
 
+## 26 Nov 2026: claims intake agent, rerun (published openmerit 0.5.3)
+
+**Task and policy:** as in the 0.5.2 entry below. The run was `run-20261126-190920-efb1`.
+
+**Eval:** a 17-case eval Scout wrote, plus the repository's two items, rewritten once from the agent's grades and then accepted (`.openmerit/evals/claims-intake-agent` in the copy; not landed here). The owner delegated grading to the agent, so no person graded it. The bar is the eval's checks, since the current model fails G2, C4 and C6.
+
+**Scout recommended** (`scout-results/2026-11-26-0.5.3-claims-intake-binary-search.json`): openai/gpt-6.1-terra, 54/57 at $0.0033 per item, against Sonnet 5.5's 23/57 at $0.0163. Next were openai/gpt-6-sol (54/57, $0.0067) and google/gemini-4-argon (54/57, $0.0088).
+
+**Choice:** keep Sonnet 5.5 for now; no change to `src/models.ts`. We declined configure. The eval was graded by an agent, not a person. The result covers the intake step only; adjudication and payment downstream were not checked. Before any switch, a person should grade the eval, and we should run `npm run scenarios -- --model intake=openrouter/openai/gpt-6.1-terra`.
+
+**Spend:** Scout eval USD 26.91, harness USD 0.66.
+
+**Residency:** every candidate is an OpenRouter route of unverified location, accepted only as the recorded gap for fictional data.
+
 ## 26 Nov 2026: claims intake agent, Scout Model Binary Search (published openmerit 0.5.2)
 
 **Task and policy:** the claims intake agent, current model `openrouter/anthropic/claude-sonnet-5.5`, chosen from the six tasks Scout mapped. Policy went in through `.openmerit/config.json`: one OpenRouter endpoint with every model allowed, under the recorded residency gap for fictional data. The run was `run-20261126-133311-db3b` in a standalone copy of this directory.
