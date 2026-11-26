@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { loadCatalogue } from "../src/catalogue/catalogue.ts";
 import { renderRun } from "../src/cli/render.ts";
-import { EvalProxy } from "../src/eval/proxy.ts";
+import { EvalProxy, MODEL_CALL_RETRIES } from "../src/eval/proxy.ts";
 import type { Harness, JsonRequest } from "../src/harness/harness.ts";
 import { startRun } from "../src/local.ts";
 import { advanceLoop, pickSamples, startLoop, type CaseAnswer } from "../src/eval/loop.ts";
@@ -32,6 +32,8 @@ const ALLOWED = ["gpt-5-nano", "gpt-4.1-nano", "gpt-6-luna", "gpt-4o-mini", "gpt
 const requests: string[] = [];
 /** The fake endpoint answers HTTP 429 to `model`'s next `remaining` requests. */
 const rateLimit = { model: "", remaining: 0 };
+/** One ticket whose next `remaining` requests to `model` fail with HTTP 500, as a provider outage for that one call. */
+const hiccup = { model: "", ticket: "", remaining: 0 };
 /** The fake endpoint stops `model`'s answers at their token limit before any text, as a model that reasons first does. */
 const cutOff = { model: "" };
 /** Models the fake endpoint answers wrongly. */
@@ -64,6 +66,7 @@ before(async () => {
       if (parsed.model === rateLimit.model && rateLimit.remaining-- > 0) { res.writeHead(429, { "content-type": "application/json", "retry-after": "0" }); return res.end(JSON.stringify({ error: { message: "rate-limited upstream" } })); }
       if (parsed.model === cutOff.model) { res.writeHead(200, { "content-type": "application/json" }); return res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: null }, finish_reason: "length" }], usage: { prompt_tokens: 100, completion_tokens: 2000 } })); }
       if (parsed.model === "gpt-4.1-nano") return fail(404, "The model `gpt-4.1-nano` does not exist or you do not have access to it.");
+      if (parsed.model === hiccup.model && parsed.messages.some(message => message.content === hiccup.ticket) && hiccup.remaining-- > 0) return fail(500, "upstream overloaded");
       if (parsed.model === flaky.model && requests.filter(model => model === flaky.model).length > 10) return fail(500, "upstream overloaded");
       // A generated eval's judge: every check passes.
       if (parsed.messages[0]?.role === "system" && parsed.messages[0].content.startsWith("You grade one answer")) {
@@ -524,6 +527,24 @@ test("when every qualified finalist costs more per item than the current model, 
   }
 });
 
+test("a call that fails in one of the current model's runs is measured again, and that run still counts once", async () => {
+  // The eval reports a failed call as a failed item, as many evals do; one ticket's call fails until the proxy gives up, then answers.
+  const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
+  const path = join(root, "evals/classify.eval.ts");
+  writeFileSync(path, readFileSync(path, "utf8").replace("const queue = await classify(item.ticket);", "const queue = await classify(item.ticket).catch(() => \"\");"));
+  execFileSync("git", ["-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qam", "eval"], { cwd: root });
+  const ctx = context(root, home);
+  const runId = startRun(ctx);
+  Object.assign(hiccup, { model: "gpt-4.1-mini", ticket: [...tickets.keys()][0]!, remaining: MODEL_CALL_RETRIES + 1 });
+  try {
+    const { step } = await drive(ctx, runId);
+    assert.equal(step.status, "done", step.error ?? JSON.stringify([step.questions, step.notices]).slice(0, 1500));
+    assert.ok(ctx.state.units(runId).some(unit => unit.role === "baseline" && unit.id.endsWith("|a2")), "the failed call ran again");
+    const task = step.result!.tasks[0]!;
+    assert.deepEqual([task.baseline!.status, task.baseline!.passes, task.baseline!.total, task.baseline!.runs], ["measured", 30, 30, 3]);
+    assert.equal(task.status, "ranked", task.note);
+  } finally { Object.assign(hiccup, { model: "", ticket: "", remaining: 0 }); }
+});
 
 test("Yes previews and applies only the approved edit", async () => {
   const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
