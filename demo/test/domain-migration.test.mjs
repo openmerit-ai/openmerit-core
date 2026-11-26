@@ -11,7 +11,7 @@ test('upgraded connections retain the original Cloudflare WebSocket response', a
 test('the landing page, sign-in and their assets use the web Worker; retired Scout pages do not',async()=>{
   const {default:router}=await import('../domain-router.mjs');
   const env={SCOUT:{fetch:request=>new Response(new URL(request.url).pathname)}};
-  for(const path of ['/','/styles.css','/scout','/scout/','/scout/api/auth','/scout/api/session','/scout/sign-in.js','/favicon.svg','/assets/geist-sans.woff2','/assets/openmerit-og-v1.png','/playground/scout','/playground/scout/','/vs-routers','/vs-routers/','/find-a-cheaper-llm/','/evals-from-your-code/','/claude-code-and-codex/','/run-locally','/run-locally/'])assert.equal(await(await router.fetch(new Request('https://openmerit.ai'+path),env)).text(),path);
+  for(const path of ['/','/styles.css','/scout','/scout/','/scout/api/auth','/scout/api/session','/scout/sign-in.js','/favicon.svg','/assets/geist-sans.woff2','/assets/openmerit-og-v1.png','/playground/scout','/playground/scout/','/vs-routers','/vs-routers/','/find-a-cheaper-llm/','/evals-from-your-code/','/claude-code-and-codex/','/run-locally','/run-locally/','/contact-sales/','/contact-sales/thanks/','/contact-sales/api'])assert.equal(await(await router.fetch(new Request('https://openmerit.ai'+path),env)).text(),path);
   for(const path of ['/connect','/connect/','/connect/api/device'])assert.equal((await router.fetch(new Request('https://openmerit.ai'+path),env)).status,404,path);
 });
 test('legacy hosts redirect every method and path, including memo sign-in, to openmerit.ai', async () => {

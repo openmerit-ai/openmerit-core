@@ -2,6 +2,10 @@
 
 Domain operations: see the [primary domain migration](site-domain-migration.md) for current routing, email, auth, and deployment constraints. Historical publication records below retain their original domains.
 
+## Contact-sales form — unreleased source, 26 November 2026
+
+`/contact-sales/` is a content page with a plain HTML form that posts to `/contact-sales/api` and works without JavaScript. Fields use the browser's own required and length checks, and the server repeats them. A field hidden off-screen catches bots, which are sent to the confirmation page without an email being sent. A valid request redirects (303) to `/contact-sales/thanks/`, a static page that search engines don't index. Errors are small server-rendered pages in the same layout that offer the `mailto:` address instead. `.contact-form` styles live in `site/styles.css`.
+
 ## Buyer-question pages — unreleased source, 26 November 2026
 
 `contentPages` in `demo/public-site.ts` lists the static pages under `site/` that answer buyers' questions: `/vs-routers/`, `/find-a-cheaper-llm/`, `/evals-from-your-code/`, `/claude-code-and-codex/` and `/run-locally/`. Both Workers allow each one with and without its trailing slash, the web Worker redirects the slashless path, `scripts/build-scout.mjs` packages each directory and `scripts/docs.test.ts` checks each page's links, IDs and metadata. Add a page by creating its directory and adding it to that list. They share the `/vs-routers/` layout and `.compare-*` styles, including code blocks, and each ends with a related-questions list linking the others.

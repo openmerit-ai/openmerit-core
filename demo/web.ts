@@ -1,11 +1,12 @@
 // The web Worker (openmerit-scout-alpha): the landing page, the playground
-// walkthrough and the Clerk sign-in at /scout/. The domain router sends /memo
+// walkthrough, the content pages, the contact-sales form and the Clerk sign-in at /scout/. The domain router sends /memo
 // to the site Worker instead.
 import { createClerkClient } from '@clerk/backend';
 import { parsePublishableKey } from '@clerk/shared/keys';
 import { contentPages, publicSiteResponse } from './public-site.ts';
+import { contactSubmit, type ContactEnv } from './contact.ts';
 
-export interface WebEnv {
+export interface WebEnv extends ContactEnv {
   ASSETS: { fetch(request: Request): Promise<Response> };
   CLERK_PUBLISHABLE_KEY?: string;
   CLERK_SECRET_KEY?: string;
@@ -70,6 +71,7 @@ export default {
     if (path === '/playground/scout') return Response.redirect(`${url.origin}/playground/scout/${url.search}`, 308);
     if (contentPages.includes(`${path}/`)) return Response.redirect(`${url.origin}${path}/${url.search}`, 308);
     if (path.startsWith('/scout/api/')) return signInApi(request, env, path);
+    if (path === '/contact-sales/api') return contactSubmit(request, env);
     return ['GET', 'HEAD'].includes(request.method) ? env.ASSETS.fetch(request) : json({ error: 'Not found.' }, 404);
   },
 };
