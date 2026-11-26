@@ -17,6 +17,7 @@ interface ContactMessage {
 }
 
 export const companySizes = ['1–10', '11–50', '51–200', '201–1,000', '1,001+'];
+export const llmSpends = ['Under $10K', '$10K–$25K', '$25K–$50K', '$50K–$100K', '$100K–$250K', '$250K–$500K', '$500K–$1M', '$1M+'];
 const limits = { name: 120, email: 254, company: 160, use: 4000, heard: 500 };
 
 function page(status: number, title: string, body: string) {
@@ -60,11 +61,11 @@ export async function contactSubmit(request: Request, env: ContactEnv): Promise<
   // Bots fill the hidden field; people never see it. Pretend it worked.
   if (field('website')) return Response.redirect(new URL('/contact-sales/thanks/', request.url).href, 303);
 
-  const entry = { name: field('name'), email: field('email'), company: field('company'), size: field('size'), use: field('use'), heard: field('heard') };
-  const valid = entry.name && entry.company && companySizes.includes(entry.size)
+  const entry = { name: field('name'), email: field('email'), company: field('company'), size: field('size'), spend: field('spend'), use: field('use'), heard: field('heard') };
+  const valid = entry.name && entry.company && companySizes.includes(entry.size) && llmSpends.includes(entry.spend)
     && /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(entry.email)
     && (Object.keys(limits) as (keyof typeof limits)[]).every(key => entry[key].length <= limits[key]);
-  if (!valid) return page(400, 'Something is missing', `Please give your name, a work email, your company and its size. ${back}`);
+  if (!valid) return page(400, 'Something is missing', `Please give your name, a work email, your company, its size and its yearly LLM spend. ${back}`);
 
   const name = entry.name.replace(/[\r\n]+/g, ' ');
   try {
@@ -74,7 +75,7 @@ export async function contactSubmit(request: Request, env: ContactEnv): Promise<
       replyTo: { name, email: entry.email },
       subject: `Hosted OpenMerit enquiry: ${entry.company.replace(/[\r\n]+/g, ' ')}`.slice(0, 200),
       text: [
-        `Name: ${name}`, `Work email: ${entry.email}`, `Company: ${entry.company}`, `Company size: ${entry.size}`,
+        `Name: ${name}`, `Work email: ${entry.email}`, `Company: ${entry.company}`, `Company size: ${entry.size}`, `Yearly LLM spend: ${entry.spend}`,
         '', 'What they want OpenMerit for:', entry.use || '(not given)',
         '', 'How they heard about OpenMerit:', entry.heard || '(not given)',
         '', 'Reply to this email to answer them.',
