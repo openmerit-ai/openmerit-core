@@ -94,7 +94,7 @@ test('the contact-sales form emails a valid request to OpenMerit with Reply-To s
   const submit = (fields: Record<string, string>, method = 'POST') => web.fetch(new Request('https://example.test/contact-sales/api', {
     method, ...(method === 'POST' ? { body: new URLSearchParams(fields) } : {}),
   }), env);
-  const valid = { name: 'Ada\r\nBcc: x@evil.test', email: 'ada@acme.test', company: 'Acme', size: '11–50', use: 'Support replies', heard: '' };
+  const valid = { name: 'Ada\r\nBcc: x@evil.test', email: 'ada@acme.test', company: 'Acme', size: '11–50', spend: '$50K–$100K', use: 'Support replies', heard: '' };
 
   const ok = await submit(valid);
   assert.equal(ok.status, 303); assert.equal(ok.headers.get('location'), 'https://example.test/contact-sales/thanks/');
@@ -102,12 +102,12 @@ test('the contact-sales form emails a valid request to OpenMerit with Reply-To s
   const message = sent[0] as { to: string[]; from: { email: string }; replyTo: { name: string; email: string }; subject: string; text: string };
   assert.deepEqual(message.to, ['lazim@openmerit.ai']); assert.equal(message.from.email, 'memo@openmerit.ai');
   assert.deepEqual(message.replyTo, { name: 'Ada Bcc: x@evil.test', email: 'ada@acme.test' });
-  assert.equal(message.subject, 'Hosted OpenMerit enquiry: Acme');
-  assert.match(message.text, /Company size: 11–50/); assert.match(message.text, /Support replies/); assert.match(message.text, /\(not given\)/);
+  assert.equal(message.subject, 'OpenMerit Cloud enquiry: Acme');
+  assert.match(message.text, /Company size: 11–50/); assert.match(message.text, /Monthly LLM spend: \$50K–\$100K/); assert.match(message.text, /Support replies/); assert.match(message.text, /\(not given\)/);
 
   // A bot filling the hidden field sees success, but nothing is sent.
   assert.equal((await submit({ ...valid, website: 'http://spam.test' })).status, 303);
-  for (const broken of [{ ...valid, size: '5' }, { ...valid, email: 'not-an-email' }, { ...valid, company: ' ' }, { ...valid, use: 'x'.repeat(4001) }]) {
+  for (const broken of [{ ...valid, size: '5' }, { ...valid, spend: '' }, { ...valid, spend: '$25–$50' }, { ...valid, email: 'not-an-email' }, { ...valid, company: ' ' }, { ...valid, use: 'x'.repeat(4001) }]) {
     assert.equal((await submit(broken)).status, 400);
   }
   allowed = false; assert.equal((await submit(valid)).status, 429); allowed = true;
