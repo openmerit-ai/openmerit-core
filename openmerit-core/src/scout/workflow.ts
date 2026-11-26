@@ -1095,15 +1095,34 @@ function unitCost(ctx: Context, runId: string, units: UnitRow[]) {
   return { cost, estimate: usage.some(item => item.estimatedUsd > 0), perItem: (total: number) => (total ? cost / total : null) };
 }
 
-function measure(ctx: Context, runId: string, units: UnitRow[], repeats: number, role: ModelResult["role"], entry: ModelRef, eci: number | null): ModelResult {
+/**
+ * A model's units, one per repeat: a repeat's second attempt (`…|a2`, the items its first lost to failed
+ * calls) is merged into that repeat, its answers replacing the first attempt's, and when it did not finish,
+ * its status is the repeat's. The usage stays on both units' IDs.
+ */
+function repeatsOf(units: readonly UnitRow[]): UnitRow[] {
+  const again = new Map(units.filter(unit => unit.id.endsWith("|a2")).map(unit => [unit.id.slice(0, -3), unit]));
+  return units.filter(unit => !unit.id.endsWith("|a2")).map(unit => {
+    const second = again.get(unit.id);
+    if (!second || unit.status !== "done") return unit;
+    if (second.status !== "done") return { ...unit, status: second.status, error: second.error };
+    const first = unit.result as unknown as UnitResult, retry = second.result as unknown as UnitResult;
+    const items = { ...first.items, ...retry.items };
+    const result: UnitResult = { ...first, items, passes: Object.values(items).filter(Boolean).length, errored: (retry.errored ?? []).filter(item => !items[item]), ...(first.checks || retry.checks ? { checks: { ...first.checks, ...retry.checks } } : {}) };
+    return { ...unit, result: result as unknown as Record<string, unknown> };
+  });
+}
+
+function measure(ctx: Context, runId: string, all: UnitRow[], repeats: number, role: ModelResult["role"], entry: ModelRef, eci: number | null): ModelResult {
+  const units = repeatsOf(all);
   const done = units.filter(unit => unit.status === "done");
   const results = done.map(unit => unit.result as unknown as UnitResult);
   const passes = results.reduce((sum, item) => sum + item.passes, 0), total = results.reduce((sum, item) => sum + item.total, 0);
-  const usage = units.map(unit => ctx.state.usage(runId, unit.id));
+  const usage = all.map(unit => ctx.state.usage(runId, unit.id));
   const requests = usage.reduce((sum, item) => sum + item.requests, 0);
   const status: ModelResult["status"] = !units.length ? "not_run" : done.length === repeats && units.length === repeats ? "measured" : units.some(unit => unit.status === "unavailable") ? "unavailable"
     : units.some(unit => unit.status === "budget_paused") ? "budget_paused" : units.some(unit => unit.status === "failed" || unit.status === "interrupted") ? "failed" : "incomplete";
-  const cost = status === "measured" ? unitCost(ctx, runId, units) : null;
+  const cost = status === "measured" ? unitCost(ctx, runId, all) : null;
   const failed = units.find(unit => unit.status === "failed" || unit.status === "unavailable");
   return {
     ...entry, role, eci, status, passes, total, runs: done.length, score: total ? passes / total : null,
@@ -1114,7 +1133,7 @@ function measure(ctx: Context, runId: string, units: UnitRow[], repeats: number,
     note: status === "measured" ? (requests === 0 ? "the eval made no model requests through OpenMerit, so its cost is not measured" : "")
       : status === "unavailable" ? `untested: ${(failed?.error ?? "").split("\n")[0]}` : status === "failed" ? `failed: ${(failed?.error ?? "interrupted").split("\n")[0]}`
       : status === "budget_paused" ? "not measured: the run is paused on its budget" : status === "not_run" ? "not run" : "not every run finished",
-    evidence: units.map(unit => unit.id),
+    evidence: all.map(unit => unit.id),
   };
 }
 
@@ -1162,7 +1181,7 @@ function compareTask(ctx: Context, runId: string, data: RunState, name: string, 
 }
 
 /** A model's done runs of `role`, as the engine's measurements. */
-const runsOf = (units: readonly UnitRow[], role: UnitRow["role"], model: string): Measurement[] => units.filter(unit => unit.role === role && unit.model === model && unit.status === "done").map(unit => {
+const runsOf = (units: readonly UnitRow[], role: UnitRow["role"], model: string): Measurement[] => repeatsOf(units.filter(unit => unit.role === role && unit.model === model)).filter(unit => unit.status === "done").map(unit => {
   const result = unit.result as unknown as UnitResult;
   return { items: result.items, costUsd: null, ...(result.checks ? { checks: result.checks } : {}) };
 });
