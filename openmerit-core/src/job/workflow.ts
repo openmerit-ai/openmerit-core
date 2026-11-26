@@ -19,8 +19,11 @@
 import { createHash } from "node:crypto";
 import { Loop } from "@rivet-dev/workflows";
 import { applyLabelCheck, BudgetRefused, caseKind, checksBasedOn, completeWith, createClient, createMeasure, flow, graderFor, invalidCases, labelCheck, LABEL_CHECK_QUESTION, writeCases, WRITTEN_CASES, type Case, type Complete, type EndpointConfig, type MeasureResult, type TaskBundle } from "../ranking/index.ts";
-import { approvalQuestion, basedOn, baselineResult, byKind, CandidateUnavailable, catalogueIndex, CHALLENGERS, checkAgent, DEFAULT_REPEATS, EndChallengers, evaluateTask, stableSample, ungradableNotice, FINALISTS, floorNote, mergeEvidence, modelResult, newProgress, redact, SAMPLE_SIZE, score, SMALL_EVAL, strongest, taskResult, type AgentRun, type Catalogue, type CatalogueModel, type Funding, type Ledger, type ModelResult, type ReserveResult, type ResolvedGuardrails, type Settlement } from "../engine/index.ts";
+import { approvalQuestion, basedOn, baselineResult, byKind, CandidateUnavailable, catalogueIndex, CHALLENGERS, checkAgent, DEFAULT_REPEATS, EndChallengers, evaluateTask, stableSample, ungradableNotice, FINALISTS, floorNote, mergeEvidence, modelResult, newProgress, redact, SAMPLE_SIZE, score, SMALL_EVAL, strongest, taskResult, type AgentRun, type Catalogue, type CatalogueModel, type Funding, type Ledger, type ModelResult, type ReserveResult, type ResolvedGuardrails, type Settlement, settledUsd } from "../engine/index.ts";
 import { agentBundle, caseEvidence } from "../connectors/agent-bundle.ts";
+import { evalEvidence } from "../connectors/eval-command.ts";
+import { EvalProxy, retryable } from "../eval/proxy.ts";
+import { runEval } from "../eval/runner.ts";
 import { advanceLoop, completeHarness, criteriaOf, feedbackOf, gradeQuestions, MAX_ROUNDS, pickSamples, readGrade, reviseEval, startLoop, type CaseAnswer, type LoopState, type SampleGrade } from "../eval/loop.ts";
 import { buildPool, OPENROUTER, regionNotice, type EndpointInfo, type Option, type Pool, type Provisional } from "./pool.ts";
 import { paybackCalls, proposeEdit, renderMarkdown, type AgentEvalSummary, type Fix, type JobResult, type MeasuredModel } from "./report.ts";
@@ -127,6 +130,16 @@ export interface LiveProgress {
 }
 
 /** The answers queue's message. `by` is the user who sent the answers, when the sender knows it: a grade's author. */
+/**
+ * A task's own eval command, which a self-hosted server runs on its machine to measure each model (README
+ * "Eval contract"): the customer's eval decides pass or fail per item, with its own threshold. root is the
+ * repository's absolute path, and cwd is relative to it.
+ */
+export interface EvalCommandSpec { command: string; root: string; cwd?: string; env?: Record<string, string>; threshold?: number | null; timeoutMs?: number }
+
+/** The server's own settings and secrets, which an eval command does not get. Its other environment passes through, as in Scout. */
+const SERVER_ENV = /^(OPENMERIT_|RIVET|CLERK_|STRIPE_|POSTHOG_|OPENROUTER_|OPENAI_|ANTHROPIC_)/;
+
 export interface AnswersMessage { answers: Answers; by?: string | null }
 
 /** The step context the job uses: a host's @rivet-dev/workflows step context has these and more. */
@@ -153,6 +166,8 @@ export interface JobContext<S> extends JobLoopContext<S> {
 export interface JobAccount {
   resolveGuardrails(input: { projectId: string; environment: string; agent?: string | null; taskId?: string }): Promise<ResolvedGuardrails>;
   jobUpdate(input: { jobId: string; status: string; budgetUsd?: number; capOpenmeritUsd?: number | null; capCustomerUsd?: number | null; measured?: boolean }): Promise<void>;
+  /** The task's confirmed eval command, which a self-hosted server runs to measure; null when it has none. */
+  evalCommandFor(taskId: string): Promise<EvalCommandSpec | null>;
   /** The task's accepted eval, which the job runs on unchanged; null before it has one. */
   evalFor(taskId: string): Promise<{ version: number; spec: EvalSpec; cases: Case[]; bar: EvalBar } | null>;
   /** Accepts a first run's eval as version 1; returns the version the job ran on. */
@@ -188,7 +203,7 @@ export interface JobHost<S extends JobStepContext> {
    */
   memberWriter(s: S, userId: string): Promise<{ source: EvalSource; name: string; open: (signal: AbortSignal) => Promise<{ complete: Complete; model: string }> } | null>;
   settings(): {
-    config: { appUrl: string; openrouter: { apiKey: string | null }; models: { caseWriter: string; judge: string }; limits: { defaultJobBudgetUsd: number } };
+    config: { mode: "hosted" | "self-hosted"; appUrl: string; openrouter: { apiKey: string | null }; models: { caseWriter: string; judge: string }; limits: { defaultJobBudgetUsd: number } };
     fetch: typeof fetch;
     /** Runs an agent end to end on its agent cases; null when the agent has no eval. */
     agentEval: (input: { accountId: string; environment: string; agent: string }) => ((assignment: ReadonlyMap<string, { model: string; endpoint: string }>) => Promise<AgentRun>) | null;
@@ -394,7 +409,10 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
     // the task has one, the bundle's examples come first, with labels the user gave in earlier runs, then
     // cases a model writes on OpenMerit's OpenRouter key or the member's subscription. Then the label check,
     // whose answers make the eval the run accepts.
-    const step = await ctx.step({
+    // A task with its own eval command, on a self-hosted server, is measured by it: no cases, label check or grading.
+    const command = await ctx.step("eval-command", async s => host.settings().config.mode === "self-hosted" ? host.account(s, s.state.input.accountId).evalCommandFor(s.state.input.taskId) : null);
+    if (command) await ctx.step("eval-command-notice", async s => { s.state.notices.push(`Measured with your eval command, \`${redact(command.command)}\`: its pass or fail per item decides${command.threshold != null ? `, with its threshold of ${command.threshold}` : ""}.`); });
+    const step = command ? { cases: [] as Case[], version: null, spec: null, source: "examples" as EvalSource, bar: "current" as EvalBar } : await ctx.step({
       name: "cases", timeout: 0, maxRetries: INTERRUPTIONS,
       run: async s => {
         const { accountId, taskId } = s.state.input;
@@ -516,7 +534,7 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
       },
     });
     // Without grading, a first run's cases, as the label check left them, are the eval it accepts as version 1. A graded run accepts it once the person agrees.
-    let evalVersion: number | null = grade ? null : await acceptFirst("eval", written.source, written.bar ?? "current", null);
+    let evalVersion: number | null = grade || command ? null : await acceptFirst("eval", written.source, written.bar ?? "current", null);
     /** The current model's failed cases and why, from its recorded measure steps, so a replay rebuilds the same. */
     const failedCases = new Map<string, { caseId: string; kind: string; reason: string }>();
 
@@ -562,7 +580,8 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
     let progress = newProgress<Option>();
     const minPassRate = guardrails.effective.minPassRate ?? 0;
     const maxLatency = Math.min(guardrails.effective.latencyMs ?? Infinity, bundle.constraints?.maxLatencyMs ?? Infinity);
-    const rules = { threshold: minPassRate ? minPassRate - 1e-9 : null, maxLatencyMs: Number.isFinite(maxLatency) ? maxLatency : null };
+    const bar = Math.max(minPassRate, command?.threshold ?? 0);
+    const rules = { threshold: bar ? bar - 1e-9 : null, maxLatencyMs: Number.isFinite(maxLatency) ? maxLatency : null };
     const describe = (option: Option) => ({ model: option.model, endpoint: option.endpoint, endpointModel: option.endpointModel, eci: option.eci });
     const optionOf = (item: { model: string; endpoint: string }) => [...(pool.baseline ? [pool.baseline] : []), ...pool.ranked, ...pool.unplaced].find(option => option.model === item.model && option.endpoint === item.endpoint)!;
     /** openmerit/engine's result for a model, in the report's names: one case is one call, so the cost per item is the cost per call. */
@@ -594,6 +613,58 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
       const judge = (bundle.output.kind === "text" || bundle.guardrails?.length) && config.openrouter.apiKey ? { client, endpoint: OPENROUTER, model: config.models.judge } : undefined;
       return { client, grader: graderFor(bundle, judge ? { judge } : {}) };
     };
+    /**
+     * One run of the task's eval command for `option` on `ids` (null: every item the eval runs), through a
+     * metering proxy whose calls go to the option's endpoint and are booked in the job's ledger. The eval
+     * reports each item's pass or fail; a call that failed, not a wrong answer, marks its failed items errored.
+     */
+    const measureCommand = async (spec: EvalCommandSpec, option: Option, ids: string[] | null, key: string, account: JobAccount, signal: AbortSignal): Promise<Measured> => {
+      const endpoint = (await keysFor(jobId, account, projectId)).find(item => item.id === option.endpoint);
+      if (!endpoint) return { kind: "unavailable", reason: `no endpoint ${option.endpoint} with a key` };
+      // The run's own cost: what the proxy settled for it, which the engine divides by its items.
+      const ledger = jobLedger(account, jobId), reserved = new Map<string, number>();
+      let costUsd = 0, costIsEstimate = false;
+      const metered: Ledger = {
+        ...ledger,
+        reserve: async reservation => { const result = await ledger.reserve({ ...reservation, key: `${key}/${reservation.key}` }); if (result.ok) reserved.set(reservation.key, reservation.usd); return result; },
+        settle: async (callKey, cost) => { costUsd += settledUsd(reserved.get(callKey) ?? 0, cost); costIsEstimate ||= cost.actualUsd === null; await ledger.settle(`${key}/${callKey}`, cost); },
+        release: callKey => ledger.release(`${key}/${callKey}`),
+      };
+      const proxy = new EvalProxy(() => metered, host.settings().fetch);
+      const url = await proxy.start();
+      const priced = models.priced[option.endpointModel] ?? null;
+      const { token, tally } = proxy.open({
+        runId: jobId, unitId: key, endpointId: endpoint.id, baseUrl: endpoint.baseUrl ?? "https://openrouter.ai/api/v1", apiKey: endpoint.apiKey, funding: endpoint.funding, model: option.endpointModel,
+        allowed: model => (model.toLowerCase() === option.endpointModel.toLowerCase() ? priced : undefined),
+      });
+      const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !SERVER_ENV.test(name)));
+      let outcome;
+      try {
+        outcome = await runEval({ command: spec.command, ...(spec.cwd ? { cwd: spec.cwd } : {}), ...(spec.env ? { env: spec.env } : {}), ...(spec.timeoutMs ? { timeoutMs: spec.timeoutMs } : {}) }, { root: spec.root, model: option.endpointModel, baseUrl: url, token, items: ids, env, signal });
+      } catch (error) {
+        if (signal.aborted) throw error;
+        return { kind: "error", reason: `the eval command could not start: ${redact(error instanceof Error ? error.message : String(error))}` };
+      } finally { proxy.close(token); await proxy.stop(); }
+      if (tally.budgetHit) return { kind: "refused", reason: tally.refusedReason ?? JOB_BUDGET };
+      const refused = [...new Set(tally.poolViolations)];
+      const refusedNote = refused.length ? ` OpenMerit's proxy refused ${tally.poolViolations.length} request(s) for ${refused.join(", ")}: the eval must send the model in $OPENMERIT_MODEL as it is.` : "";
+      if (!outcome.ok) {
+        const rejected = tally.upstreamErrors.find(status => [400, 401, 403, 404].includes(status) || retryable(status));
+        if (rejected) return { kind: "unavailable", reason: `${option.endpoint} answered HTTP ${rejected} for ${option.endpointModel}` };
+        return { kind: "error", reason: `${outcome.error ?? "the eval failed"}.${refusedNote}${outcome.log ? ` Last output: ${outcome.log.split("\n").slice(-3).join(" ")}` : ""}` };
+      }
+      if (!outcome.items) return { kind: "error", reason: `the eval reported no per-item results: it must write {"items":[{"id","pass"}]} to $OPENMERIT_RESULT.${refusedNote}` };
+      if (!tally.requests) return { kind: "unavailable", reason: `the eval sent no model request through OpenMerit's proxy (OPENAI_BASE_URL), so ${option.endpointModel} was not what it ran.${refusedNote}` };
+      const reported = new Map(outcome.items.map(item => [item.id, item.pass]));
+      const wanted = ids ?? [...reported.keys()];
+      const absent = wanted.filter(item => !reported.has(item));
+      if (absent.length) return { kind: "error", reason: `the eval reported no result for ${absent.length} requested item(s): ${absent.slice(0, 10).join(", ")}` };
+      const callsFailed = tally.upstreamErrors.length > 0 || tally.abandoned > 0;
+      return {
+        kind: "ok", costUsd, costIsEstimate, graderCostUsd: 0, latencyMs: wanted.length ? outcome.durationMs / wanted.length : null,
+        results: wanted.map(item => reported.get(item) ? { caseId: item, pass: true } : { caseId: item, pass: false, ...(callsFailed ? { failure: "error" as const, reason: "a model call failed during this run" } : refused.length ? { reason: `the proxy refused a model outside the pool (${refused.join(", ")})` } : {}) }),
+      };
+    };
     let counter = 0;
     /** How many measure steps the job takes in all, once the search knows its size. Set outside steps, from the step count, so a replay sets the same. */
     let plannedTotal: number | null = null;
@@ -603,8 +674,10 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
      * repeat, with its own keys. `keep` keeps the run's answers for the grading loop: the step's result
      * is recorded, so they are redacted and cut short here, as the samples are.
      */
-    const measure = (option: Option, ids: string[], keep = false): Promise<Measured> => {
+    const measure = (option: Option, ids: string[] | null, keep = false): Promise<Measured> => {
       const name = `measure-${++counter}`;
+      if (command) return ctx.step({ name, timeout: 0, maxRetries: INTERRUPTIONS, run: async s => { const result = await measureCommand(command, option, ids, `${jobId}/${name}`, host.account(s, s.state.input.accountId), s.abortSignal); if (result.kind === "ok" || result.kind === "unavailable") done(s); return result; } }) as Promise<Measured>;
+      if (!ids) throw new Error("measuring without an eval command needs the cases");
       const against = option !== pool.baseline && progress.baseline.length ? score(progress.baseline).score : null;
       return ctx.step({
         name, timeout: 0, maxRetries: INTERRUPTIONS,
@@ -616,7 +689,7 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
           const left = stepsDone && s.state.progress.planned ? Math.max(1, Math.ceil(elapsed / stepsDone * (s.state.progress.planned - stepsDone) / 60_000)) : null;
           const live: LiveProgress = {
             model: option.model, endpoint: option.endpoint, baseline: against === null || !pool.baseline ? null : { model: pool.baseline.model, rate: against * 100 },
-            done: 0, total: ids.length, passes: 0, history: [], minutesLeft: left,
+            done: 0, total: ids!.length, passes: 0, history: [], minutesLeft: left,
           };
           s.state.live = live;
           const account = host.account(s, s.state.input.accountId);
@@ -636,9 +709,9 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
           for (let attempt = 1; ; attempt++) {
             live.done = 0; live.passes = 0; live.history = []; answers = [];
             try {
-              const result = await run({ model: option.endpointModel, endpoint: option.endpoint }, ids, { run: String(attempt - 1) });
+              const result = await run({ model: option.endpointModel, endpoint: option.endpoint }, ids!, { run: String(attempt - 1) });
               done(s);
-              return { kind: "ok" as const, ...result, ...(keep ? { answers: ids.flatMap(id => answers.filter(answer => answer.caseId === id)) } : {}) };
+              return { kind: "ok" as const, ...result, ...(keep ? { answers: ids!.flatMap(id => answers.filter(answer => answer.caseId === id)) } : {}) };
             } catch (error) {
               // An actor that is stopping aborts its calls: leave the step unrecorded so it runs again.
               if (s.abortSignal.aborted) throw error;
@@ -666,7 +739,7 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
 
     try {
       if (policy === 1) throw new JobStop("failed", "failed", "The job started measuring before a deploy changed how OpenMerit measures, so it cannot resume. Nothing is charged for it; call openmerit_recommend again to rerun it.", { kind: "rerun" });
-      if (!usable.length) throw new JobStop("stopped", "no_cases", "No case has a known correct answer. Add examples with expected answers to the bundle, or answer the label check.",
+      if (!command && !usable.length) throw new JobStop("stopped", "no_cases", "No case has a known correct answer. Add examples with expected answers to the bundle, or answer the label check.",
         { kind: "ask_agent", prompt: `OpenMerit found no test case with a known correct answer for the task "${bundle.task}". Add examples with their expected answers to its task bundle, taken from the code's tests or fixtures, then call openmerit_recommend again.` });
       if (!pool.baseline) throw new JobStop("failed", "baseline_failed", "No endpoint can run the current model: OpenMerit's OpenRouter key is not configured, and no endpoint of yours serves it.", { kind: "open", label: "Add an endpoint", path: "/project/" });
       const current = pool.baseline;
@@ -680,15 +753,16 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
       const rank = (round: number, bar: LoopState["bar"]) => {
         provisional = (told && [...pool.ranked, ...pool.unplaced].find(item => item.model === told.model && item.endpoint === told.endpoint)) || null;
         return evaluateTask<Option>({
-          ladder: pool.ranked, unplaced: pool.unplaced, strength: item => item.eci ?? -Infinity, items: caseIds, repeats, provisional,
-          rules, kinds,
+          ladder: pool.ranked, unplaced: pool.unplaced, strength: item => item.eci ?? -Infinity, items: command ? null : caseIds, repeats, provisional,
+          // The customer's own eval decides with its own threshold: no floor.
+          rules, kinds, ...(command ? { floor: null } : {}),
           baselinePrice: current.price, progress,
           // Against the criteria, a model qualifies when it meets the eval's checks, whatever the current model scored.
           criteria: bar === "criteria" ? criteriaOf(bundle, guardrails.effective.criteriaPassRate) : null,
           measure: async (option, items, call) => {
             const target = option ?? current;
             if (call.provisional && call.role === "screen") plannedTotal = counter + 1 + repeats;
-            const result = await measure(target, [...(items ?? caseIds)], grade && call.role !== "screen" && call.repeat === 1);
+            const result = await measure(target, items ? [...items] : command ? null : [...caseIds], grade && call.role !== "screen" && call.repeat === 1);
             if (result.kind === "unavailable") {
               if (!option) throw new JobStop("stopped", "baseline_failed", `${current.model} could not run: ${result.reason}`, { kind: "rerun" });
               throw new CandidateUnavailable(result.reason);
@@ -864,7 +938,8 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
       let chosen = result.pick ? measuredModel(result.pick) : null;
       let agentEval: AgentEvalSummary | null = null;
       const usesTools = !!bundle.tools?.length;
-      if (chosen && (input.agent !== null || usesTools)) {
+      // The customer's eval command already runs the whole task, tools and all, so it is the agent eval too.
+      if (chosen && !command && (input.agent !== null || usesTools)) {
         await ctx.step("agent-eval-start", async s => { s.state.phase = "agent_eval"; s.state.live = null; s.state.updatedAt = now(); });
         const grouped = input.agent === null ? null : host.settings().agentEval({ accountId: input.accountId, environment: input.environment, agent: input.agent });
         const current = pool.baseline!;
@@ -917,7 +992,7 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
             search: { pool: pool.ranked.length, unplaced: pool.unplaced.length, samples: result.samples, finalists: result.finalists, challengers: challenging.map(item => item.model), shortfall: result.searchShortfall },
             agentEval, edit: chosen ? proposeEdit(bundle, optionOf(chosen), pool.baseline!.endpoint, index.find) : { edits: [], instructions: null },
             // The quality rule over the bundle's evidence, and the approval question both hosts ask.
-            basedOn: [...basedOn(strongest(mergeEvidence(bundle.task, bundle.current.model, [agentBundle({ bundle, baselineEndpoint: pool.baseline!.endpoint, find: index.find }).evidence(), caseEvidence(bundle, usable)]))), ...[checksBasedOn(bundle)].filter((line): line is string => line !== null)],
+            basedOn: [...basedOn(strongest(mergeEvidence(bundle.task, bundle.current.model, [agentBundle({ bundle, baselineEndpoint: pool.baseline!.endpoint, find: index.find }).evidence(), caseEvidence(bundle, usable), ...(command ? [evalEvidence({ command: redact(command.command) })] : [])]))), ...[checksBasedOn(bundle)].filter((line): line is string => line !== null)],
             approval: chosen ? approvalQuestion(bundle.task, bundle.current.model, chosen) : null,
             spend: { openmeritUsd: spent.openmeritUsd, customerUsd: spent.customerUsd }, guardrails, notices: [...s.state.notices, ...notices], fixes: [...(s.state.fixes ?? []), ...fixes],
             reportUrl: `${host.settings().config.appUrl}/r/${jobId}/`, catalogueVersion: models.catalogueVersion, cases: counts, ...(evalVersion === null ? {} : { evalVersion }),

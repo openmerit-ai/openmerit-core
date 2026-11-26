@@ -2,6 +2,9 @@
 // billing webhooks, endpoints, guardrails and watches. Sign-in, Stripe and every model are local
 // fakes, and the app runs in a child process so a test can SIGKILL it mid-job.
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, describe, test } from "node:test";
@@ -66,7 +69,7 @@ describe("the cloud app", () => {
     const init = await signedIn.rpc("initialize", { protocolVersion: "2025-06-18" });
     assert.equal(init.body.result?.protocolVersion, "2025-06-18");
     const tools = await signedIn.rpc("tools/list");
-    assert.deepEqual(tools.body.result?.tools?.map(tool => tool.name), ["openmerit_recommend", "openmerit_result", "openmerit_answer", "openmerit_confirmation", "openmerit_tasks", "openmerit_eval", "openmerit_retire"]);
+    assert.deepEqual(tools.body.result?.tools?.map(tool => tool.name), ["openmerit_recommend", "openmerit_result", "openmerit_answer", "openmerit_confirmation", "openmerit_eval_command", "openmerit_tasks", "openmerit_eval", "openmerit_retire"]);
 
     const noOrganization = await caller(app, "test:user_b").tool("openmerit_tasks", {});
     assert.equal(noOrganization.isError, true);
@@ -891,5 +894,53 @@ test("a self-hosted server starts a job without a plan, and its Stripe settings 
     const metadata = await (await fetch(`${app.url}/.well-known/oauth-protected-resource`)).json() as Data;
     assert.deepEqual(metadata.authorization_servers, [], "self-hosted names no Clerk issuer");
     assert.equal((await subscribe(app, "org_self")).status, 503, "no Stripe webhook is applied");
+  } finally { await stop(app); await models.close(); }
+});
+
+test("a self-hosted server measures a task with its own eval command once a person confirms the command", async () => {
+  const models = await fakeModels();
+  const app = await startApp({ models, env: { OPENMERIT_MODE: "self-hosted" } });
+  // The repository's own eval: it classifies each ticket through OPENAI_BASE_URL with $OPENMERIT_MODEL and reports each item's pass or fail.
+  const repo = mkdtempSync(join(tmpdir(), "openmerit-repo-"));
+  writeFileSync(join(repo, "eval.mjs"), `import { writeFileSync } from "node:fs";
+const tickets = ${JSON.stringify(Object.entries(TICKETS).map(([ticket, queue], index) => ({ id: `t${index + 1}`, ticket, queue })))};
+const only = (process.env.OPENMERIT_ITEMS ?? "").split(",").filter(Boolean);
+const items = [];
+for (const item of tickets.filter(each => !only.length || only.includes(each.id))) {
+  const response = await fetch(process.env.OPENAI_BASE_URL + "/chat/completions", { method: "POST", headers: { authorization: "Bearer " + process.env.OPENAI_API_KEY, "content-type": "application/json" },
+    body: JSON.stringify({ model: process.env.OPENMERIT_MODEL, messages: [{ role: "user", content: "Which queue? " + item.ticket }], max_tokens: 5 }) });
+  const answer = (await response.json()).choices?.[0]?.message?.content ?? "";
+  items.push({ id: item.id, pass: answer.trim() === item.queue });
+}
+writeFileSync(process.env.OPENMERIT_RESULT, JSON.stringify({ items }));
+`);
+  try {
+    const agent = caller(app, "test:local:local:admin");
+    const held = await agent.tool("openmerit_eval_command", { bundle: bundle("own classifier", false), environment: "acme/own", command: "node eval.mjs", root: repo, threshold: 0.5 });
+    assert.equal(held.data.status, "needs_confirmation", held.text);
+    const taskId = held.data.task_id as string, { id } = held.data.confirmation as { id: string };
+    assert.equal((await agent.api<{ evalCommand: unknown }>(`/api/tasks/${taskId}/eval-command`)).body.evalCommand, null, "nothing runs before the person confirms");
+    const page = await (await fetch(`${app.url}/confirm/${id}`)).text();
+    assert.match(page, /Measure own classifier by running a command on this machine[^]*Command: node eval\.mjs/);
+    const nonce = /name="nonce" value="([\w-]+)"/.exec(page)![1]!;
+    await fetch(`${app.url}/confirm/${id}`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ nonce, decision: "confirm" }).toString() });
+    assert.equal((await agent.api<{ evalCommand: { command: string } }>(`/api/tasks/${taskId}/eval-command`)).body.evalCommand.command, "node eval.mjs");
+    assert.equal((await agent.tool("openmerit_eval_command", { task_id: taskId, command: "node eval.mjs", root: join(repo, "nope") })).isError, true, "a root that does not exist is refused");
+
+    const before = models.calls.length;
+    const started = await agent.tool("openmerit_recommend", { task_id: taskId });
+    assert.equal(started.isError, false, started.text);
+    // No label check and no grading: the customer's eval is the grader.
+    const done = await waitFor(() => agent.tool("openmerit_result", { job_id: started.data.job_id }), value => ["done", "failed", "stopped", "needs_input"].includes(String(value.data.status)), 180_000);
+    assert.equal(done.data.status, "done", done.text);
+    const result = (await agent.api<Result & { notices: string[]; basedOn: string[] }>(`/api/runs/${String(started.data.job_id)}`)).body;
+    assert.equal(result.status, "picked", done.text);
+    assert.ok(result.notices.some(notice => notice.startsWith("Measured with your eval command, `node eval.mjs`")), result.notices.join("\n"));
+    assert.ok(result.basedOn.some(line => /your eval's pass or fail per item/.test(line)), result.basedOn.join("\n"));
+    assert.equal(result.pick!.total, Object.keys(TICKETS).length * 3, "the eval's own items, three runs each");
+    const calls = models.calls.slice(before);
+    assert.ok(calls.length > 0 && calls.every(call => !call.ticket.startsWith("writer") && call.auth === "Bearer or-test-key"), "the eval's calls reach the endpoint with its key, through the proxy, and no cases are written");
+    const spend = (await agent.api<{ openmeritUsd: number }>("/api/spend")).body;
+    assert.ok(spend.openmeritUsd > 0, "the eval's calls are booked in the account's ledger");
   } finally { await stop(app); await models.close(); }
 });

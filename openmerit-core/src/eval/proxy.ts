@@ -10,8 +10,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { setTimeout as sleep } from "node:timers/promises";
 import { requestPrice, type CatalogueModel } from "../engine/catalogue.ts";
-import { expectedCost, readUsage, sizeEstimate, type Ledger, type Settlement } from "../engine/ledger.ts";
-import type { State } from "../state/db.ts";
+import { expectedCost, readUsage, sizeEstimate, type Funding, type Ledger, type Settlement } from "../engine/ledger.ts";
 
 export interface ProxyUnit {
   runId: string;
@@ -21,6 +20,8 @@ export interface ProxyUnit {
   apiKey: string;
   /** The candidate (or baseline) the unit evaluates, as the endpoint names it. */
   model: string;
+  /** Who pays for the unit's calls: the customer's own endpoint (the default), or OpenMerit's key. */
+  funding?: Funding;
   /** Endpoint model ID → catalogue model, for every model the pool allows on this endpoint. */
   allowed: (endpointModel: string) => CatalogueModel | null | undefined;
 }
@@ -33,6 +34,8 @@ export interface UnitTally {
   cutOff: number;
   /** The largest request refused on the budget: what it needed, and the output tokens it allowed. */
   refusedLargest?: { usd: number; outputTokens: number };
+  /** Why the ledger refused the largest refused request, such as the job's budget or a monthly cap. */
+  refusedReason?: string;
 }
 
 /** True when an OpenAI-style answer (body or SSE stream) stopped at its token limit without any text. */
@@ -117,12 +120,13 @@ export class EvalProxy {
   /** Requests being handled, and how to abort each one's upstream call. */
   private readonly inFlight = new Map<Promise<unknown>, AbortController>();
   private readonly units = new Map<string, { unit: ProxyUnit; tally: UnitTally; ledger: Ledger }>();
-  private readonly state: State;
+  /** The ledger a unit's requests are reserved and settled in: the CLI's run in SQLite, or a cloud job's in its account. */
+  private readonly ledgerFor: (unit: ProxyUnit) => Ledger;
   private readonly fetcher: typeof fetch;
   /** Requests reserved and not yet settled, and the requests waiting for one of them to settle. */
   private reserved = 0;
   private settledWaiters: (() => void)[] = [];
-  constructor(state: State, fetcher: typeof fetch = fetch) { this.state = state; this.fetcher = fetcher; }
+  constructor(ledgerFor: (unit: ProxyUnit) => Ledger, fetcher: typeof fetch = fetch) { this.ledgerFor = ledgerFor; this.fetcher = fetcher; }
 
   async start(): Promise<string> {
     this.server = createServer((req, res) => {
@@ -155,7 +159,7 @@ export class EvalProxy {
   open(unit: ProxyUnit): { token: string; tally: UnitTally } {
     const token = `om-eval-${randomBytes(18).toString("hex")}`;
     const tally: UnitTally = { requests: 0, refused: 0, budgetHit: false, poolViolations: [], upstreamErrors: [], abandoned: 0, cutOff: 0 };
-    this.units.set(token, { unit, tally, ledger: this.state.ledger({ runId: unit.runId, unitId: unit.unitId }) });
+    this.units.set(token, { unit, tally, ledger: this.ledgerFor(unit) });
     return { token, tally };
   }
 
@@ -190,7 +194,7 @@ export class EvalProxy {
     const expected = expectedCost(catalogue, parsed, forwarded.length);
     // The CLI calls only the user's own endpoints with their keys.
     const key = randomUUID();
-    const reserve = () => ledger.reserve({ key, usd: expected.usd, funding: "customer", model, endpoint: unit.endpointId });
+    const reserve = () => ledger.reserve({ key, usd: expected.usd, funding: unit.funding ?? "customer", model, endpoint: unit.endpointId });
     let reservation = await reserve();
     // Refused while other requests hold reservations at their maximum cost: they usually settle far lower, so wait for
     // them instead of pausing the run. Only a request the budget refuses with nothing else in flight pauses it.
@@ -200,7 +204,7 @@ export class EvalProxy {
     }
     if (!reservation.ok) {
       tally.refused++; tally.budgetHit = true;
-      if (!tally.refusedLargest || expected.usd > tally.refusedLargest.usd) tally.refusedLargest = { usd: expected.usd, outputTokens: expected.outputTokens };
+      if (!tally.refusedLargest || expected.usd > tally.refusedLargest.usd) { tally.refusedLargest = { usd: expected.usd, outputTokens: expected.outputTokens }; tally.refusedReason = reservation.reason; }
       return send(res, 402, `OpenMerit eval budget reached: ${reservation.reason}; this request needs about $${reservation.neededUsd.toFixed(4)}. Paid evaluation is paused until the budget is raised.`, "openmerit_budget");
     }
     tally.requests++;

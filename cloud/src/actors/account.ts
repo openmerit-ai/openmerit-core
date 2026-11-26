@@ -10,6 +10,7 @@ import { checkRepo, parseRepoUrl, reviewRepository, tokenProblem, type RepoRevie
 import { decryptKey, encryptKey, endpointUrlProblem } from "../keys.ts";
 import { OPENROUTER, type EndpointInfo } from "../../../openmerit-core/src/job/pool.ts";
 import type { Case, EndpointConfig, EndpointKind, TaskBundle } from "../../../openmerit-core/src/ranking/index.ts";
+import type { EvalCommandSpec } from "../../../openmerit-core/src/job/workflow.ts";
 import type { Registry } from "../registry.ts";
 import { services } from "../services.ts";
 
@@ -67,6 +68,8 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS confirmations (id TEXT PRIMARY KEY, nonce TEXT NOT NULL, project_id TEXT NOT NULL, method TEXT NOT NULL, path TEXT NOT NULL, body TEXT NOT NULL,
     checks TEXT NOT NULL, title TEXT NOT NULL, items TEXT NOT NULL, requested_by TEXT NOT NULL, requested_via TEXT, status TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
     decided_by TEXT, decided_at INTEGER, result TEXT)`,
+  // A task's own eval command, which a self-hosted server runs to measure it, as a person confirmed it (api.ts).
+  `CREATE TABLE IF NOT EXISTS eval_commands (task_id TEXT PRIMARY KEY, spec TEXT NOT NULL, confirmed_by TEXT NOT NULL, confirmed_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS eval_drafts (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, repo_id TEXT, environment TEXT NOT NULL, name TEXT NOT NULL, bundle TEXT NOT NULL,
     cases TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL, decided_by TEXT, decided_at INTEGER, task_id TEXT)`,
 ];
@@ -651,6 +654,21 @@ export const account = actor({
     /** Refuses MCP access tokens issued before now. */
     disconnect: async (c): Promise<void> => {
       await c.db.execute(`INSERT INTO account (id, mcp_revoked_before) VALUES (1, ?) ON CONFLICT (id) DO UPDATE SET mcp_revoked_before = excluded.mcp_revoked_before`, Math.floor(Date.now() / 1000));
+    },
+
+    /** The task's eval command, which the job runs on a self-hosted server. */
+    evalCommandFor: async (c, taskId: string): Promise<EvalCommandSpec | null> => {
+      const [row] = await c.db.execute(`SELECT spec FROM eval_commands WHERE task_id = ?`, taskId);
+      return row ? JSON.parse(String(row.spec)) as EvalCommandSpec : null;
+    },
+    /** Sets the task's eval command, as a person confirmed it, or clears it with null. */
+    setEvalCommand: async (c, input: { taskId: string; spec: EvalCommandSpec | null; by: string }): Promise<void> => {
+      if (!input.spec) await c.db.execute(`DELETE FROM eval_commands WHERE task_id = ?`, input.taskId);
+      else await c.db.execute(`INSERT INTO eval_commands (task_id, spec, confirmed_by, confirmed_at) VALUES (?, ?, ?, ?) ON CONFLICT (task_id) DO UPDATE SET spec = excluded.spec, confirmed_by = excluded.confirmed_by, confirmed_at = excluded.confirmed_at`, input.taskId, JSON.stringify(input.spec), input.by, Date.now());
+    },
+    /** Creates a task's row before its first run, so a person can confirm its eval command first. */
+    createTask: async (c, input: { taskId: string; projectId: string; environment: string; agent: string | null; name: string; currentModel: string }): Promise<void> => {
+      await c.db.execute(`INSERT INTO tasks (id, project_id, environment, agent, name, current_model, pick, status, retired) VALUES (?, ?, ?, ?, ?, ?, NULL, 'new', 0) ON CONFLICT (id) DO NOTHING`, input.taskId, input.projectId, input.environment, input.agent, input.name, input.currentModel);
     },
 
     /** Saves a coding agent's critical request until a person confirms or declines it. */

@@ -4,6 +4,9 @@
 // default project without it); the plan, members and billing are the organization's. Changing endpoints, GitHub
 // repositories, environment guardrails, billing and the account itself needs the organization's admin role.
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { statSync } from "node:fs";
+import { isAbsolute } from "node:path";
+import type { EvalCommandSpec } from "../../openmerit-core/src/job/workflow.ts";
 import type { AppDeps } from "./app.ts";
 import { LOCAL_USER, type AuthResult, type Identity } from "./auth.ts";
 import { confirmUrl } from "./config.ts";
@@ -85,6 +88,28 @@ function evalProblem(bundle: TaskBundle, spec: unknown, cases: unknown): string 
   }
   return JSON.stringify(cases).length > 1024 * 1024 ? "The cases are larger than 1 MB." : null;
 }
+
+/**
+ * A task's eval command as the coding agent sent it (`command`, `root`, `cwd`, `env`, `threshold`, `timeoutSeconds`),
+ * checked: root is an existing absolute directory on this server's machine, and env names are variable names.
+ */
+export function evalCommandSpec(input: Json | null): { ok: true; spec: EvalCommandSpec } | { ok: false; error: string } {
+  const command = typeof input?.command === "string" ? input.command.trim() : "";
+  if (!command || command.length > 4000) return { ok: false, error: "Send the eval command as a string of at most 4,000 characters, such as \"node evals/classify.mjs\"." };
+  const root = typeof input?.root === "string" ? input.root : "";
+  if (!isAbsolute(root)) return { ok: false, error: "Send root, the repository's absolute path on this machine." };
+  try { if (!statSync(root).isDirectory()) return { ok: false, error: `${root} is not a directory.` }; } catch { return { ok: false, error: `${root} does not exist on the machine this server runs on.` }; }
+  const cwd = input?.cwd === undefined || input.cwd === null ? undefined : String(input.cwd);
+  if (cwd !== undefined && (isAbsolute(cwd) || cwd.split(/[\\/]/).includes(".."))) return { ok: false, error: "cwd is a directory inside root, relative to it." };
+  const env = input?.env ?? undefined;
+  if (env !== undefined && (typeof env !== "object" || env === null || Array.isArray(env) || !Object.entries(env).every(([name, value]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) && typeof value === "string"))) return { ok: false, error: "env maps variable names to strings." };
+  const threshold = input?.threshold ?? null;
+  if (threshold !== null && (typeof threshold !== "number" || threshold < 0 || threshold > 1)) return { ok: false, error: "threshold is the eval's minimum pass rate, from 0 to 1, or null." };
+  const seconds = input?.timeoutSeconds ?? null;
+  if (seconds !== null && (typeof seconds !== "number" || seconds < 10 || seconds > 7200)) return { ok: false, error: "timeoutSeconds is from 10 to 7,200." };
+  return { ok: true, spec: { command, root, ...(cwd ? { cwd } : {}), ...(env ? { env: env as Record<string, string> } : {}), threshold: threshold as number | null, ...(seconds ? { timeoutMs: seconds * 1000 } : {}) } };
+}
+export const HOSTED_EVAL_COMMAND = "Measuring with your own eval command runs on a self-hosted OpenMerit server for now (OPENMERIT_MODE=self-hosted); the hosted app cannot run commands on your machine yet.";
 
 /** Guardrails that spend money: setting one is a critical action. */
 const MONEY_GUARDRAILS = ["budgetUsd", "spendCapUsd", "customerSpendCapUsd"];
@@ -292,6 +317,25 @@ export function apiRoutes(deps: AppDeps) {
       }
       const started = await runTask(client, { accountId: who.accountId, userId: who.userId, taskId: match[1]!, budgetUsd, trigger: confirmed ? "mcp" : "app" });
       return started.ok ? json(201, { jobId: started.jobId, taskId: started.taskId }) : error(409, started.error);
+    }
+    // The task's own eval command: a self-hosted server runs it to measure each model. Setting it runs a shell command on this machine, so a person confirms it.
+    if ((match = /^\/api\/tasks\/([\w-]+)\/eval-command$/.exec(path)) && (method === "GET" || method === "PUT" || method === "DELETE")) {
+      const row = await account.task(match[1]!);
+      if (!row) return error(404, "No such task in this account.");
+      if (method === "GET") return json(200, { evalCommand: await account.evalCommandFor(row.id) });
+      if (config.mode === "hosted") return error(409, HOSTED_EVAL_COMMAND);
+      if (method === "DELETE") {
+        const held = await hold(`Stop measuring ${row.name} with its eval command`, ["Its next run measures on OpenMerit's own cases"], null); if (held) return held;
+        await account.setEvalCommand({ taskId: row.id, spec: null, by: who.userId });
+        return json(200, { evalCommand: null });
+      }
+      const input = await body(request);
+      const checked = evalCommandSpec(input);
+      if (!checked.ok) return error(400, checked.error);
+      const { spec } = checked;
+      const held = await hold(`Measure ${row.name} by running a command on this machine`, [`Command: ${spec.command}`, `In: ${spec.cwd ? `${spec.root}/${spec.cwd}` : spec.root}`, ...(spec.env ? [`Environment: ${Object.entries(spec.env).map(([name, value]) => `${name}=${value}`).join(", ")}`] : []), `It runs once per model measured, with its model calls through OpenMerit's proxy${spec.threshold != null ? `; models need a pass rate of at least ${spec.threshold}` : ""}`], input); if (held) return held;
+      await account.setEvalCommand({ taskId: row.id, spec, by: who.userId });
+      return json(200, { evalCommand: spec });
     }
     // Retire instead of delete: the task stops watching and keeps its eval and runs. The next recommend call brings it back.
     if ((match = /^\/api\/tasks\/([\w-]+)\/retire$/.exec(path)) && method === "POST") {

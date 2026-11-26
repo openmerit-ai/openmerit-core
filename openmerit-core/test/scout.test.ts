@@ -810,7 +810,7 @@ test("the metering proxy estimates an answer without token usage by its size, no
   const nano = loadCatalogue().models.find(model => model.id === "openai/gpt-5-nano")!;
   // An endpoint that answers without a usage block, as some providers and streams do.
   const bare = (async () => new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: "billing" } }] }), { status: 200, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
-  const proxy = new EvalProxy(ctx.state, bare);
+  const proxy = new EvalProxy(unit => ctx.state.ledger({ runId: unit.runId, unitId: unit.unitId }), bare);
   const url = await proxy.start();
   const { token } = proxy.open({ runId, unitId: "unit", endpointId: "openai", baseUrl, apiKey: "sk-fake-endpoint", model: "gpt-5-nano", allowed: () => nano });
   const answer = await fetch(`${url}/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ model: "gpt-5-nano", max_completion_tokens: 128000, messages: [{ role: "user", content: "I was charged twice." }] }) });
@@ -830,7 +830,7 @@ test("the metering proxy holds a request the budget refuses only because of othe
   const reservedEach = (100_000 * nano.outputPerM!) / 1e6;
   ctx.state.updateRun(runId, { budgetUsd: reservedEach * 1.5 });
   const slow = (async () => { await new Promise(resolve => setTimeout(resolve, 50)); return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: "billing" } }], usage: { prompt_tokens: 10, completion_tokens: 2 } }), { status: 200, headers: { "content-type": "application/json" } }); }) as unknown as typeof fetch;
-  const proxy = new EvalProxy(ctx.state, slow);
+  const proxy = new EvalProxy(unit => ctx.state.ledger({ runId: unit.runId, unitId: unit.unitId }), slow);
   const url = await proxy.start();
   const { token, tally } = proxy.open({ runId, unitId: "unit", endpointId: "openai", baseUrl, apiKey: "sk-fake-endpoint", model: "gpt-5-nano", allowed: () => nano });
   const ask = () => fetch(`${url}/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ model: "gpt-5-nano", max_completion_tokens: 100_000, messages: [{ role: "user", content: "I was charged twice." }] }) }).then(response => response.status);
@@ -861,7 +861,7 @@ test("a model call the eval gives up on is aborted upstream and never counts mor
     init.signal!.addEventListener("abort", () => { upstreamAborted = true; });
     return new Response(new ReadableStream({ async pull(controller) { await new Promise(resolve => setTimeout(resolve, 20)); if (init.signal!.aborted) controller.error(init.signal!.reason); else controller.enqueue(chunk); } }), { status: 200, headers: { "content-type": "text/event-stream" } });
   }) as unknown as typeof fetch;
-  const proxy = new EvalProxy(ctx.state, endless);
+  const proxy = new EvalProxy(unit => ctx.state.ledger({ runId: unit.runId, unitId: unit.unitId }), endless);
   const url = await proxy.start();
   const { token } = proxy.open({ runId, unitId: "unit", endpointId: "openai", baseUrl, apiKey: "sk-fake-endpoint", model: "gpt-5-nano", allowed: () => nano });
   const gaveUp = new AbortController();
@@ -955,7 +955,7 @@ test("the metering proxy refuses models outside the allowed pool without forward
   const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
   const ctx = context(root, home);
   const runId = startRun(ctx);
-  const proxy = new EvalProxy(ctx.state);
+  const proxy = new EvalProxy(unit => ctx.state.ledger({ runId: unit.runId, unitId: unit.unitId }));
   const url = await proxy.start();
   const catalogue = loadCatalogue();
   const nano = catalogue.models.find(model => model.id === "openai/gpt-5-nano")!;
@@ -980,7 +980,7 @@ test("the metering proxy sends a failed model call again, and passes on a failur
   const ctx = context(repo(), mkdtempSync(join(tmpdir(), "openmerit-home-")));
   const runId = startRun(ctx);
   const nano = loadCatalogue().models.find(model => model.id === "openai/gpt-5-nano")!;
-  const proxy = new EvalProxy(ctx.state);
+  const proxy = new EvalProxy(unit => ctx.state.ledger({ runId: unit.runId, unitId: unit.unitId }));
   const url = await proxy.start();
   const { token, tally } = proxy.open({ runId, unitId: "unit", endpointId: "openai", baseUrl, apiKey: "sk-fake-endpoint", model: "gpt-5-nano", allowed: () => nano });
   const post = () => fetch(`${url}/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ model: "gpt-5-nano", max_tokens: 10, messages: [{ role: "user", content: "hi" }] }) });
