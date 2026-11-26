@@ -4,10 +4,10 @@
 // 1. The current model runs every item `repeats` times. When it passes less than `floor` of its own
 //    eval (80% by default), the eval cannot tell models apart, and nothing is screened or recommended. Once fewer than `sampleSize` items have passed
 //    in every run so far, it stops early: another run cannot add any, and the search cannot screen.
-// 2. `sample` picks the screening items from those it passed in every run, and as many again for a
-//    retry: an option that misses exactly one sampled item is screened once more on the retry items,
-//    since one miss in five is as likely chance as weakness. The caller should draw the same items for
-//    the same eval (`stableSample`), so runs of one eval search the same way.
+// 2. The screen runs on the items it passed in every run, or on SMALL_EVAL of them that `sample` draws
+//    when there are more: an option that misses exactly one is screened once more on that item, since
+//    one miss can be chance. The caller should draw the same items for the same eval (`stableSample`),
+//    so runs of one eval search the same way.
 // 3. Scout Model Binary Search over the ladder (`binarySearch`), then the finalists run every item
 //    `repeats` times. The leader is the finalist with the best score, then the lowest measured cost.
 // 4. Challengers (`challengers`), capped at the leader's list price, or at the current model's when no
@@ -26,7 +26,7 @@ export const TOP = 3;
 export const EVAL_FLOOR = 0.8;
 /** A switch must cost at least this much less per item than the current model; a smaller saving is within measurement noise, so the current model stays. */
 export const MIN_SAVING = 0.1;
-/** An eval with at most this many items screens on every item the current model passed in every run, not a sample. */
+/** The most items a screen runs on: every item the current model passed in every run, or this many drawn from them. */
 export const SMALL_EVAL = 20;
 
 /** Passes over item runs for one kind of item, such as typical, edge or guardrail cases. */
@@ -78,7 +78,7 @@ export interface MeasureCall {
   role: "baseline" | "screen" | "final";
   /** How the option was reached; `baseline` for the current model. */
   stage: Stage | "baseline";
-  /** 1-based; a screen is 1, and 2 for its retry on the retry items. */
+  /** 1-based; a screen is 1, and 2 for its retry on the item it missed. */
   repeat: number;
   /** 2 when this call measures again the items an earlier call with the same role, stage and repeat lost to failed calls. */
   attempt?: 2;
@@ -165,7 +165,7 @@ export interface EvaluateInput<T extends Rung> {
    * the evaluation.
    */
   measure: (option: T | null, items: readonly string[] | null, call: MeasureCall) => Promise<Measurement | null>;
-  /** Picks up to `count` screening items from `reliable`, the same ones on a replay: the screen's items, then the retry's. */
+  /** Picks `count` screening items from `reliable`, the same ones on a replay. */
   sample: (reliable: readonly string[], count: number) => readonly string[] | Promise<readonly string[]>;
   progress?: Progress<T>;
   /** Called as the evaluation goes, such as to show the search path while it runs. */
@@ -344,12 +344,9 @@ export async function evaluateTask<T extends Rung>(input: EvaluateInput<T>): Pro
   const pool = criteria ? items : reliable;
   if (pool.length < sampleSize) return result("too_few_reliable");
 
-  // 2. The samples, and the retry's items when the pool has as many again. A small eval screens on its
-  // whole pool: five items of twelve decided too much by chance, and a miss there is retried on itself.
-  const small = items.length <= SMALL_EVAL;
-  const drawn = small ? [...pool] : [...await input.sample(pool, Math.min(pool.length, 2 * sampleSize))];
-  const samples = small ? drawn : drawn.slice(0, sampleSize);
-  const retry = small ? [] : drawn.length >= 2 * sampleSize ? drawn.slice(sampleSize, 2 * sampleSize) : [];
+  // 2. The samples: the whole pool, or SMALL_EVAL items drawn from a larger one. Five items decided too
+  // much by chance, and evals with written cases are rarely under twenty; a single miss is retried on itself.
+  const samples = pool.length <= SMALL_EVAL ? [...pool] : [...await input.sample(pool, SMALL_EVAL)];
   const entry = (option: T, stage: Stage, provisional: boolean): Evaluated<T> => {
     let found = tried.get(option.key);
     if (!found) {
@@ -370,15 +367,14 @@ export async function evaluateTask<T extends Rung>(input: EvaluateInput<T>): Pro
       if (!first) throw new Error(`The screen of ${option.key} returned no measurement.`);
       runs.push(first);
       accepted = passes(first, samples);
-      // One miss, and not of a guardrail or step check, which every case must pass: screen once more on the retry items.
+      // One miss, and not of a guardrail or step check, which every case must pass: screen once more on the item it missed.
       const missed = samples.filter(item => first.items[item] !== true);
       const broke = criteria ? meetsCriteria([first], criteria).failed.some(check => criteria.guardrails.includes(check)) : false;
-      const again = small ? missed : retry;
-      if (!accepted && again.length && missed.length === 1 && !broke) {
-        const second = await settled(option, again, { role: "screen", stage, repeat: 2, ...flag });
+      if (!accepted && missed.length === 1 && !broke) {
+        const second = await settled(option, missed, { role: "screen", stage, repeat: 2, ...flag });
         if (!second) throw new Error(`The screen of ${option.key} returned no measurement.`);
         runs.push(second);
-        accepted = passes(second, again);
+        accepted = passes(second, missed);
       }
     } catch (error) {
       if (unavailable(error)) {

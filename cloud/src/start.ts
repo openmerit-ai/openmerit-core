@@ -113,9 +113,9 @@ async function launch(client: AppClient, input: { accountId: string; projectId: 
   const { jobId, taskId } = ids;
   const account = client.account.getOrCreate([input.accountId]);
   const task = client.task.getOrCreate([input.accountId, taskId], { createWithInput: { accountId: input.accountId, taskId, projectId: input.projectId, environment: input.environment, name: input.bundle.task } });
-  const [catalogue, endpoints, guardrails, past] = await Promise.all([
+  const [catalogue, endpoints, guardrails, past, accepted] = await Promise.all([
     client.catalogue.getOrCreate(["global"]).get(), account.endpointsForJob(input.projectId),
-    account.resolveGuardrails({ projectId: input.projectId, environment: input.environment, agent: input.agent, taskId }), task.info(),
+    account.resolveGuardrails({ projectId: input.projectId, environment: input.environment, agent: input.agent, taskId }), task.info(), account.evalFor(taskId),
   ]);
   const measured = past.lastResult?.pick && past.lastResult.currentModel === input.bundle.current.model ? past.lastResult : null;
   const pool = buildPool({ catalogue, endpoints, bundle: input.bundle, guardrails: guardrails.effective });
@@ -127,6 +127,8 @@ async function launch(client: AppClient, input: { accountId: string; projectId: 
   const estimate = estimateJob(pool, input.bundle, {
     repeats: Math.max(1, guardrails.effective.repeats ?? DEFAULT_REPEATS), budgetUsd: guardrails.effective.budgetUsd ?? config.limits.defaultJobBudgetUsd,
     costPerCall: model => callCost(index.find(model), input.bundle), judge: input.bundle.output.kind === "text" || input.bundle.guardrails?.length ? config.models.judge : null,
+    // As the job decides: a person grades a first run's answers, before any eval is accepted.
+    grading: input.kind === "run" && !accepted && !!config.openrouter.apiKey,
   });
   await task.recordJob({ jobId, bundle: input.bundle, agent: input.agent, kind: input.kind });
   await client.job.create([jobId], { input: { accountId: input.accountId, projectId: input.projectId, taskId, environment: input.environment, agent: input.agent, bundle: input.bundle, kind: input.kind, trigger: input.trigger, userId: input.userId, provisional, createdAt: new Date().toISOString() } });

@@ -526,6 +526,9 @@ test("a person grades a run's answers: a disagreement writes the eval again, agr
     const agent = caller(app, "test:user_g:org_grade:admin");
     const started = await agent.tool("openmerit_recommend", { bundle: bundle("graded classifier", false), environment: "acme/grade" });
     const jobId = started.data.job_id as string;
+    // A first run may search once per grading round, and its estimate says so.
+    assert.equal((started.data.estimate as { rounds: number }).rounds, 3);
+    assert.match(started.text, /That is one round: .* up to 3 rounds/);
     const result = () => agent.tool("openmerit_result", { job_id: jobId });
     await waitFor(result, value => value.data.status === "needs_input");
     await agent.tool("openmerit_answer", { job_id: jobId, answers: { label_check: ["written-1", "written-2"] } });
@@ -556,13 +559,15 @@ test("a person grades a run's answers: a disagreement writes the eval again, agr
     assert.equal(done.data.status, "done", done.text);
     const report = (await agent.api<{ grading: { rounds: number; accepted: boolean; bar: string; summary: string | null }; evalVersion: number }>(`/api/runs/${jobId}`)).body;
     assert.deepEqual([report.grading.rounds, report.grading.accepted, report.grading.bar, report.evalVersion], [2, true, "criteria", 1]);
-    assert.match(report.grading.summary ?? "", /^Your current model passes your checks/);
+    assert.match(report.grading.summary ?? "", /^Your current model meets your checks(, though it fails \d+ of its \d+ case runs)?[;,]/);
     const evaluation = (await agent.api<{ accepted: { version: number; source: string; by: string | null; bar: string; spec: { criteria?: string[] } } }>(`/api/tasks/${task!.id}/eval`)).body.accepted;
     assert.deepEqual([evaluation.version, evaluation.source, evaluation.by, evaluation.bar], [1, "grading", "user_g", "criteria"]);
     assert.deepEqual(evaluation.spec.criteria, ["The queue is the one the ticket's main problem belongs to."]);
 
     // The next run measures on the accepted eval against its bar, and asks nothing.
     const next = await agent.tool("openmerit_recommend", { bundle: bundle("graded classifier", false), environment: "acme/grade" });
+    assert.equal((next.data.estimate as { rounds: number }).rounds, 1, "a run on the accepted eval grades nothing, so it searches once");
+    assert.doesNotMatch(next.text, /That is one round/);
     const second = await waitFor(() => agent.tool("openmerit_result", { job_id: next.data.job_id }), value => ["done", "failed", "stopped", "needs_input"].includes(String(value.data.status)), 180_000);
     assert.equal(second.data.status, "done", second.text);
     const later = (await agent.api<{ grading: { rounds: number; accepted: boolean; bar: string }; evalVersion: number }>(`/api/runs/${String(next.data.job_id)}`)).body;

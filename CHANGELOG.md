@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Screens on up to 20 cases in every eval.** An eval over 20 cases, which is most of them once OpenMerit writes cases, used to screen each candidate on 5; it now screens on 20 drawn from the cases the current model passes, and a single miss is screened once more on that case. Scout and the cloud app both. The estimate and Scout's approval text say so.
+- In Scout, only the cases of OpenMerit's eval whose model call failed are measured again as failed calls; a case answered wrongly in the same run used to be retried too, whenever any call in that run had failed.
+- In the cloud app, a challenger or finalist whose measuring step keeps failing, such as on a deadline, is skipped as untested instead of ending every challenger after it; and `openmerit_recommend`'s `estimate` has `rounds`: a first run that a person grades may search up to three times, once per round whose grades write the eval again, and the estimate says so (a retest run cost twice its estimate).
+- Against the eval's checks, a current model that meets them while failing a few cases says "meets your checks, though it fails 2 of its 51 case runs" instead of "passes your checks" beside its failed cases.
 - The cloud app runs self-hosted: `OPENMERIT_MODE=self-hosted` starts it for one person on 127.0.0.1 with a local engine, signs in with a token written to `~/.openmerit/server/token` on first start, and needs no plan, Clerk, Stripe or PostHog; spend caps still apply. Not yet reachable from the `openmerit` CLI.
 
 ## 0.5.2 — 2026-11-26
