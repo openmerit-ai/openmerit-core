@@ -2,6 +2,29 @@
 
 Dated observations from using OpenMerit as Sahra Health, newest release first. Each entry says what we ran, what happened and what a customer would expect.
 
+## Published 0.5.2: claims intake agent, Scout stopped without a pick (26 Nov 2026)
+
+We ran `openmerit@0.5.2` from npm, installed globally, in a standalone `git init` copy of this directory. `package.json` still pins 0.4.2. Setup used an API-key harness over OpenRouter (`anthropic/claude-sonnet-5.5`), one OpenRouter endpoint with every model allowed, and a $5 budget. We chose the "Claims intake agent" from the six tasks Scout mapped. The run was `run-20261126-133311-db3b`, against catalogue 2026-11-12, and the result is in `scout-results/2026-11-26-0.5.2-claims-intake-binary-search.json`. This was for a launch example, not release acceptance.
+
+**What happened.** Scout found the repository's eval and wrote a 19-case eval from the task's spec. Sonnet passed 12, 11 and 10 of 21 items. At the grade step, the owner delegated grading of the six answers to the agent, so no person graded them: 1, 2 and 5 good; 3, 4 and 6 bad. Answers 3, 4 and 6 listed "no GP e-Referral number" as a bill/XML mismatch, although the referral was absent from both. Scout wrote eval version 2 from those grades, and Sonnet then passed 9, 9 and 7 of 21 (25/63). The search screened nine candidates on five items:
+
+| Model | Screen |
+| --- | --- |
+| meta/muse-wonder | 5/5 |
+| openai/gpt-5.5 | 5/5 |
+| meta/muse-ember | 5/5 |
+| x-ai/grok-4.5 | 8/10 |
+| nvidia/nemotron-3-ultra-550b-a55b | 3/5 |
+| xiaomi/mimo-v2.6-flash, deepseek/deepseek-v4.1-flash-1017, anthropic/claude-opus-4.8, tencent/hy4-preview | 2/5 |
+
+The budget paused at $4.27 of $5, and we raised it to $10 for this run only. `openai/gpt-5.4-pro` then passed 1/5 and timed out on the next screen ("no answer in 120 s"). Scout asked "1 eval run failed. Run it again?" (default no). We answered no, and the run ended with no recommendation. Spend was $6.78 eval (689 requests, $2.25 estimated from list prices) plus $0.93 harness.
+
+**Findings**
+
+1. **Declining one candidate's retry stops the whole search.** The question reads as being about one failed eval run. A customer would expect Scout to skip that candidate and still rank the three that passed 5/5. Instead the result says "The search stopped, so no model is recommended". `openmerit history` also says the search "stopped before screening any candidate" directly above nine screen lines.
+2. **A "cheaper than Sonnet" candidate cost far more per item.** The pool lists 177 candidates "cheaper than anthropic/claude-sonnet-5.5", but `openai/gpt-5.4-pro` spent about $1.18 on its first five-item screen (about $0.24 per item, against Sonnet's measured $0.016) and $1.33 on the attempt that timed out. Its two attempts were about 40% of the run's eval spend. We assume the ranking compares list prices and misses reasoning tokens, but we cannot check that from the customer side.
+3. **Results files are listed ahead of the app's own model.** At scan, models that appear only in saved `scout-results/` files were listed before the model the app uses. Scout did skip "data files that list many models", so this concerns the order of the listing only.
+
 ## Published 0.4.2: local CLI, setup and Scout Model Binary Search (14 Nov 2026)
 
 We followed "Release testing" steps 1–5 against the registry package `openmerit@0.4.2`. It is on the `next` dist-tag; `latest` is still 0.4.1, so we installed `openmerit@0.4.2` explicitly. The harness was an API key over OpenRouter (`anthropic/claude-sonnet-5.5`, `OPENROUTER_API_KEY`). The Claude Code and ChatGPT harness sign-ins need a person, so we did not test them. The coding agent was a fresh Claude Code 2.1.318 session (`535f9ab8-3ca1-4cd7-b98e-a8aadc3a168e`) running over OpenRouter, rooted at `playground/`, with the `openmerit` MCP server that setup registered. It had never seen OpenMerit source. This is **not release acceptance**. Only the coding agent completed a comparison, the scenario comparison was cut for budget, and it is one release, not two.
