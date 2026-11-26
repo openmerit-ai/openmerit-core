@@ -688,7 +688,7 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
   }
   const declined = new Set(data.retryDeclined);
 
-  const proxy = new EvalProxy(state, ctx.fetch);
+  const proxy = new EvalProxy(unit => state.ledger({ runId: unit.runId, unitId: unit.unitId }), ctx.fetch);
   const proxyUrl = await proxy.start();
 
   /** One eval run: replayed from SQLite when finished, otherwise run through the proxy and read back. */

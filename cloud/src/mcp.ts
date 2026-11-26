@@ -9,9 +9,9 @@ import type { Answers, JobView } from "./actors/job.ts";
 import { explain, nearMissLine, paybackLine, reasonFor, type Fix, type JobResult } from "../../openmerit-core/src/job/report.ts";
 import type { AppClient } from "./registry.ts";
 import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
-import { bundleProblem, DEFAULT_ENVIRONMENT, rerunJob, runTask, startJob } from "./start.ts";
+import { bundleProblem, DEFAULT_ENVIRONMENT, redactBundle, rerunJob, runTask, startJob, taskIdFor } from "./start.ts";
 import { evalDir, type Decision } from "./actors/account.ts";
-import { heldReply } from "./api.ts";
+import { evalCommandSpec, heldReply, HOSTED_EVAL_COMMAND } from "./api.ts";
 import { estimateLine } from "../../openmerit-core/src/job/workflow.ts";
 
 export const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
@@ -79,6 +79,21 @@ export const TOOLS = [
     description: "Whether the user confirmed a critical request another tool held for them (a higher budget, grades, a decision on a switch), and its outcome, such as the job a confirmed run started. You cannot confirm it: only the user can, on the page the holding tool linked to.",
     inputSchema: { type: "object", required: ["confirmation_id"], additionalProperties: false, properties: { confirmation_id: string } },
     annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  {
+    name: "openmerit_eval_command", title: "OpenMerit: measure with the repository's eval",
+    description: "On a self-hosted OpenMerit server, makes a task's own eval command, from the user's repository, what measures each model, instead of cases OpenMerit writes. The command follows the eval contract: it reads the model from $OPENMERIT_MODEL, sends its model calls to $OPENAI_BASE_URL with $OPENAI_API_KEY, runs only the $OPENMERIT_ITEMS items when set, and writes {\"items\":[{\"id\",\"pass\"}]} to $OPENMERIT_RESULT. Name the task by task_id, or, for a task that has not run, send its bundle and environment as openmerit_recommend takes them. It runs a command on the user's machine, so the user confirms it on a page this tool links to; then call openmerit_recommend with the task_id. clear true stops using it. The hosted server refuses it for now.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      task_id: string, bundle: BUNDLE_SCHEMA, environment: { type: "string", description: "With bundle: the repository or workspace, as openmerit_recommend takes it" }, agent: string, project: string,
+      command: { type: "string", description: "The shell command that runs the eval, such as 'node evals/classify.mjs'" },
+      root: { type: "string", description: "The repository's absolute path on the machine the server runs on" },
+      cwd: { type: "string", description: "The directory to run it in, relative to root. Default: root" },
+      env: { type: "object", additionalProperties: string, description: "Extra variables; {{model}} and {{items}} are filled in, as in CLASSIFIER_MODEL={{model}}" },
+      threshold: { type: ["number", "null"], description: "The eval's own minimum pass rate, 0 to 1, or null" },
+      timeout_seconds: { type: "number", description: "Longest one run may take. Default 1,800" },
+      clear: { type: "boolean", description: "True to stop measuring the task with its eval command" },
+    } },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   },
   {
     name: "openmerit_tasks", title: "OpenMerit: tasks",
@@ -316,6 +331,33 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
     }
     return { text: describeJob(next), data: jobData(next) };
   }
+  if (name === "openmerit_eval_command") {
+    if (deps.config.mode === "hosted") return { text: HOSTED_EVAL_COMMAND, data: { status: "refused" }, isError: true };
+    let task = typeof args.task_id === "string" ? await account.task(args.task_id) : null;
+    if (args.task_id !== undefined && !task) return { text: `No task ${String(args.task_id)} in this account. openmerit_tasks lists the task ids.`, data: {}, isError: true };
+    if (!task) {
+      const problem = bundleProblem(args.bundle);
+      if (problem) return { text: `Name the task by task_id, or send its bundle and environment. The bundle is not usable: ${problem}.`, data: {}, isError: true };
+      const bundle = redactBundle(args.bundle as TaskBundle);
+      const environment = typeof args.environment === "string" && args.environment.trim() ? args.environment.trim().replaceAll(":", "-").slice(0, 200) : DEFAULT_ENVIRONMENT;
+      const agent = typeof args.agent === "string" && args.agent.trim() ? args.agent.trim().slice(0, 200) : null;
+      const projectId = await account.projectForEnvironment(environment);
+      const taskId = taskIdFor(projectId, environment, bundle.task);
+      await account.createTask({ taskId, projectId, environment, agent, name: bundle.task, currentModel: bundle.current.model });
+      const handle = client.task.getOrCreate([identity.accountId, taskId], { createWithInput: { accountId: identity.accountId, taskId, projectId, environment, name: bundle.task } });
+      if (!(await handle.info()).bundle) await handle.prepare(bundle);
+      task = await account.task(taskId);
+    }
+    const row = task!;
+    if (args.clear === true) return hold({ projectId: row.projectId, method: "DELETE", path: `/api/tasks/${row.id}/eval-command`, body: {}, checks: "person", title: `Stop measuring ${row.name} with its eval command`, items: ["Its next run measures on OpenMerit's own cases"] });
+    const body: Json = { command: args.command, root: args.root, cwd: args.cwd, env: args.env, threshold: args.threshold ?? null, timeoutSeconds: args.timeout_seconds ?? null };
+    const checked = evalCommandSpec(body);
+    if (!checked.ok) return { text: checked.error, data: {}, isError: true };
+    const { spec } = checked;
+    const held = await hold({ projectId: row.projectId, method: "PUT", path: `/api/tasks/${row.id}/eval-command`, body, checks: "person", title: `Measure ${row.name} by running a command on this machine`,
+      items: [`Command: ${spec.command}`, `In: ${spec.cwd ? `${spec.root}/${spec.cwd}` : spec.root}`, ...(spec.env ? [`Environment: ${Object.entries(spec.env).map(([key, value]) => `${key}=${value}`).join(", ")}`] : []), `It runs once per model measured, with its model calls through OpenMerit's proxy${spec.threshold != null ? `; models need a pass rate of at least ${spec.threshold}` : ""}`] });
+    return { ...held, text: `${held.text} Once it is confirmed, call openmerit_recommend with task_id "${row.id}" to measure.`, data: { ...held.data, task_id: row.id } };
+  }
   if (name === "openmerit_confirmation") {
     const found = typeof args.confirmation_id === "string" ? await account.confirmation(args.confirmation_id) : null;
     if (!found) return { text: `No confirmation ${String(args.confirmation_id)} in this account.`, data: {}, isError: true };
@@ -342,7 +384,7 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
       return item.pick ? ", waiting for a decision" : "";
     };
     const text = tasks.length
-      ? [`${tasks.length} task${tasks.length === 1 ? "" : "s"}:`, ...tasks.map(item => `- ${item.name} [${item.id}] (${inProject(item)}${item.environment}${item.agent ? `, agent ${item.agent}` : ""}): ${item.currentModel}${item.pick ? ` → ${item.pick}` : ""}, ${item.lastRunAt ? `${item.status}, ${item.state}` : "not run yet: approved in the app from a repository review; ask the user, then call openmerit_recommend with its task_id"}${item.idleSince ? ` since ${item.idleSince.slice(0, 10)}` : ""}${decided(item)}${heads[item.id] ? `, eval v${heads[item.id]!.version}${heads[item.id]!.review ? " (a draft waits for review in the app)" : ""}` : ""}`),
+      ? [`${tasks.length} task${tasks.length === 1 ? "" : "s"}:`, ...tasks.map(item => `- ${item.name} [${item.id}] (${inProject(item)}${item.environment}${item.agent ? `, agent ${item.agent}` : ""}): ${item.currentModel}${item.pick ? ` → ${item.pick}` : ""}, ${item.lastRunAt ? `${item.status}, ${item.state}` : "not run yet; ask the user, then call openmerit_recommend with its task_id"}${item.idleSince ? ` since ${item.idleSince.slice(0, 10)}` : ""}${decided(item)}${heads[item.id] ? `, eval v${heads[item.id]!.version}${heads[item.id]!.review ? " (a draft waits for review in the app)" : ""}` : ""}`),
         ...tasks.flatMap(item => heads[item.id] && heads[item.id]!.repo !== heads[item.id]!.version ? [behindLine(item.name, item.id, heads[item.id]!)] : []),
         ...stale.map(item => `${item.name} was deleted at ${deps.config.appUrl}; its eval copy at ${item.dir} in ${item.environment} stays. Ask the user whether to remove it, then call openmerit_eval with task_id "${item.taskId}" and action removed.`),
         ready.length ? `Ready since the last session: ${ready.map(item => `${item.id} (${item.status})`).join(", ")}. Call openmerit_result for each.` : "Nothing new since the last session."].join("\n")
