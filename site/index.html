@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Meet Scout, OpenMerit's model search agent. Find the right AI models for your task, on the web or inside your coding agent.">
+  <meta name="description" content="OpenMerit finds cheaper models that pass an eval written from your code, and stays out of your live request path. Free to run on your machine; OpenMerit Cloud runs it for you.">
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#f8f7f4" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#171915" media="(prefers-color-scheme: dark)">
   <meta property="og:type" content="website">
   <meta property="og:title" content="OpenMerit — Your team has better things to build.">
-  <meta property="og:description" content="Meet Scout, OpenMerit's model search agent. Find the right AI models for your task, on the web or inside your coding agent.">
+  <meta property="og:description" content="OpenMerit finds cheaper models that pass an eval written from your code, and stays out of your live request path. Free to run on your machine; OpenMerit Cloud runs it for you.">
   <meta property="og:url" content="https://openmerit.ai/">
   <meta property="og:site_name" content="OpenMerit">
   <meta property="og:image" content="https://openmerit.ai/assets/openmerit-og-v1.png">
@@ -24,7 +24,7 @@
   <link rel="canonical" href="https://openmerit.ai/">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="preload" href="/assets/geist-sans.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/styles.css?v=20261103-speed-v1">
+  <link rel="stylesheet" href="/styles.css?v=20261126-questions-v1">
   <script src="/assets/video-player.js?v=20261031-v2" type="module"></script>
   <script src="/assets/thread-rule.js?v=20261103-v1" type="module"></script>
   <script src="/assets/speed-egg.js?v=20261103-v2" type="module"></script>
@@ -89,6 +89,17 @@
         </div>
         <p class="film-status" role="status" aria-live="polite"></p>
       </div>
+    </section>
+    <section class="home-questions" aria-labelledby="questions-title">
+      <div class="thread-rule" aria-hidden="true"><svg><path/></svg></div>
+      <h2 id="questions-title">Common questions</h2>
+      <ul>
+        <li><a href="/vs-routers/">How is OpenMerit different from an LLM router or gateway?</a></li>
+        <li><a href="/find-a-cheaper-llm/">How do I find a cheaper LLM that works as well as the one my app uses?</a></li>
+        <li><a href="/evals-from-your-code/">Can a tool write evals from my codebase and test cheaper models against them?</a></li>
+        <li><a href="/claude-code-and-codex/">Can I compare and pick LLMs from inside Claude Code or Codex?</a></li>
+        <li><a href="/run-locally/">Can I choose a model without my code going through OpenMerit?</a></li>
+      </ul>
     </section>
   </main>
 </body>
