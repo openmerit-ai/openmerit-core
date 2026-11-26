@@ -22,6 +22,7 @@ const workers: Readonly<Record<string, Worker>> = {
   "scout-serving": { config: "wrangler.scout-alpha.jsonc" },
   "playground-claims": { config: "playground/wrangler.jsonc" },
   app: { config: "wrangler.app.jsonc" },
+  email: { config: "wrangler.email.jsonc" },
   site: {
     config: "wrangler.jsonc",
   },

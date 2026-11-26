@@ -29,10 +29,10 @@
   // The contact-sales form emails each request to CONTACT_TO, sent from the
   // address the memo already verified, and allows 3 submissions a minute per IP.
   "vars": {
-    "CONTACT_TO": "lazim@openmerit.ai",
+    "CONTACT_TO": "team@openmerit.ai",
     "CONTACT_FROM": "memo@openmerit.ai"
   },
-  "send_email": [{ "name": "CONTACT_EMAIL", "allowed_sender_addresses": ["memo@openmerit.ai"], "allowed_destination_addresses": ["lazim@openmerit.ai"] }],
+  "send_email": [{ "name": "CONTACT_EMAIL", "allowed_sender_addresses": ["memo@openmerit.ai"], "allowed_destination_addresses": ["team@openmerit.ai"] }],
   "ratelimits": [{ "name": "CONTACT_RATE", "namespace_id": "2026112601", "simple": { "limit": 3, "period": 60 } }],
   "build": {
     "command": "npm run check:web && npm run check:docs && npm run build:scout"

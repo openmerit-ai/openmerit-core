@@ -106,7 +106,7 @@ test('the contact-sales form emails a valid request to OpenMerit with Reply-To s
   const sent: unknown[] = [];
   let allowed = true, failSend = false;
   const env: WebEnv = {
-    ASSETS: assets, CONTACT_TO: 'lazim@openmerit.ai', CONTACT_FROM: 'memo@openmerit.ai',
+    ASSETS: assets, CONTACT_TO: 'team@openmerit.ai', CONTACT_FROM: 'memo@openmerit.ai',
     CONTACT_EMAIL: { send: async message => { if (failSend) throw new Error('down'); sent.push(message); } },
     CONTACT_RATE: { limit: async () => ({ success: allowed }) },
   };
@@ -119,7 +119,7 @@ test('the contact-sales form emails a valid request to OpenMerit with Reply-To s
   assert.equal(ok.status, 303); assert.equal(ok.headers.get('location'), 'https://example.test/contact-sales/thanks/');
   assert.equal(sent.length, 1);
   const message = sent[0] as { to: string[]; from: { email: string }; replyTo: { name: string; email: string }; subject: string; text: string };
-  assert.deepEqual(message.to, ['lazim@openmerit.ai']); assert.equal(message.from.email, 'memo@openmerit.ai');
+  assert.deepEqual(message.to, ['team@openmerit.ai']); assert.equal(message.from.email, 'memo@openmerit.ai');
   assert.deepEqual(message.replyTo, { name: 'Ada Bcc: x@evil.test', email: 'ada@acme.test' });
   assert.equal(message.subject, 'OpenMerit Cloud enquiry: Acme');
   assert.match(message.text, /Company size: 11–50/); assert.match(message.text, /Monthly LLM spend: \$50K–\$100K/); assert.match(message.text, /Support replies/); assert.match(message.text, /\(not given\)/);
@@ -131,7 +131,7 @@ test('the contact-sales form emails a valid request to OpenMerit with Reply-To s
   }
   allowed = false; assert.equal((await submit(valid)).status, 429); allowed = true;
   failSend = true; const failed = await submit(valid); failSend = false;
-  assert.equal(failed.status, 502); assert.match(await failed.text(), /mailto:lazim@openmerit\.ai/);
+  assert.equal(failed.status, 502); assert.match(await failed.text(), /mailto:team@openmerit\.ai/);
   assert.equal((await submit({}, 'GET')).status, 404);
   assert.equal(sent.length, 1);
 });

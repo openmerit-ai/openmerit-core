@@ -1,0 +1,10 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "openmerit-email",
+  "account_id": "1f505317550261331711b1274ec53c33",
+  "main": "email/worker.ts",
+  "compatibility_date": "2026-10-15",
+  // Email-only: Email Routing rules on openmerit.ai send aliases here; no HTTP routes.
+  "workers_dev": false,
+  "preview_urls": false
+}

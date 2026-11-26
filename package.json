@@ -13,7 +13,7 @@
   },
   "scripts": {
     "pretypecheck": "npm run build:site",
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p email/tsconfig.json",
     "check:typescript": "node scripts/check-typescript.ts",
     "types:workers": "node scripts/worker-types.ts",
     "check:worker-types": "node scripts/worker-types.ts --check",
@@ -28,8 +28,9 @@
     "app": "node app/dev/server.ts",
     "check:demo": "npm ci --ignore-scripts --prefix demo && npm run build:site && tsc -p tsconfig.site.json && node --test demo/test/*.test.mjs demo/test/*.test.ts app/test/*.test.ts",
     "check:web": "node --test demo/test/web.test.ts",
-    "verify": "npm run typecheck && npm run check:typescript && npm run check:demo && npm run check:docs && npm run build && git diff --check",
-    "check:all": "npm run verify && npm run check:worker-types && npm run check --prefix openmerit-core && npm run build --prefix openmerit-core && node openmerit-core/scripts/smoke-packed.ts && npm run check --prefix playground && npm run check --prefix cloud"
+    "verify": "npm run typecheck && npm run check:typescript && npm run check:demo && npm run check:email && npm run check:docs && npm run build && git diff --check",
+    "check:all": "npm run verify && npm run check:worker-types && npm run check --prefix openmerit-core && npm run build --prefix openmerit-core && node openmerit-core/scripts/smoke-packed.ts && npm run check --prefix playground && npm run check --prefix cloud",
+    "check:email": "node --test email/*.test.ts"
   },
   "devDependencies": {
     "@clerk/backend": "3.26.1",
