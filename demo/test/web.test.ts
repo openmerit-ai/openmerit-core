@@ -5,7 +5,7 @@ import web, { type WebEnv } from '../web.ts';
 
 const assets: WebEnv['ASSETS'] = { fetch: async request => {
   const path = new URL(request.url).pathname;
-  const pages: Record<string, string> = { '/': 'Landing page', '/scout/': 'Sign in', '/playground/scout/': 'Walkthrough', '/vs-routers/': 'Comparison' };
+  const pages: Record<string, string> = { '/': 'Landing page', '/scout/': 'Sign in', '/playground/scout/': 'Walkthrough', '/vs-routers/': 'Comparison', '/vs-routers/index.md': '# Comparison' };
   return new Response(pages[path] ?? 'Not found', { status: pages[path] ? 200 : 404 });
 } };
 
@@ -40,6 +40,25 @@ test('the landing page stays at root, and sign-in and the walkthrough keep their
     assert.equal(response.status, 308); assert.equal(response.headers.get('location'), `https://example.test/${page}/?ref=x`);
   }
   assert.equal(await (await web.fetch(new Request('https://example.test/vs-routers/'), authEnv)).text(), 'Comparison');
+});
+
+test('pages answer agents that ask for text/markdown with their Markdown version, and browsers with HTML', async () => {
+  const page = (accept?: string, path = '/vs-routers/') => web.fetch(new Request(`https://example.test${path}`, accept ? { headers: { accept } } : {}), authEnv);
+  for (const accept of ['text/markdown', 'text/markdown, text/html, */*', 'text/html;q=0.9, text/markdown;q=0.5']) {
+    const response = await page(accept);
+    assert.equal(await response.text(), '# Comparison', accept);
+    assert.equal(response.headers.get('content-type'), 'text/markdown; charset=utf-8');
+    assert.equal(response.headers.get('content-signal'), 'search=yes, ai-input=yes, ai-train=no');
+    assert.match(response.headers.get('vary') ?? '', /Accept/);
+  }
+  for (const accept of [undefined, 'text/html,application/xhtml+xml,*/*;q=0.8', 'text/markdown;q=0', 'text/x-markdown']) {
+    const response = await page(accept);
+    assert.equal(await response.text(), 'Comparison', String(accept));
+    assert.equal(response.headers.get('content-signal'), null);
+    assert.match(response.headers.get('vary') ?? '', /Accept/);
+  }
+  // Only the listed pages negotiate; the sign-in page stays HTML.
+  assert.equal(await (await page('text/markdown', '/scout/')).text(), 'Sign in');
 });
 
 test('retired pages and APIs return 404 without reading assets or secrets', async () => {
