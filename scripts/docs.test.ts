@@ -6,7 +6,7 @@ import MarkdownIt from 'markdown-it';
 import {memo} from './memo.config.ts';
 
 const root = resolve(import.meta.dirname, '..'), site = join(root, 'site');
-const pages = await Promise.all(['/', '/scout/', '/memo/'].map(async url => ({url, text: await readFile(join(site, url, 'index.html'), 'utf8')})));
+const pages = await Promise.all(['/', '/scout/', '/memo/', '/vs-routers/'].map(async url => ({url, text: await readFile(join(site, url, 'index.html'), 'utf8')})));
 
 test('live pages keep valid links, unique section IDs and device-driven appearance', async () => {
   for (const page of pages) {

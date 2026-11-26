@@ -11,7 +11,7 @@ test('upgraded connections retain the original Cloudflare WebSocket response', a
 test('the landing page, sign-in and their assets use the web Worker; retired Scout pages do not',async()=>{
   const {default:router}=await import('../domain-router.mjs');
   const env={SCOUT:{fetch:request=>new Response(new URL(request.url).pathname)}};
-  for(const path of ['/','/styles.css','/scout','/scout/','/scout/api/auth','/scout/api/session','/scout/sign-in.js','/favicon.svg','/assets/geist-sans.woff2','/assets/openmerit-og-v1.png','/playground/scout','/playground/scout/'])assert.equal(await(await router.fetch(new Request('https://openmerit.ai'+path),env)).text(),path);
+  for(const path of ['/','/styles.css','/scout','/scout/','/scout/api/auth','/scout/api/session','/scout/sign-in.js','/favicon.svg','/assets/geist-sans.woff2','/assets/openmerit-og-v1.png','/playground/scout','/playground/scout/','/vs-routers','/vs-routers/'])assert.equal(await(await router.fetch(new Request('https://openmerit.ai'+path),env)).text(),path);
   for(const path of ['/connect','/connect/','/connect/api/device'])assert.equal((await router.fetch(new Request('https://openmerit.ai'+path),env)).status,404,path);
 });
 test('legacy hosts redirect every method and path, including memo sign-in, to openmerit.ai', async () => {
@@ -83,7 +83,7 @@ test('retired pages and APIs are offline on every public host', async () => {
   const { default: router } = await import('../domain-router.mjs');
   const env = new Proxy({}, { get(target, key) { assert.fail(`Retired routes must not call ${String(key)}`); } });
   for (const host of ['openmerit.ai', 'www.openmerit.ai', 'openmerit.site', 'www.openmerit.site']) {
-    for (const path of ['/index.html', '/scouting', '/playground', '/playground/', '/playground/other', '/playground/scout/extra', '/connections', '/docs', '/docs/', '/docs/scout/', '/docs/scout/source.md', '/docs/manifest.json', '/memoir', '/memo-other/', '/memo.css/extra', '/memo-access.js.map', '/demo/', '/demo/api/session', '/demo/internal/abc/infer', '/engineering/', '/script.js', '/illustrations.js']) {
+    for (const path of ['/index.html', '/scouting', '/playground', '/playground/', '/playground/other', '/playground/scout/extra', '/vs-routers/extra', '/connections', '/docs', '/docs/', '/docs/scout/', '/docs/scout/source.md', '/docs/manifest.json', '/memoir', '/memo-other/', '/memo.css/extra', '/memo-access.js.map', '/demo/', '/demo/api/session', '/demo/internal/abc/infer', '/engineering/', '/script.js', '/illustrations.js']) {
       for (const method of ['GET', 'HEAD', 'POST']) {
         let request = new Request(`https://${host}${path}`, { method });
         let result = await router.fetch(request, env);
