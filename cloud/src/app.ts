@@ -99,7 +99,6 @@ export async function startApp(options: StartOptions): Promise<{ server: Server;
   setServices({
     config: options.config, billing, bundledCatalogue, refreshCatalogue: options.services?.refreshCatalogue ?? null,
     fetch: options.services?.fetch ?? fetch, agentEval: options.services?.agentEval ?? (() => null),
-    githubToken: async userId => options.auth ? options.auth.githubToken(userId) : null,
   });
   const registry = createRegistry(options.local);
   if (options.local) await registry.startAndWait();

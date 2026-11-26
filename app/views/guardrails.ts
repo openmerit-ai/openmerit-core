@@ -3,7 +3,7 @@ import { html, usd, type Html } from "../html.ts";
 import type { View } from "../view.ts";
 import { empty, header } from "./common.ts";
 
-const levels: { level: Level; label: string }[] = [{ level: "environment", label: "Environment" }, { level: "agent", label: "Agent" }, { level: "task", label: "Task" }];
+const levels: { level: Level; label: string }[] = [{ level: "environment", label: "Environment" }, { level: "task", label: "Task" }];
 const isLevel = (value: string | null): value is Level => levels.some((item) => item.level === value);
 
 type Shape = "list" | "number" | "whole" | "usd" | "percent" | "boolean" | "text" | "policy";
@@ -75,13 +75,9 @@ function from(level: Level | undefined, here: Level): Html {
 
 interface Data { tasks: Task[]; level: Level; id: string | null; guardrails: GuardrailsAt | null }
 
-// An agent's ID is environment:agent, as the cloud app keys agent-level guardrails.
 export function choices(tasks: Task[], level: Level): { id: string; label: string }[] {
   if (level === "task") return tasks.map((task) => ({ id: task.id, label: `${task.name} · ${task.environment}` }));
-  if (level === "environment") return [...new Set(tasks.map((task) => task.environment))].map((id) => ({ id, label: id }));
-  const agents = new Map<string, string>();
-  for (const task of tasks) if (task.agent) agents.set(`${task.environment}:${task.agent}`, `${task.agent} · ${task.environment}`);
-  return [...agents].map(([id, label]) => ({ id, label }));
+  return [...new Set(tasks.map((task) => task.environment))].map((id) => ({ id, label: id }));
 }
 
 export const guardrailsView: View<Data> = {
@@ -94,10 +90,10 @@ export const guardrailsView: View<Data> = {
     return { tasks, level, id, guardrails };
   },
   render({ tasks, level, id, guardrails }, { me }) {
-    const top = header(me, "Guardrails", "Rules for which models OpenMerit may pick and how it measures them, set for an environment, an agent or a task. Constraints only narrow at lower levels; defaults are replaced by them.");
+    const top = header(me, "Guardrails", "Rules for which models OpenMerit may pick and how it measures them, set for an environment or a task. Constraints only narrow at lower levels; defaults are replaced by them.");
     const tabs = html`<nav class="tabs" aria-label="Level">${levels.map((item) => html`<a href="?level=${item.level}"${item.level === level ? html` aria-current="page"` : ""}>${item.label}</a>`)}</nav>`;
     const options = choices(tasks, level);
-    if (!guardrails || !id) return html`${top}${tabs}<section>${empty(`No ${level === "environment" ? "environments" : `${level}s`} yet`, "Environments, agents and tasks appear when a coding agent first sends a task. Their guardrails can be set here then.")}</section>`;
+    if (!guardrails || !id) return html`${top}${tabs}<section>${empty(`No ${level === "environment" ? "environments" : `${level}s`} yet`, "Environments and tasks appear when a coding agent first sends a task. Their guardrails can be set here then.")}</section>`;
     const here = new Map(guardrails.settings.map((setting) => [setting.key, setting.value]));
     const effective = guardrails.effective as Record<string, unknown>;
     const locked = level === "environment" && me.role !== "admin";

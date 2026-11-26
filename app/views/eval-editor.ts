@@ -1,6 +1,6 @@
-// The eval editor, shared by a task's Eval tab and the review queue: what the judge checks (criteria
+// The eval editor, on a task's Eval tab: what the judge checks (criteria
 // and guardrails, one per line) and the cases, each with its input, its expected answer and whether
-// it is measured. The cloud app keeps the accepted eval and a draft under review; the coding agent writes the accepted one to the repository.
+// it is measured. The cloud app keeps the accepted eval and a draft under review.
 import type { EvalCase, EvalSpec, TaskOutput } from "../api.ts";
 import { html, type Html } from "../html.ts";
 

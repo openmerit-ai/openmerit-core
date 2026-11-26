@@ -11,7 +11,7 @@ const taskLink = (task: Task, tab = "") => `/tasks/?task=${encodeURIComponent(ta
 // Watching is automatic; the cloud app reports why a task is not watched. Before it sends state,
 // a task that is not watching is taken as frozen by its watch guardrail.
 const stateOf = (task: Task): TaskState => task.state ?? (task.watching ? "watching" : "frozen");
-// A task approved from a repository review has no run yet: it neither watches nor spends until its first.
+// A task that has not run yet neither watches nor spends until its first run.
 const notRun = (task: Task): boolean => task.lastRunAt === null && task.status === "new";
 const states: Record<TaskState, (task: Task) => Html> = {
   watching: () => html`<span class="pill good">Watching</span>`,
@@ -36,7 +36,7 @@ function table(tasks: Task[]): Html {
           <thead><tr><th>Task</th><th>Model in use</th><th>Last run</th><th>Latest</th><th>Watch</th></tr></thead>
           <tbody>
             ${tasks.map((task) => html`<tr${task.status === "switched" ? html` class="switch"` : ""}>
-              <td><a href="${taskLink(task)}">${task.name}</a><span class="sub">${task.environment}${task.agent ? html` · agent ${guardrails("agent", `${task.environment}:${task.agent}`, task.agent)}` : ""} · <a href="${taskLink(task, "eval")}">Eval</a> · ${guardrails("task", task.id, "Guardrails")}</span></td>
+              <td><a href="${taskLink(task)}">${task.name}</a><span class="sub">${task.environment}${task.agent ? ` · agent ${task.agent}` : ""} · <a href="${taskLink(task, "eval")}">Eval</a> · ${guardrails("task", task.id, "Guardrails")}</span></td>
               <td>${model(task.currentModel)}</td>
               <td>${task.status === "running" ? "Running" : day(task.lastRunAt)}</td>
               <td>${notRun(task) ? html`<span class="sub">Not run yet</span>` : result(task, (text) => (task.lastJobId ? html`<a href="/r/${task.lastJobId}/">${text}</a>` : html`${text}`))}${decided(task)}</td>
@@ -50,20 +50,10 @@ function table(tasks: Task[]): Html {
 // Who wrote the accepted eval, in the page's words.
 const SOURCES: Record<EvalSource, string> = {
   openmerit: "OpenMerit wrote the cases", chatgpt: "Written on a member's ChatGPT subscription",
-  examples: "The coding agent's examples", review: "Approved from a repository review", app: "Accepted in the app",
+  examples: "The coding agent's examples", app: "Accepted in the app",
   grading: "Accepted by grading a run's answers",
 };
-const evalDir = (task: string) => `.openmerit/evals/${task.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "task"}`;
 const listed = (items: string[]) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
-
-function repoState(task: Task, view: EvalView): Html {
-  const accepted = view.accepted!.version, repo = view.repo;
-  const where = html`<code>${evalDir(task.name)}</code>`;
-  if (!repo) return html`<span class="pill tag">Not in the repository</span><span class="sub">Your coding agent offers to write version ${accepted} to ${where} on its next OpenMerit call.</span>`;
-  const by = html`written by ${repo.byName ?? repo.by}${repo.client ? ` with ${repo.client}` : ""} ${ago(repo.at)}`;
-  if (repo.version === accepted) return html`<span class="pill good">Up to date</span><span class="sub">Version ${repo.version} is in ${where}, ${by}.</span>`;
-  return html`<span class="pill warn">Behind</span><span class="sub">${where} has version ${repo.version}, ${by}. Your coding agent offers to write version ${accepted} on its next OpenMerit call.</span>`;
-}
 
 // An accepted eval stays as it is until the task changes or someone revises it. A draft is saved in place
 // and accepted as the next version; until then the task's runs and watch wait.
@@ -75,7 +65,6 @@ function evalTab(detail: TaskDetail, view: EvalView, editable: boolean): Html {
       <h2 id="version">Accepted: version ${accepted.version}</h2>
       <div class="card">
         <div class="row"><span>${SOURCES[accepted.source]}${accepted.by ? ` · ${accepted.byName ?? accepted.by}` : ""}<span class="sub">${date(accepted.at)} · ${plural(accepted.cases.filter(measured).length, "case")} measured of ${accepted.cases.length}</span></span><span class="sub">${plural(accepted.runs, "run")} on this version</span></div>
-        <div class="row"><span>Repository copy ${repoState(detail, view)}</span><span></span></div>
       </div>
     </section>`;
   if (!draft) {
@@ -100,7 +89,7 @@ function evalTab(detail: TaskDetail, view: EvalView, editable: boolean): Html {
 }
 
 function runsTab(detail: TaskDetail): Html {
-  if (!detail.jobs.length) return html`<section>${empty("Not run yet", "This task was approved from a repository review. Its first run measures cheaper models on its eval; after that OpenMerit watches it.", html`<p><button class="btn primary" type="button" data-action="run">Run now</button></p>`)}</section>`;
+  if (!detail.jobs.length) return html`<section>${empty("Not run yet", "Its first run measures cheaper models on its eval; after that OpenMerit watches it.", html`<p><button class="btn primary" type="button" data-action="run">Run now</button></p>`)}</section>`;
   const versions = new Set(detail.jobs.map((run) => run.evalVersion).filter((value) => value !== null && value !== undefined));
   return html`<section aria-labelledby="runs">
       <h2 id="runs">Runs</h2>
@@ -138,7 +127,7 @@ export const tasksView: View<Data> = {
       const retired = stateOf(detail) === "retired";
       return html`<div class="eyebrow"><a href="/tasks/">Tasks</a><span>›</span><span>${detail.environment}</span></div>
         <h1 class="title">${detail.name}</h1>
-        <p class="lede">The code uses ${model(detail.currentModel)}. ${notRun(detail) ? "Approved from a repository review; it has not run yet." : html`Latest: ${result(detail)}`}</p>
+        <p class="lede">The code uses ${model(detail.currentModel)}. ${notRun(detail) ? "It has not run yet." : html`Latest: ${result(detail)}`}</p>
         <p class="task-actions">${watch(detail)}
           ${stateOf(detail) === "review" ? "" : html`<button class="btn${notRun(detail) ? " primary" : ""}" type="button" data-action="run">${notRun(detail) ? "Run now" : "Run again"}</button>`}
           ${retired ? "" : html`<button class="btn" type="button" data-action="retire">Retire</button>`}
@@ -155,7 +144,7 @@ export const tasksView: View<Data> = {
     const tasks = [...active.filter((task) => !notRun(task)), ...active.filter(notRun)], retired = all.filter((task) => stateOf(task) === "retired");
     const watching = all.filter((task) => stateOf(task) === "watching" && !notRun(task)).length;
     const top = header(me, "Tasks", "OpenMerit watches every task: it re-runs a task's tests when a new model could fit it or prices change, and tells you when a cheaper model matches the one you use.", [plural(tasks.length, "task"), `${watching} watched`]);
-    if (!all.length) return html`${top}<section aria-labelledby="tasks"><h2 id="tasks">All Tasks</h2>${empty("No tasks yet", "A task appears the first time a coding agent asks OpenMerit which model it should use, or when you approve an eval from a repository review.")}</section>`;
+    if (!all.length) return html`${top}<section aria-labelledby="tasks"><h2 id="tasks">All Tasks</h2>${empty("No tasks yet", "A task appears the first time a coding agent asks OpenMerit which model it should use.")}</section>`;
     return html`${top}
     <section aria-labelledby="tasks">
       <h2 id="tasks">All Tasks</h2>
@@ -187,7 +176,7 @@ export const tasksView: View<Data> = {
       try {
         const accepted = await api.send<EvalView>("POST", `/api/tasks/${encodeURIComponent(data.detail.id)}/eval/accept`, { ...readDraft(form, data), base: data.eval.draft.at });
         await refresh();
-        toast(`Accepted version ${accepted.accepted?.version ?? ""}. Runs and the watch resume on it, and your coding agent offers to write it to the repository.`);
+        toast(`Accepted version ${accepted.accepted?.version ?? ""}. Runs and the watch resume on it.`);
       } catch (failure) { formError(form, failure); }
     },
     async discardDraft(_target, data, { api, confirm, refresh, toast }) {

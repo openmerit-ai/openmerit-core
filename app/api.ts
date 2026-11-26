@@ -24,11 +24,6 @@ export interface Me {
   plan: Plan;
 }
 
-// A project in the organization (GET /api/projects): it holds tasks, runs, guardrails, endpoints and
-// GitHub repositories. The default project holds what the organization had before projects.
-export interface Project { id: string; name: string; createdAt: string; tasks: number; endpoints: number; repos: string[] }
-export const DEFAULT_PROJECT = "default";
-
 // The member's own ChatGPT subscription (GET /api/me/subscriptions), for every organization they belong to.
 // writer is who writes the cases of the runs they start. A sign-in under way has the code to enter; no
 // token is ever sent to the page.
@@ -42,7 +37,6 @@ export interface Subscriptions { writer: CaseWriter; subscriptions: Subscription
 
 export interface Task {
   id: string;
-  projectId?: string;
   environment: string;
   agent: string | null;
   name: string;
@@ -70,27 +64,22 @@ export interface Task {
 // its source of truth. The accepted eval runs unchanged; its version counts acceptances. A draft is the
 // eval under review, edited in place: reopened because the coding agent sent the task with a different
 // prompt, tools or output (task_changed, with the new output shape), or by a person (revise). While a
-// draft is open the task's runs and watch wait. The coding agent writes the accepted version to the repository.
+// draft is open the task's runs and watch wait.
 export interface EvalCase { id: string; input: Record<string, string>; expected?: unknown; origin: "example" | "written" | "trace"; kind?: string; approved?: boolean; toolResults?: unknown }
 export interface EvalSpec { description?: string; input?: { description: string }; steps?: { description: string; tools?: string[]; access?: string; required?: boolean; after?: number[] }[]; criteria?: string[]; guardrails?: string[] }
-export type EvalSource = "openmerit" | "chatgpt" | "examples" | "review" | "app" | "grading";
+export type EvalSource = "openmerit" | "chatgpt" | "examples" | "app" | "grading";
 export type TaskPart = "prompt" | "tools" | "output";
 export interface EvalAccepted { version: number; spec: EvalSpec; cases: EvalCase[]; source: EvalSource; by: string | null; byName?: string | null; at: string; runs: number }
 export interface EvalRevision { reason: "task_changed" | "revise"; changed: TaskPart[]; spec: EvalSpec; cases: EvalCase[]; output: TaskOutput | null; by: string | null; byName?: string | null; at: string }
 export interface EvalView {
   taskId: string;
-  projectId: string;
   accepted: EvalAccepted | null;
   draft: EvalRevision | null;
-  // The version the coding agent last wrote to the repository, who signed in, and the agent.
-  repo: { version: number; by: string; byName?: string | null; client: string | null; at: string } | null;
 }
-// A task's output shape, from the bundle the coding agent or review sent, for editing expected answers.
+// A task's output shape, from the bundle the coding agent sent, for editing expected answers.
 export type TaskOutput = { kind: "text" } | { kind: "json"; schema: object } | { kind: "label"; labels: string[] };
-// An eval a repository review found, waiting for approval, which creates the task, or dismissal.
-export interface EvalDraft { id: string; projectId: string; repoId: string | null; environment: string; name: string; bundle: EvalSpec & { task: string; current: { model: string }; output: TaskOutput }; cases: EvalCase[]; status: "pending" | "approved" | "dismissed"; createdAt: string; taskId: string | null }
 // GET /api/tasks/:id: the task's row with its bundle, eval summary and latest runs.
-export interface TaskDetail extends Task { bundle: { output: TaskOutput; current: { model: string } } | null; eval: { version: number; cases: number; repo: EvalView["repo"]; review: EvalRevision["reason"] | null } | null; jobs: Run[] }
+export interface TaskDetail extends Task { bundle: { output: TaskOutput; current: { model: string } } | null; eval: { version: number; cases: number; review: EvalRevision["reason"] | null } | null; jobs: Run[] }
 
 export type TaskState = "watching" | "idle" | "frozen" | "retired" | "review";
 
@@ -205,51 +194,6 @@ export interface LiveProgress {
 export type EndpointKind = "openrouter" | "openai-compatible" | "anthropic";
 export interface Endpoint { id: string; kind: EndpointKind; baseUrl: string; allowedModels: string[] | "all"; keyLast4: string; verifiedAt: string | null; builtIn: boolean }
 
-// A model call a repository's review found: where it is and the model it names, or the expression that picks it (cloud/src/github.ts).
-export interface ModelCall { file: string; line: number; value: string; catalogueId: string | null; dynamic: boolean; envVar: string | null }
-// A task spec a repository's review wrote (openmerit/ranking's TaskBundle): the fields the app shows.
-export interface TaskSpec {
-  task: string; description?: string; output: { kind: "text" | "json" | "label"; labels?: string[] }; tools?: { name: string }[];
-  criteria?: string[]; guardrails?: string[]; codeRefs?: { file: string; line: number }[];
-}
-export interface RepoReview {
-  // scan lists the model calls only (the app had no reviewer key, or the review predates 24 Nov 2026); review also writes the task specs in tasks.
-  reviewer: string;
-  commit: string;
-  branch: string;
-  files: number;
-  bytes: number;
-  models: { value: string; catalogueId: string | null; calls: number }[];
-  // The application's model calls only; examples, scripts and demos count as the application.
-  modelCalls: ModelCall[];
-  totalCalls: number;
-  // Model calls in tests, fixtures, docs and other support files, which are counted but not listed, and the
-  // sentence that says so ("3 more in tests, fixtures or docs, not listed"). Absent from reviews before 24 Nov 2026.
-  supportCalls?: number;
-  notListed?: string | null;
-  tasks: TaskSpec[];
-  // Application model calls in no spec, and why, such as a review that reached its budget. Absent from scan-only reviews.
-  unmapped?: { usageIds: string[]; reason: string }[];
-  // What the review's model calls cost OpenMerit, counted in the account's spend.
-  costUsd?: number;
-  durationMs: number;
-}
-// GET /api/github: the OpenMerit GitHub App's install link and, for a member signed in with GitHub, the installations
-// their GitHub token reaches and the repositories each gives OpenMerit. error is GitHub's refusal of that token.
-export interface GitHubAccess {
-  app: string | null; installUrl: string | null; signedIn: boolean; error: string | null;
-  installations: { id: number; account: string; type: string; selection: "all" | "selected"; manageUrl: string; repos: { fullName: string; private: boolean; defaultBranch: string }[] }[];
-}
-// A GitHub repository the account added (GET /api/repos). tokenLast4 is null for a public one added by its URL.
-// review.result is the last review that finished, kept while another runs or after one fails.
-export type ReviewStatus = "queued" | "reviewing" | "done" | "failed";
-export interface Repo {
-  id: string; fullName: string; url: string; private: boolean; defaultBranch: string; tokenLast4: string | null; addedAt: string; checkedAt: string;
-  // How OpenMerit reads it: its public URL, a fine-grained token, or the GitHub sign-in of the member who added it (a Clerk user ID). Absent before 24 Nov 2026.
-  access?: "public" | "token" | "github"; githubUser?: string | null;
-  review: { status: ReviewStatus; requestedAt: string; finishedAt: string | null; error: string | null; result: RepoReview | null };
-}
-
 export interface GuardrailsAt {
   level: Level;
   id: string;
@@ -261,8 +205,7 @@ export interface GuardrailsAt {
 }
 
 // GET /api/tasks/deleted: who deleted which task, with no task content. The export includes it.
-// repoCopy: the directory of the eval's repository copy, until the coding agent removes it.
-export interface DeletedTask { taskId: string; name: string; environment: string; userId: string; jobs: number; deletedAt: string; repoCopy?: string | null }
+export interface DeletedTask { taskId: string; name: string; environment: string; userId: string; jobs: number; deletedAt: string }
 
 export interface Spend { openmeritUsd: number; customerUsd: number; monthlyCapUsd: number; customerCapUsd: number; period: { start: string; end: string | null } }
 
@@ -288,8 +231,7 @@ interface ReverificationHint { clerk_error: { reason: "reverification-error"; me
 const isReverificationHint = (data: unknown): data is ReverificationHint =>
   typeof data === "object" && data !== null && (data as Partial<ReverificationHint>).clerk_error?.reason === "reverification-error";
 
-// project names the project the calls work in (the X-OpenMerit-Project header); without one, the cloud app uses the default project.
-export function createApi(origin: string, token: () => Promise<string | null>, fetcher: typeof fetch = fetch, reverify?: Reverify, project: () => string | null = () => null): Api {
+export function createApi(origin: string, token: () => Promise<string | null>, fetcher: typeof fetch = fetch, reverify?: Reverify): Api {
   async function call<T>(method: string, path: string, body?: unknown, retried = false): Promise<T> {
     const bearer = await token();
     if (!bearer) throw new ApiError(401, "Sign in to continue.", "sign_in_required");
@@ -297,7 +239,7 @@ export function createApi(origin: string, token: () => Promise<string | null>, f
     try {
       response = await fetcher(new URL(path, origin), {
         method,
-        headers: { authorization: `Bearer ${bearer}`, accept: "application/json", ...(project() ? { "x-openmerit-project": project()! } : {}), ...(body === undefined ? {} : { "content-type": "application/json" }) },
+        headers: { authorization: `Bearer ${bearer}`, accept: "application/json", ...(body === undefined ? {} : { "content-type": "application/json" }) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         signal: AbortSignal.timeout(20_000),
       });

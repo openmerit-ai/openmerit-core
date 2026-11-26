@@ -13,8 +13,6 @@ export interface Services {
   refreshCatalogue: (() => Promise<Catalogue>) | null;
   /** Fetch for model calls and endpoint checks. */
   fetch: typeof fetch;
-  /** A user's GitHub token from their GitHub sign-in (Auth.githubToken); null without one or without sign-in. */
-  githubToken: (userId: string) => Promise<string | null>;
   /**
    * Runs an account's agent end to end on its agent cases, with some tasks switched. Null when the
    * agent has no eval, which the agent-eval guardrail then decides about. No source provides agent

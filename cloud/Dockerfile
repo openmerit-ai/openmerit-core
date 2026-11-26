@@ -2,8 +2,7 @@
 # imports openmerit-core's engine and ranking from source:
 #   docker build -f cloud/Dockerfile .
 FROM node:22.19.0-bookworm-slim
-# git clones the GitHub repositories an account adds (src/github.ts), over HTTPS only. The reviewer's
-# read-only grep and find tools run ripgrep and fd. Debian's fd (8.6) lacks --no-require-git, which Pi's
+# The harness's read-only grep and find tools run ripgrep and fd. Debian's fd (8.6) lacks --no-require-git, which Pi's
 # find passes, so fd is the pinned upstream release, checked against its SHA-256; curl leaves with the layer.
 ARG FD_VERSION=10.3.0
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates ripgrep curl \
@@ -35,7 +34,7 @@ COPY openmerit-core/src/eval/proxy.ts openmerit-core/src/eval/loop.ts openmerit-
 COPY openmerit-core/src/catalogue openmerit-core/src/catalogue
 COPY openmerit-core/src/connectors/agent-bundle.ts openmerit-core/src/connectors/eval-command.ts openmerit-core/src/connectors/
 COPY openmerit-core/src/scout/scan.ts openmerit-core/src/scout/
-# The repository review (src/github.ts): its prompt, and the harness that reads a checkout with Pi's read-only tools.
+# The review module: the tool-result helpers generated evals use, and the harness's read-only tools.
 COPY openmerit-core/src/review openmerit-core/src/review
 COPY openmerit-core/src/job openmerit-core/src/job
 COPY openmerit-core/src/harness openmerit-core/src/harness

@@ -28,8 +28,6 @@ import { advanceLoop, completeHarness, criteriaOf, feedbackOf, gradeQuestions, M
 import { buildPool, OPENROUTER, regionNotice, type EndpointInfo, type Option, type Pool, type Provisional } from "./pool.ts";
 import { paybackCalls, proposeEdit, renderMarkdown, type AgentEvalSummary, type Fix, type JobResult, type MeasuredModel } from "./report.ts";
 
-/** The project of jobs and tasks recorded before projects. */
-export const DEFAULT_PROJECT = "default";
 /** The words a refusal for the job's own budget contains, which the fix for it looks for. */
 export const JOB_BUDGET = "budget for this job";
 
@@ -40,16 +38,15 @@ export const JOB_BUDGET = "budget for this job";
 export type EvalSpec = Pick<TaskBundle, "description" | "input" | "steps" | "criteria" | "guardrails">;
 /**
  * Who wrote the accepted eval: OpenMerit's case writer, a member's subscription or the coding agent's examples alone (each by a first run),
- * a repository review, a person in the app, or a person grading a run's answers, after OpenMerit wrote it again from any grades that disagreed.
+ * a person in the app, or a person grading a run's answers, after OpenMerit wrote it again from any grades that disagreed.
  */
-export type EvalSource = "openmerit" | "chatgpt" | "examples" | "review" | "app" | "grading";
+export type EvalSource = "openmerit" | "chatgpt" | "examples" | "app" | "grading";
 /** What a model must meet: the current model's score, or the eval's checks once a person marked the current model's own answers wrong. */
 export type EvalBar = "current" | "criteria";
 export const specOf = (bundle: TaskBundle): EvalSpec => Object.fromEntries((["description", "input", "steps", "criteria", "guardrails"] as const).filter(key => bundle[key] !== undefined).map(key => [key, bundle[key]])) as EvalSpec;
 
-/** A task's ID: one per project, environment and task name, the same whichever job or host sees it. */
-export const taskIdFor = (projectId: string, environment: string, task: string) =>
-  `t_${createHash("sha256").update(projectId === DEFAULT_PROJECT ? `${environment}\0${task}` : `${projectId}\0${environment}\0${task}`).digest("hex").slice(0, 16)}`;
+/** A task's ID: one per environment and task name, the same whichever job or host sees it. */
+export const taskIdFor = (environment: string, task: string) => `t_${createHash("sha256").update(`${environment}\0${task}`).digest("hex").slice(0, 16)}`;
 
 /** Redacts every string in a bundle (or any JSON value): secrets the coding agent pasted never reach a model or the disk. */
 export function redactBundle<T>(value: T): T {
@@ -77,8 +74,6 @@ export type JobTrigger = "app" | "mcp" | "watch";
 
 export interface JobInput {
   accountId: string;
-  /** Absent on jobs started before projects, which are all in the default project. */
-  projectId?: string;
   taskId: string;
   environment: string;
   agent: string | null;
@@ -164,18 +159,18 @@ export interface JobContext<S> extends JobLoopContext<S> {
 
 /** The account's side of a job: its guardrails, eval, endpoints, ledger and records. */
 export interface JobAccount {
-  resolveGuardrails(input: { projectId: string; environment: string; agent?: string | null; taskId?: string }): Promise<ResolvedGuardrails>;
+  resolveGuardrails(input: { environment: string; agent?: string | null; taskId?: string }): Promise<ResolvedGuardrails>;
   jobUpdate(input: { jobId: string; status: string; budgetUsd?: number; capOpenmeritUsd?: number | null; capCustomerUsd?: number | null; measured?: boolean }): Promise<void>;
   /** The task's confirmed eval command, which a self-hosted server runs to measure; null when it has none. */
   evalCommandFor(taskId: string): Promise<EvalCommandSpec | null>;
   /** The task's accepted eval, which the job runs on unchanged; null before it has one. */
   evalFor(taskId: string): Promise<{ version: number; spec: EvalSpec; cases: Case[]; bar: EvalBar } | null>;
   /** Accepts a first run's eval as version 1; returns the version the job ran on. */
-  acceptFirstEval(input: { taskId: string; projectId: string; bundle: TaskBundle; spec: EvalSpec; cases: Case[]; source: EvalSource; by: string | null; bar?: EvalBar }): Promise<number>;
+  acceptFirstEval(input: { taskId: string; bundle: TaskBundle; spec: EvalSpec; cases: Case[]; source: EvalSource; by: string | null; bar?: EvalBar }): Promise<number>;
   setJobEval(input: { jobId: string; version: number }): Promise<void>;
   /** Endpoints with their keys, which the job keeps in memory only. */
-  endpointSecrets(projectId: string): Promise<EndpointConfig[]>;
-  endpointsForJob(projectId: string): Promise<EndpointInfo[]>;
+  endpointSecrets(): Promise<EndpointConfig[]>;
+  endpointsForJob(): Promise<EndpointInfo[]>;
   reserve(input: { jobId: string; key: string; usd: number; funding: Funding; model?: string; endpoint?: string }): Promise<ReserveResult>;
   settle(input: { key: string; cost: Settlement }): Promise<void>;
   release(key: string): Promise<void>;
@@ -240,10 +235,10 @@ const endpointKeys = new Map<string, Promise<EndpointConfig[]>>();
 /** Drops a job's endpoint keys from memory, as when its actor is destroyed. */
 export const forgetJob = (jobId: string) => { endpointKeys.delete(jobId); };
 
-function keysFor(jobId: string, account: JobAccount, projectId: string): Promise<EndpointConfig[]> {
+function keysFor(jobId: string, account: JobAccount): Promise<EndpointConfig[]> {
   let keys = endpointKeys.get(jobId);
   if (!keys) {
-    keys = account.endpointSecrets(projectId).catch((error: unknown) => { endpointKeys.delete(jobId); throw error; });
+    keys = account.endpointSecrets().catch((error: unknown) => { endpointKeys.delete(jobId); throw error; });
     endpointKeys.set(jobId, keys);
   }
   return keys;
@@ -383,19 +378,17 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
         const { input } = s.state;
         const bundle = redactBundle(input.bundle);
         const account = host.account(s, input.accountId);
-        const guardrails = await account.resolveGuardrails({ projectId: input.projectId ?? DEFAULT_PROJECT, environment: input.environment, agent: input.agent, taskId: input.taskId });
+        const guardrails = await account.resolveGuardrails({ environment: input.environment, agent: input.agent, taskId: input.taskId });
         const { effective } = guardrails;
         await account.jobUpdate({ jobId, status: "running", budgetUsd: effective.budgetUsd ?? host.settings().config.limits.defaultJobBudgetUsd, capOpenmeritUsd: effective.spendCapUsd ?? null, capCustomerUsd: effective.customerSpendCapUsd ?? null });
         s.state.status = "running"; s.state.phase = "cases"; s.state.updatedAt = now();
-        return { bundle, guardrails, accountId: input.accountId, projectId: input.projectId ?? DEFAULT_PROJECT, environment: input.environment, agent: input.agent, provisional: input.provisional };
+        return { bundle, guardrails, accountId: input.accountId, environment: input.environment, agent: input.agent, provisional: input.provisional };
       },
     });
     const { guardrails } = source as { guardrails: ResolvedGuardrails };
     const sent = (source as { bundle: TaskBundle }).bundle;
-    // A job recorded before projects has no projectId in its source step: it is in the default project.
-    const projectId = (source as { projectId?: string }).projectId ?? DEFAULT_PROJECT;
     const input = { accountId: source.accountId, environment: source.environment, agent: source.agent };
-    const taskId = taskIdFor(projectId, input.environment, sent.task);
+    const taskId = taskIdFor(input.environment, sent.task);
     const budgetUsd = guardrails.effective.budgetUsd ?? host.settings().config.limits.defaultJobBudgetUsd;
     /** What fixes a refused spend: the job's budget is the task's to raise, a cap for the job is a guardrail, and a monthly cap waits for next month. */
     const refusalFix = (reason: string): FixFor | null => reason.includes(JOB_BUDGET) ? { kind: "raise_budget", budgetUsd: Math.ceil(budgetUsd * 2) }
@@ -451,7 +444,7 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
           const index = catalogueIndex(await host.catalogue(s));
           const account = host.account(s, accountId);
           // The writer answers with all its cases at once, so it gets longer than a ranking call to answer.
-          const models = createClient(await keysFor(jobId, account, projectId), { fetch, model: model => index.find(model), timeoutMs: 600_000 });
+          const models = createClient(await keysFor(jobId, account), { fetch, model: model => index.find(model), timeoutMs: 600_000 });
           complete = completeWith(models, { endpoint: OPENROUTER, model: config.models.caseWriter }, jobLedger(account, jobId), `${jobId}/cases`, s.abortSignal);
           count = WRITTEN_CASES;
           source = "openmerit";
@@ -528,7 +521,7 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
       name, timeout: 60_000,
       run: async s => {
         const account = host.account(s, s.state.input.accountId);
-        const version = written.version ?? await account.acceptFirstEval({ taskId, projectId, bundle: sent, spec: specOf(bundle), cases, source, by: by ?? s.state.input.userId ?? null, bar });
+        const version = written.version ?? await account.acceptFirstEval({ taskId, bundle: sent, spec: specOf(bundle), cases, source, by: by ?? s.state.input.userId ?? null, bar });
         await account.setJobEval({ jobId, version });
         return version;
       },
@@ -545,7 +538,7 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
       name, timeout: 60_000,
       run: async s => {
           const catalogue = await host.catalogue(s);
-        const endpoints = await host.account(s, s.state.input.accountId).endpointsForJob(projectId);
+        const endpoints = await host.account(s, s.state.input.accountId).endpointsForJob();
         const built = buildPool({ catalogue, endpoints, bundle, guardrails: guardrails.effective, wide });
         // The catalogue entries the job's calls are priced by, by the name each endpoint calls the model, so every step prices on this version.
         const index = catalogueIndex(catalogue);
@@ -566,7 +559,7 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
           s.state.fixes = [...(s.state.fixes ?? []), { kind: "ask_agent", notice, prompt: `OpenMerit left out cases of the task "${bundle.task}" because the eval has no mocked result for a tool they may call. Give each of the task bundle's tools a mockResult, a realistic answer taken from the code or its tests, then call openmerit_recommend again.` }];
         }
         const region = guardrails.effective.region ? regionNotice(guardrails.effective.region) : null;
-        if (region && built.notices.includes(region)) s.state.fixes = [...(s.state.fixes ?? []), { kind: "open", notice: region, label: "Add an endpoint", path: "/project/" }];
+        if (region && built.notices.includes(region)) s.state.fixes = [...(s.state.fixes ?? []), { kind: "open", notice: region, label: "Add an endpoint", path: "/connections/#endpoints" }];
         s.state.progress.planned = plannedSteps(built.ranked.length, built.unplaced.length, Math.max(1, guardrails.effective.repeats ?? DEFAULT_REPEATS));
         return { pool: built, priced, catalogueVersion: catalogue.version };
       },
@@ -607,7 +600,7 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
     /** The job's model client, and the grader the bundle's output calls for. */
     const grading = async (account: JobAccount) => {
       const { config, fetch } = host.settings();
-      const client = createClient(await keysFor(jobId, account, projectId), { fetch, model: model => models.priced[model] ?? null });
+      const client = createClient(await keysFor(jobId, account), { fetch, model: model => models.priced[model] ?? null });
       // Text answers go to a fixed judge on OpenMerit's key. Its calls count in the job's spend but not in the candidate's cost per call.
       // The rubric is the task's own (rubricFor), with one check per criterion and guardrail of its spec.
       const judge = (bundle.output.kind === "text" || bundle.guardrails?.length) && config.openrouter.apiKey ? { client, endpoint: OPENROUTER, model: config.models.judge } : undefined;
@@ -619,7 +612,7 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
      * reports each item's pass or fail; a call that failed, not a wrong answer, marks its failed items errored.
      */
     const measureCommand = async (spec: EvalCommandSpec, option: Option, ids: string[] | null, key: string, account: JobAccount, signal: AbortSignal): Promise<Measured> => {
-      const endpoint = (await keysFor(jobId, account, projectId)).find(item => item.id === option.endpoint);
+      const endpoint = (await keysFor(jobId, account)).find(item => item.id === option.endpoint);
       if (!endpoint) return { kind: "unavailable", reason: `no endpoint ${option.endpoint} with a key` };
       // The run's own cost: what the proxy settled for it, which the engine divides by its items.
       const ledger = jobLedger(account, jobId), reserved = new Map<string, number>();
@@ -741,7 +734,7 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
       if (policy === 1) throw new JobStop("failed", "failed", "The job started measuring before a deploy changed how OpenMerit measures, so it cannot resume. Nothing is charged for it; call openmerit_recommend again to rerun it.", { kind: "rerun" });
       if (!command && !usable.length) throw new JobStop("stopped", "no_cases", "No case has a known correct answer. Add examples with expected answers to the bundle, or answer the label check.",
         { kind: "ask_agent", prompt: `OpenMerit found no test case with a known correct answer for the task "${bundle.task}". Add examples with their expected answers to its task bundle, taken from the code's tests or fixtures, then call openmerit_recommend again.` });
-      if (!pool.baseline) throw new JobStop("failed", "baseline_failed", "No endpoint can run the current model: OpenMerit's OpenRouter key is not configured, and no endpoint of yours serves it.", { kind: "open", label: "Add an endpoint", path: "/project/" });
+      if (!pool.baseline) throw new JobStop("failed", "baseline_failed", "No endpoint can run the current model: OpenMerit's OpenRouter key is not configured, and no endpoint of yours serves it.", { kind: "open", label: "Add an endpoint", path: "/connections/#endpoints" });
       const current = pool.baseline;
 
       /** Each option's answers on its first full run of the round, for the samples. */
@@ -866,7 +859,7 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
                       const account = host.account(s, s.state.input.accountId);
               const { config, fetch } = host.settings();
               const index = catalogueIndex(await host.catalogue(s));
-              const writer = createClient(await keysFor(jobId, account, projectId), { fetch, model: model => index.find(model), timeoutMs: 600_000 });
+              const writer = createClient(await keysFor(jobId, account), { fetch, model: model => index.find(model), timeoutMs: 600_000 });
               // The reviser and the case writer run on OpenMerit's key, metered in the job's ledger under this round's keys.
               const complete = completeWith(writer, { endpoint: OPENROUTER, model: config.models.caseWriter }, jobLedger(account, jobId), `${jobId}/revise-r${round}`, s.abortSignal);
               let value;

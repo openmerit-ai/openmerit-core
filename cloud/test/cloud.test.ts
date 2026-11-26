@@ -110,7 +110,7 @@ describe("the cloud app", () => {
     assert.equal(member.status, 403);
   });
 
-  test("stores endpoint keys encrypted, never returns them, and lets a lower guardrail level only narrow a constraint", async () => {
+  test("stores endpoint keys encrypted, never returns them, and resolves environment guardrails", async () => {
     const admin = caller(app, "test:user_f:org_keys:admin");
     const key = "sk-customer-secret-abcd";
     const added = await admin.api<Data>("/api/endpoints", { method: "POST", body: JSON.stringify({ kind: "openai-compatible", baseUrl: "https://api.fireworks.test/v1", apiKey: key, allowedModels: ["acme/fine-tune-1"] }) });
@@ -124,11 +124,11 @@ describe("the cloud app", () => {
     assert.equal(local.status, 400);
 
     await admin.api("/api/guardrails", { method: "PUT", body: JSON.stringify({ level: "environment", id: "acme/app", settings: { allowedModels: ["a", "b"], budgetUsd: 2 } }) });
-    await admin.api("/api/guardrails", { method: "PUT", body: JSON.stringify({ level: "agent", id: "acme/app:claims", settings: { allowedModels: ["a", "c"], budgetUsd: 9 } }) });
-    const resolved = await admin.api<{ effective: Data; from: Data; rejected: { key: string; level: string }[] }>("/api/guardrails?level=agent&id=acme/app:claims");
-    assert.deepEqual(resolved.body.effective, { allowedModels: ["a", "b"], budgetUsd: 9 });
-    assert.deepEqual(resolved.body.from, { allowedModels: "environment", budgetUsd: "agent" });
-    assert.deepEqual(resolved.body.rejected.map(item => [item.key, item.level]), [["allowedModels", "agent"]]);
+    // There is no agent level: only environment and task.
+    assert.equal((await admin.api("/api/guardrails", { method: "PUT", body: JSON.stringify({ level: "agent", id: "acme/app:claims", settings: { budgetUsd: 9 } }) })).status, 400);
+    const resolved = await admin.api<{ effective: Data; from: Data; rejected: { key: string; level: string }[] }>("/api/guardrails?level=environment&id=acme/app");
+    assert.deepEqual(resolved.body.effective, { allowedModels: ["a", "b"], budgetUsd: 2 });
+    assert.deepEqual(resolved.body.from, { allowedModels: "environment", budgetUsd: "environment" });
     assert.equal((await caller(app, "test:user_g:org_keys").api("/api/guardrails", { method: "PUT", body: JSON.stringify({ level: "environment", id: "acme/app", settings: {} }) })).status, 403);
 
     const preflight = await fetch(`${app.url}/api/me`, { method: "OPTIONS", headers: { origin: "https://app.openmerit.test" } });
@@ -292,7 +292,7 @@ test("a job waits on its label check across a restart, then measures on OpenRout
     assert.equal((await agent().api(`/api/runs/${jobId}`)).status, 404);
     assert.equal((await fetch(`${app.url}${publicPath}`)).status, 404, "the share link stops loading");
     assert.equal((await agent().tool("openmerit_result", { job_id: jobId })).isError, true);
-    assert.deepEqual((await agent().api<{ settings: unknown[] }>(`/api/guardrails?level=task&id=${taskRow.id}`)).body.settings, []);
+    assert.equal((await agent().api(`/api/guardrails?level=task&id=${taskRow.id}`)).status, 404, "its task-level guardrails go with it");
     assert.equal((await agent().api<{ plan: { usedEvals: number } }>("/api/me")).body.plan.usedEvals, usedBefore, "deleting does not give evaluations back");
     const [deletion] = (await agent().api<Data[]>("/api/tasks/deleted")).body;
     assert.deepEqual([deletion!.taskId, deletion!.name, deletion!.userId, deletion!.jobs], [taskRow.id, "ticket classifier", "user_r", 3]);
@@ -849,7 +849,7 @@ test("a job whose start fails after the account recorded it is marked failed, an
     const [task] = (await agent.api<{ id: string }[]>("/api/tasks")).body;
     // What a start that failed in an outage left before startJob caught it: the account's row and no job actor.
     const orphan = "job_20261124_0rphan000001";
-    assert.equal((await rivet.account.getOrCreate(["org_orphan"]).startJob({ jobId: orphan, projectId: "default", taskId: task!.id, kind: "run", askedBy: null })).ok, true);
+    assert.equal((await rivet.account.getOrCreate(["org_orphan"]).startJob({ jobId: orphan, taskId: task!.id, kind: "run", askedBy: null })).ok, true);
     assert.equal((await runs()).find(run => run.id === orphan)?.status, "queued");
     await new Promise(resolve => setTimeout(resolve, 2_500));
     const deleted = await agent.api<Data>(`/api/tasks/${task!.id}`, { method: "DELETE" });

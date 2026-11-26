@@ -13,7 +13,6 @@ import { callCost } from "../../openmerit-core/src/ranking/index.ts";
 import { catalogueIndex, DEFAULT_REPEATS } from "../../openmerit-core/src/engine/index.ts";
 
 export { redactBundle, taskIdFor };
-import { DEFAULT_PROJECT } from "./actors/account.ts";
 
 export const DEFAULT_ENVIRONMENT = "default";
 
@@ -58,9 +57,9 @@ export type StartResult = { ok: true; jobId: string; taskId: string; provisional
  * `trigger` is where the job was started: app.openmerit.ai, an MCP tool call or a task's watch.
  * `userId` is the Clerk user who started it; a watch job has none.
  */
-export async function startJob(client: AppClient, start: { accountId: string; projectId: string; environment: string; agent: string | null; bundle: TaskBundle; kind: "run" | "watch"; trigger: JobTrigger; userId: string | null; askedBy?: string | null }): Promise<StartResult> {
+export async function startJob(client: AppClient, start: { accountId: string; environment: string; agent: string | null; bundle: TaskBundle; kind: "run" | "watch"; trigger: JobTrigger; userId: string | null; askedBy?: string | null }): Promise<StartResult> {
   const input = { ...start, bundle: redactBundle(start.bundle) };
-  const taskId = taskIdFor(input.projectId, input.environment, input.bundle.task);
+  const taskId = taskIdFor(input.environment, input.bundle.task);
   const jobId = newJobId();
   const account = client.account.getOrCreate([input.accountId]);
   const keyRefusal = await modelKeyRefusal();
@@ -70,7 +69,7 @@ export async function startJob(client: AppClient, start: { accountId: string; pr
   const gate = await account.evalGate({ taskId, bundle: input.bundle, examples });
   if (!gate.ok) return gate;
   await settleOrphans(client, input.accountId);
-  const started = await account.startJob({ jobId, projectId: input.projectId, taskId, kind: input.kind, askedBy: input.askedBy ?? null });
+  const started = await account.startJob({ jobId, taskId, kind: input.kind, askedBy: input.askedBy ?? null });
   if (!started.ok) return started;
   try {
     return await launch(client, input, { jobId, taskId });
@@ -109,13 +108,13 @@ export async function settleOrphans(client: AppClient, accountId: string, taskId
   return settled;
 }
 
-async function launch(client: AppClient, input: { accountId: string; projectId: string; environment: string; agent: string | null; bundle: TaskBundle; kind: "run" | "watch"; trigger: JobTrigger; userId: string | null }, ids: { jobId: string; taskId: string }): Promise<StartResult> {
+async function launch(client: AppClient, input: { accountId: string; environment: string; agent: string | null; bundle: TaskBundle; kind: "run" | "watch"; trigger: JobTrigger; userId: string | null }, ids: { jobId: string; taskId: string }): Promise<StartResult> {
   const { jobId, taskId } = ids;
   const account = client.account.getOrCreate([input.accountId]);
-  const task = client.task.getOrCreate([input.accountId, taskId], { createWithInput: { accountId: input.accountId, taskId, projectId: input.projectId, environment: input.environment, name: input.bundle.task } });
+  const task = client.task.getOrCreate([input.accountId, taskId], { createWithInput: { accountId: input.accountId, taskId, environment: input.environment, name: input.bundle.task } });
   const [catalogue, endpoints, guardrails, past, accepted] = await Promise.all([
-    client.catalogue.getOrCreate(["global"]).get(), account.endpointsForJob(input.projectId),
-    account.resolveGuardrails({ projectId: input.projectId, environment: input.environment, agent: input.agent, taskId }), task.info(), account.evalFor(taskId),
+    client.catalogue.getOrCreate(["global"]).get(), account.endpointsForJob(),
+    account.resolveGuardrails({ environment: input.environment, agent: input.agent, taskId }), task.info(), account.evalFor(taskId),
   ]);
   const measured = past.lastResult?.pick && past.lastResult.currentModel === input.bundle.current.model ? past.lastResult : null;
   const pool = buildPool({ catalogue, endpoints, bundle: input.bundle, guardrails: guardrails.effective });
@@ -131,7 +130,7 @@ async function launch(client: AppClient, input: { accountId: string; projectId: 
     grading: input.kind === "run" && !accepted && !!config.openrouter.apiKey,
   });
   await task.recordJob({ jobId, bundle: input.bundle, agent: input.agent, kind: input.kind });
-  await client.job.create([jobId], { input: { accountId: input.accountId, projectId: input.projectId, taskId, environment: input.environment, agent: input.agent, bundle: input.bundle, kind: input.kind, trigger: input.trigger, userId: input.userId, provisional, createdAt: new Date().toISOString() } });
+  await client.job.create([jobId], { input: { accountId: input.accountId, taskId, environment: input.environment, agent: input.agent, bundle: input.bundle, kind: input.kind, trigger: input.trigger, userId: input.userId, provisional, createdAt: new Date().toISOString() } });
   return { ok: true, jobId, taskId, provisional, estimate };
 }
 
@@ -145,7 +144,7 @@ export async function rerunJob(client: AppClient, input: { accountId: string; us
   return runTask(client, { ...input, taskId: job.taskId });
 }
 
-/** Runs a task on the bundle it last ran on, or for a task approved from a review, the bundle the review wrote. */
+/** Runs a task on the bundle it last ran on. */
 export async function runTask(client: AppClient, input: { accountId: string; userId: string; taskId: string; budgetUsd?: number | null; trigger: JobTrigger; askedBy?: string | null }): Promise<StartResult> {
   const account = client.account.getOrCreate([input.accountId]);
   const row = await account.task(input.taskId);
@@ -153,8 +152,8 @@ export async function runTask(client: AppClient, input: { accountId: string; use
   if (!row || !bundle) return { ok: false, error: "This run's task no longer has a bundle to run again: send one with openmerit_recommend." };
   if (input.budgetUsd !== undefined && input.budgetUsd !== null) {
     if (!Number.isFinite(input.budgetUsd) || input.budgetUsd <= 0 || input.budgetUsd > MAX_RERUN_BUDGET_USD) return { ok: false, error: `The budget must be more than $0 and at most $${MAX_RERUN_BUDGET_USD}.` };
-    const settings = Object.fromEntries((await account.guardrails({ projectId: row.projectId, level: "task", scope: row.id })).map(item => [item.key, item.value])) as Guardrails;
-    await account.setGuardrails({ projectId: row.projectId, level: "task", scope: row.id, settings: { ...settings, budgetUsd: input.budgetUsd } });
+    const settings = Object.fromEntries((await account.guardrails({ level: "task", scope: row.id })).map(item => [item.key, item.value])) as Guardrails;
+    await account.setGuardrails({ level: "task", scope: row.id, settings: { ...settings, budgetUsd: input.budgetUsd } });
   }
-  return startJob(client, { accountId: input.accountId, projectId: row.projectId, environment: row.environment, agent: row.agent, bundle, kind: "run", trigger: input.trigger, userId: input.userId, askedBy: input.askedBy ?? null });
+  return startJob(client, { accountId: input.accountId, environment: row.environment, agent: row.agent, bundle, kind: "run", trigger: input.trigger, userId: input.userId, askedBy: input.askedBy ?? null });
 }

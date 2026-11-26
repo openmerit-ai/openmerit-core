@@ -1,7 +1,7 @@
 // The app.openmerit.ai pages: signs in with Clerk, then fills the page named by
 // #view[data-view] from the cloud app's /api/* with the session token.
 import { trackPageview } from "./analytics.ts";
-import { ApiError, createApi, DEFAULT_PROJECT, type Api, type Me, type Project } from "./api.ts";
+import { ApiError, createApi, type Api, type Me, type Task } from "./api.ts";
 import { loadClerk, needsOrganization, signedIn, unavailable, type AppConfig, type Clerk } from "./auth.ts";
 import { html, setLogos, type Html } from "./html.ts";
 import { startLive, stopLive } from "./live.ts";
@@ -14,7 +14,6 @@ import { dataView } from "./views/data.ts";
 import { evalsView } from "./views/evals.ts";
 import { guardrailsView } from "./views/guardrails.ts";
 import { planView } from "./views/plan.ts";
-import { projectView } from "./views/project.ts";
 import { runView } from "./views/run.ts";
 import { runsView } from "./views/runs.ts";
 import { tasksView } from "./views/tasks.ts";
@@ -24,7 +23,7 @@ setLogos(__LOGOS__);
 
 const views: Record<string, (ctx: Ctx) => Promise<Mounted>> = {
   runs: mount(runsView), run: mount(runView), tasks: mount(tasksView), evals: mount(evalsView), connections: mount(connectionsView),
-  guardrails: mount(guardrailsView), plan: mount(planView), data: mount(dataView), project: mount(projectView), account: mount(accountView), confirm: mount(confirmView),
+  guardrails: mount(guardrailsView), plan: mount(planView), data: mount(dataView), account: mount(accountView), confirm: mount(confirmView),
 };
 
 const root = document.querySelector<HTMLElement>("#view");
@@ -35,9 +34,6 @@ const brand = html`<a class="brand" href="/" aria-label="OpenMerit"><svg class="
 let clerk: Clerk | null = null;
 let api: Api | null = null;
 let mounted: Mounted | null = null;
-// The project the sidebar's switcher has open; every project-scoped /api/* call names it.
-let projectId: string | null = null;
-let accountId = "";
 
 const put = (content: Html): void => {
   if (!root) return;
@@ -227,64 +223,12 @@ function fillProfile(me: Account | null): void {
   if (session) session.lastChild!.textContent = me ? "Sign out" : "Sign in";
 }
 
-// The open project is remembered per organization. ?project= opens another, as after deleting one.
-const projectKey = (orgId: string): string => `om-project:${orgId}`;
-function chooseProject(orgId: string, projects: Project[]): Project {
-  let stored: string | null = null;
-  try { stored = params.get("project") ?? localStorage.getItem(projectKey(orgId)); } catch { /* private browsing */ }
-  const found = projects.find((item) => item.id === stored) ?? projects.find((item) => item.id === DEFAULT_PROJECT) ?? projects[0]!;
-  try { localStorage.setItem(projectKey(orgId), found.id); } catch { /* the choice lasts until reload */ }
-  return found;
-}
-
-const checkIcon = html`<svg class="icon check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>`;
-function fillProjects(me: Account, current: Project, projects: Project[]): void {
-  const button = document.querySelector<HTMLElement>(".project-switch");
-  const menu = document.querySelector<HTMLElement>(".project-menu");
-  if (!button || !menu) return;
-  button.title = `${current.name} · Switch project`;
-  button.querySelector(".project-mark")!.textContent = initial(current.name);
-  button.querySelector(".project-name")!.textContent = current.name;
-  menu.innerHTML = html`${projects.map((item) => html`<button type="button" role="menuitem" data-global="project" data-project="${item.id}"${item.id === current.id ? html` aria-current="true"` : ""}><span class="project-mark" aria-hidden="true">${initial(item.name)}</span><span class="label">${item.name}</span>${item.id === current.id ? checkIcon : html`<span class="sub">${item.tasks || ""}</span>`}</button>`)}
-    <hr>
-    ${me.role === "admin" ? html`<button type="button" role="menuitem" data-global="new-project"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New project</button>` : ""}
-    <a role="menuitem" href="/project/"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>Project settings</a>`.__html;
-}
-
-// Names a new project, creates it and opens its settings, where its repositories and endpoints go.
-async function newProject(): Promise<void> {
-  if (!api) return;
-  const dialog = document.createElement("dialog");
-  dialog.className = "dialog";
-  dialog.innerHTML = html`<form method="dialog" class="form">
-    <h2 class="dialog-title">New project</h2>
-    <p>A project has its own tasks, runs, guardrails, GitHub repositories and model endpoints. The plan and members stay the organization's.</p>
-    <label><span>Project name</span><input name="name" required maxlength="64" autocomplete="off" spellcheck="false" placeholder="Support bot"></label>
-    <p class="form-error" role="alert" hidden></p>
-    <div class="dialog-actions"><button class="btn" value="cancel" formnovalidate>Cancel</button><button class="btn primary" value="ok">Create project</button></div>
-  </form>`.__html;
-  document.body.append(dialog);
-  const form = dialog.querySelector("form")!, error = dialog.querySelector<HTMLElement>(".form-error")!;
-  form.addEventListener("submit", (event) => {
-    if ((event.submitter as HTMLButtonElement | null)?.value !== "ok") return;
-    event.preventDefault();
-    const name = String(new FormData(form).get("name") ?? "").trim();
-    api!.send<Project>("POST", "/api/projects", { name }).then((created) => {
-      try { localStorage.setItem(projectKey(accountId), created.id); } catch { /* the reload opens the default */ }
-      location.assign(`/project/?project=${encodeURIComponent(created.id)}`);
-    }, (failure: unknown) => { error.textContent = message(failure); error.hidden = false; });
-  });
-  dialog.addEventListener("close", () => dialog.remove());
-  dialog.showModal();
-}
-
-// The sidebar's Review evals item: shown with its count only while a review's drafts, or tasks whose eval
-// waits for review, wait in this project.
+// The sidebar's Review evals item: shown with its count only while tasks whose eval waits for review wait.
 async function fillReview(api: Api): Promise<void> {
   const item = document.querySelector<HTMLElement>(".nav-action[href='/evals/']");
   if (!item) return;
-  const [drafts, tasks] = await Promise.all([api.get<unknown[]>("/api/eval-drafts").catch((): unknown[] => []), api.get<{ state?: string }[]>("/api/tasks").catch((): { state?: string }[] => [])]);
-  const waiting = drafts.length + tasks.filter((task) => task.state === "review").length;
+  const tasks = await api.get<Task[]>("/api/tasks").catch((): Task[] => []);
+  const waiting = tasks.filter((task) => task.state === "review").length;
   item.hidden = waiting === 0 && !item.hasAttribute("aria-current");
   item.querySelector(".count")!.textContent = waiting ? String(waiting) : "";
   item.title = waiting ? `Review evals: ${waiting} waiting` : "Review evals";
@@ -307,7 +251,7 @@ async function boot(): Promise<void> {
       if (!response.ok) throw new Error("Sign-in is temporarily unavailable. Please try again later.");
       const config = await response.json() as AppConfig;
       clerk = await loadClerk(config);
-      api = createApi(config.apiOrigin, async () => (await clerk?.session?.getToken()) ?? null, fetch, reverify, () => projectId);
+      api = createApi(config.apiOrigin, async () => (await clerk?.session?.getToken()) ?? null, fetch, reverify);
       // Boots again when the user signs in or out, or their session gains or loses an organization.
       const state = (found: Clerk): string => (signedIn(found) ? `in:${found.organization?.id ?? ""}` : needsOrganization(found) ? "organization" : "out");
       let was = state(clerk);
@@ -326,15 +270,11 @@ async function boot(): Promise<void> {
   leaveStandalone();
   trackPageview(clerk.user?.id);
   try {
-    const [found, projects] = await Promise.all([api.get<Me>("/api/me"), api.get<Project[]>("/api/projects")]);
+    const found = await api.get<Me>("/api/me");
     const me: Account = { ...found, account: { ...found.account, name: found.account.name ?? clerk.organization?.name ?? "Your organization" } };
-    accountId = me.account.id;
-    const project = chooseProject(accountId, projects);
-    projectId = project.id;
     fillProfile(me);
-    fillProjects(me, project, projects);
     const ctx: Ctx = {
-      api, me, project, projects, params, id: runId, toast, confirm: confirmDialog, download,
+      api, me, params, id: runId, toast, confirm: confirmDialog, download,
       go: (url) => location.assign(url),
       refresh: async () => { await render(ctx); void fillReview(ctx.api); },
     };
@@ -355,16 +295,7 @@ async function act(name: string, target: HTMLElement): Promise<void> {
   finally { if (button?.isConnected) { button.disabled = false; button.removeAttribute("aria-busy"); } }
 }
 
-async function global(name: string, target: HTMLElement): Promise<void> {
-  if (name === "project") {
-    const chosen = target.dataset.project ?? DEFAULT_PROJECT;
-    try { localStorage.setItem(projectKey(accountId), chosen); } catch { /* opens through the query instead */ }
-    // A run's page belongs to its own project: switching opens the new project's runs.
-    const url = new URL(runId ? "/" : location.pathname, location.origin);
-    url.searchParams.set("project", chosen);
-    return location.assign(url.toString());
-  }
-  if (name === "new-project") return newProject();
+async function global(name: string): Promise<void> {
   if (!clerk) return void boot();
   if (name === "retry") return void boot();
   if (name === "sign-in") return clerk.openSignIn({ forceRedirectUrl: location.href, signUpForceRedirectUrl: location.href });
@@ -377,7 +308,7 @@ async function global(name: string, target: HTMLElement): Promise<void> {
 document.addEventListener("click", (event) => {
   if (!(event.target instanceof Element)) return;
   const globalTarget = event.target.closest<HTMLElement>("[data-global]");
-  if (globalTarget) { event.preventDefault(); void global(globalTarget.dataset.global ?? "", globalTarget).catch((failure) => toast(message(failure), true)); return; }
+  if (globalTarget) { event.preventDefault(); void global(globalTarget.dataset.global ?? "").catch((failure) => toast(message(failure), true)); return; }
   const target = event.target.closest<HTMLElement>("button[data-action]");
   if (target && root?.contains(target)) void act(target.dataset.action ?? "", target);
 });

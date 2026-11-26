@@ -1,10 +1,9 @@
-// Guardrails at three levels: environment (a repository or workspace), agent (a group of tasks) and
-// task. A level that does not set a guardrail inherits it from the level above. Constraints protect
+// Guardrails at two levels: environment (a repository or workspace) and task. A level that does not set a guardrail inherits it from the level above. Constraints protect
 // the customer, so a lower level can only narrow them; defaults can be replaced either way. The
 // resolver reports which level set each effective value, and every setting it refused.
 
-export type Level = "environment" | "agent" | "task";
-export const LEVELS: readonly Level[] = ["environment", "agent", "task"];
+export type Level = "environment" | "task";
+export const LEVELS: readonly Level[] = ["environment", "task"];
 
 export type ActionPolicy = "open_pr" | "ask_first" | "instructions_only";
 
