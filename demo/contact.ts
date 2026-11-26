@@ -65,7 +65,7 @@ export async function contactSubmit(request: Request, env: ContactEnv): Promise<
   const valid = entry.name && entry.company && companySizes.includes(entry.size) && llmSpends.includes(entry.spend)
     && /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(entry.email)
     && (Object.keys(limits) as (keyof typeof limits)[]).every(key => entry[key].length <= limits[key]);
-  if (!valid) return page(400, 'Something is missing', `Please give your name, a work email, your company, its size and its yearly LLM spend. ${back}`);
+  if (!valid) return page(400, 'Something is missing', `Please give your name, a work email, your company, its size and its monthly LLM spend. ${back}`);
 
   const name = entry.name.replace(/[\r\n]+/g, ' ');
   try {
@@ -75,7 +75,7 @@ export async function contactSubmit(request: Request, env: ContactEnv): Promise<
       replyTo: { name, email: entry.email },
       subject: `Hosted OpenMerit enquiry: ${entry.company.replace(/[\r\n]+/g, ' ')}`.slice(0, 200),
       text: [
-        `Name: ${name}`, `Work email: ${entry.email}`, `Company: ${entry.company}`, `Company size: ${entry.size}`, `Yearly LLM spend: ${entry.spend}`,
+        `Name: ${name}`, `Work email: ${entry.email}`, `Company: ${entry.company}`, `Company size: ${entry.size}`, `Monthly LLM spend: ${entry.spend}`,
         '', 'What they want OpenMerit for:', entry.use || '(not given)',
         '', 'How they heard about OpenMerit:', entry.heard || '(not given)',
         '', 'Reply to this email to answer them.',

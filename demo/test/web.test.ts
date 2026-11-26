@@ -103,7 +103,7 @@ test('the contact-sales form emails a valid request to OpenMerit with Reply-To s
   assert.deepEqual(message.to, ['lazim@openmerit.ai']); assert.equal(message.from.email, 'memo@openmerit.ai');
   assert.deepEqual(message.replyTo, { name: 'Ada Bcc: x@evil.test', email: 'ada@acme.test' });
   assert.equal(message.subject, 'Hosted OpenMerit enquiry: Acme');
-  assert.match(message.text, /Company size: 11–50/); assert.match(message.text, /Yearly LLM spend: \$50K–\$100K/); assert.match(message.text, /Support replies/); assert.match(message.text, /\(not given\)/);
+  assert.match(message.text, /Company size: 11–50/); assert.match(message.text, /Monthly LLM spend: \$50K–\$100K/); assert.match(message.text, /Support replies/); assert.match(message.text, /\(not given\)/);
 
   // A bot filling the hidden field sees success, but nothing is sent.
   assert.equal((await submit({ ...valid, website: 'http://spam.test' })).status, 303);
