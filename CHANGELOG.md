@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- In Scout, an eval that exits 0 while OpenMerit's proxy refused some of its requests (HTTP 403, a model outside the allowed pool) now says so in history, in that model's note and in the stop message; it used to show only as failed items.
+- OpenMerit's evals ask for a JSON task's answer in its schema (`response_format`), as the application does, so models no longer fail every case by answering in prose. Scout and the cloud app both.
+- In Scout, a request the eval budget would refuse only because other requests are reserved at their maximum waits for them to settle instead of pausing the run, and an answer cut off part-way or without usage is priced by what the model wrote, not by the stream's bytes, which booked failed calls at their whole reservation.
 - **Screens on up to 20 cases in every eval.** An eval over 20 cases, which is most of them once OpenMerit writes cases, used to screen each candidate on 5; it now screens on 20 drawn from the cases the current model passes, and a single miss is screened once more on that case. Scout and the cloud app both. The estimate and Scout's approval text say so.
 - In Scout, only the cases of OpenMerit's eval whose model call failed are measured again as failed calls; a case answered wrongly in the same run used to be retried too, whenever any call in that run had failed.
 - In the cloud app, a challenger or finalist whose measuring step keeps failing, such as on a deadline, is skipped as untested instead of ending every challenger after it; and `openmerit_recommend`'s `estimate` has `rounds`: a first run that a person grades may search up to three times, once per round whose grades write the eval again, and the estimate says so (a retest run cost twice its estimate).

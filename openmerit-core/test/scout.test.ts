@@ -12,7 +12,7 @@ import { after, before, test } from "node:test";
 import { loadCatalogue } from "../src/catalogue/catalogue.ts";
 import { renderRun } from "../src/cli/render.ts";
 import { runGeneratedEval } from "../src/eval/generated.ts";
-import { EvalProxy, MODEL_CALL_RETRIES } from "../src/eval/proxy.ts";
+import { answerBytes, EvalProxy, MODEL_CALL_RETRIES } from "../src/eval/proxy.ts";
 import type { Harness, JsonRequest } from "../src/harness/harness.ts";
 import { startRun } from "../src/local.ts";
 import { advanceLoop, pickSamples, startLoop, type CaseAnswer } from "../src/eval/loop.ts";
@@ -547,6 +547,20 @@ test("a call that fails in one of the current model's runs is measured again, an
   } finally { Object.assign(hiccup, { model: "", ticket: "", remaining: 0 }); }
 });
 
+test("an eval that exits 0 while the proxy refused some of its requests says so in history and in the current model's note", async () => {
+  // The eval asks for gpt-4o, outside the allowed pool, on its first ticket only, and counts the refused call as a miss.
+  const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
+  const path = join(root, "evals/classify.eval.ts");
+  writeFileSync(path, readFileSync(path, "utf8").replace("const queue = await classify(item.ticket);", "const queue = await classify(item.ticket, item === items[0] ? \"gpt-4o\" : undefined).catch(() => \"\");"));
+  execFileSync("git", ["-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qam", "eval"], { cwd: root });
+  const ctx = context(root, home);
+  const { step } = await drive(ctx, startRun(ctx));
+  assert.equal(step.status, "done", step.error ?? JSON.stringify([step.questions, step.notices]).slice(0, 1500));
+  const refusal = /OpenMerit's proxy refused the eval's requests for gpt-4o \(HTTP 403\), which is not gpt-4\.1-mini or another model this repository allows/;
+  assert.match(step.result!.tasks[0]!.baseline!.note, refusal);
+  assert.ok(ctx.state.events(step.runId).some(event => event.kind === "proxy" && refusal.test(event.message)), "history names the refused model");
+});
+
 test("a generated eval reports as errored only the cases whose model call failed, not the ones answered wrongly in the same run", async () => {
   const [failing, ...others] = [...tickets.keys()].slice(0, 3);
   const value = { bundle: specBundle({ ...CLASSIFIER_SPEC, steps: [] } as SpecReply, { name: "ticket classifier" }, [], "gpt-4o-mini"), cases: [failing!, ...others].map((ticket, index) => ({ id: `written-${index + 1}`, input: { ticket }, expected: tickets.get(ticket), origin: "written" as const })) };
@@ -796,6 +810,34 @@ test("the metering proxy estimates an answer without token usage by its size, no
   const reserved = (128000 * nano.outputPerM!) / 1e6;
   assert.deepEqual([spend.unknown, spend.inFlight], [0, 0]);
   assert.ok(spend.estimatedUsd > 0 && spend.totalUsd < reserved / 1000, `estimated $${spend.totalUsd}, reserved $${reserved}`);
+});
+
+test("the metering proxy holds a request the budget refuses only because of other requests in flight until they settle, instead of pausing the run", async () => {
+  const ctx = context(repo(), mkdtempSync(join(tmpdir(), "openmerit-home-")));
+  const runId = startRun(ctx);
+  const nano = loadCatalogue().models.find(model => model.id === "openai/gpt-5-nano")!;
+  // Each request reserves its 100,000-token maximum; the budget holds one such reservation, and each answer costs almost nothing.
+  const reservedEach = (100_000 * nano.outputPerM!) / 1e6;
+  ctx.state.updateRun(runId, { budgetUsd: reservedEach * 1.5 });
+  const slow = (async () => { await new Promise(resolve => setTimeout(resolve, 50)); return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: "billing" } }], usage: { prompt_tokens: 10, completion_tokens: 2 } }), { status: 200, headers: { "content-type": "application/json" } }); }) as unknown as typeof fetch;
+  const proxy = new EvalProxy(ctx.state, slow);
+  const url = await proxy.start();
+  const { token, tally } = proxy.open({ runId, unitId: "unit", endpointId: "openai", baseUrl, apiKey: "sk-fake-endpoint", model: "gpt-5-nano", allowed: () => nano });
+  const ask = () => fetch(`${url}/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ model: "gpt-5-nano", max_completion_tokens: 100_000, messages: [{ role: "user", content: "I was charged twice." }] }) }).then(response => response.status);
+  try {
+    assert.deepEqual(await Promise.all([ask(), ask(), ask()]), [200, 200, 200]);
+    assert.equal(tally.budgetHit, false);
+  } finally { await proxy.stop(); }
+  assert.equal(ctx.state.spend(runId).requests, 3);
+});
+
+test("the metering proxy sizes an answer by what the model wrote, not by the stream's framing around each token", () => {
+  const frame = (delta: object) => `data: ${JSON.stringify({ id: "gen-1", object: "chat.completion.chunk", model: "qwen/qwen3.8-27b", choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`;
+  const stream = [frame({ role: "assistant", reasoning: "think" }), ..."billing".split("").map(content => frame({ content })), frame({ tool_calls: [{ index: 0, function: { arguments: "{}" } }] }), "data: {\"choices\":[{\"delta\":{\"content\":\"cut"].join("");
+  assert.equal(answerBytes(stream), "think".length + "billing".length + "{}".length, "a chunk cut off part-way counts nothing");
+  assert.ok(Buffer.byteLength(stream) > 50 * answerBytes(stream), "the framing is most of the bytes");
+  assert.equal(answerBytes(JSON.stringify({ choices: [{ message: { role: "assistant", content: "account" } }] })), 7);
+  assert.equal(answerBytes("plain text"), 10, "an answer that is not chat-completions JSON counts whole");
 });
 
 test("a model call the eval gives up on is aborted upstream and never counts more than its reservation", async () => {

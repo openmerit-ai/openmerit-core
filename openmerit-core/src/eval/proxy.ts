@@ -36,8 +36,32 @@ export interface UnitTally {
 }
 
 /** True when an OpenAI-style answer (body or SSE stream) stopped at its token limit without any text. */
+const chunksOf = (text: string) => (text.trimStart().startsWith("{") ? [text] : text.split("\n").filter(line => line.startsWith("data:")).map(line => line.slice(5).trim()).filter(line => line.startsWith("{")));
+
+/**
+ * The bytes of what the model wrote in an answer, streamed or not: its text, reasoning and tool-call arguments,
+ * without the JSON and server-sent-event framing around each token, which is most of a stream's bytes.
+ * An answer that is not chat-completions JSON counts whole.
+ */
+export function answerBytes(text: string): number {
+  const chunks = chunksOf(text);
+  if (!chunks.length) return Buffer.byteLength(text);
+  let bytes = 0;
+  type Part = { content?: unknown; reasoning?: unknown; reasoning_content?: unknown; tool_calls?: { function?: { arguments?: unknown } }[] };
+  for (const chunk of chunks) {
+    try {
+      const value = JSON.parse(chunk) as { choices?: { message?: Part; delta?: Part }[] };
+      for (const choice of value.choices ?? []) {
+        const part = choice.message ?? choice.delta ?? {};
+        for (const piece of [part.content, part.reasoning, part.reasoning_content, ...(part.tool_calls ?? []).map(call => call.function?.arguments)]) if (typeof piece === "string") bytes += Buffer.byteLength(piece);
+      }
+    } catch { /* a chunk cut off part-way */ }
+  }
+  return bytes;
+}
+
 export function cutOffBeforeText(text: string): boolean {
-  const chunks = text.trimStart().startsWith("{") ? [text] : text.split("\n").filter(line => line.startsWith("data:")).map(line => line.slice(5).trim()).filter(line => line.startsWith("{"));
+  const chunks = chunksOf(text);
   let content = "", length = false;
   for (const chunk of chunks) {
     try {
@@ -95,6 +119,9 @@ export class EvalProxy {
   private readonly units = new Map<string, { unit: ProxyUnit; tally: UnitTally; ledger: Ledger }>();
   private readonly state: State;
   private readonly fetcher: typeof fetch;
+  /** Requests reserved and not yet settled, and the requests waiting for one of them to settle. */
+  private reserved = 0;
+  private settledWaiters: (() => void)[] = [];
   constructor(state: State, fetcher: typeof fetch = fetch) { this.state = state; this.fetcher = fetcher; }
 
   async start(): Promise<string> {
@@ -163,17 +190,32 @@ export class EvalProxy {
     const expected = expectedCost(catalogue, parsed, forwarded.length);
     // The CLI calls only the user's own endpoints with their keys.
     const key = randomUUID();
-    const reservation = await ledger.reserve({ key, usd: expected.usd, funding: "customer", model, endpoint: unit.endpointId });
+    const reserve = () => ledger.reserve({ key, usd: expected.usd, funding: "customer", model, endpoint: unit.endpointId });
+    let reservation = await reserve();
+    // Refused while other requests hold reservations at their maximum cost: they usually settle far lower, so wait for
+    // them instead of pausing the run. Only a request the budget refuses with nothing else in flight pauses it.
+    while (!reservation.ok && this.reserved > 0 && !signal.aborted) {
+      await new Promise<void>(resolve => { this.settledWaiters.push(resolve); signal.addEventListener("abort", () => resolve(), { once: true }); });
+      reservation = await reserve();
+    }
     if (!reservation.ok) {
       tally.refused++; tally.budgetHit = true;
       if (!tally.refusedLargest || expected.usd > tally.refusedLargest.usd) tally.refusedLargest = { usd: expected.usd, outputTokens: expected.outputTokens };
       return send(res, 402, `OpenMerit eval budget reached: ${reservation.reason}; this request needs about $${reservation.neededUsd.toFixed(4)}. Paid evaluation is paused until the budget is raised.`, "openmerit_budget");
     }
     tally.requests++;
+    this.reserved++;
     const started = Date.now();
     // Every reservation is settled, even when the endpoint or the eval drops the connection part-way.
-    let settled = false, received = 0;
-    const settle = (cost: Settlement) => { settled = true; return ledger.settle(key, cost); };
+    let settled = false, received = 0, text = "";
+    const settle = async (cost: Settlement) => {
+      settled = true;
+      try { await ledger.settle(key, cost); } finally {
+        this.reserved--;
+        const waiting = this.settledWaiters; this.settledWaiters = [];
+        for (const wake of waiting) wake();
+      }
+    };
     try {
       const forward = () => this.fetcher(`${unit.baseUrl.replace(/\/$/, "")}${path}`, {
         method: "POST", body: forwarded, redirect: "manual", signal: AbortSignal.any([signal, AbortSignal.timeout(600_000)]),
@@ -187,7 +229,6 @@ export class EvalProxy {
         return send(res, 502, `OpenMerit proxy: ${unit.endpointId} did not answer (${upstream.message}).`, "openmerit_upstream");
       }
       res.writeHead(upstream.status, { "content-type": upstream.headers.get("content-type") ?? "application/json" });
-      let text = "";
       const decoder = new TextDecoder();
       const reader = upstream.body?.getReader();
       for (;;) {
@@ -205,11 +246,11 @@ export class EvalProxy {
       else if (cutOffBeforeText(text)) tally.cutOff++;
       if (!upstream.ok) await settle({ actualUsd: usage?.costUsd ?? 0, estimatedUsd: null, latencyMs, failed: true });
       // An answer without usage is estimated from its size, not counted at the request's maximum.
-      else await settle({ actualUsd: usage?.costUsd ?? null, estimatedUsd: usage ? requestPrice(catalogue ?? null, usage.input, usage.output) : sizeEstimate(catalogue, forwarded.length, received), latencyMs });
+      else await settle({ actualUsd: usage?.costUsd ?? null, estimatedUsd: usage ? requestPrice(catalogue ?? null, usage.input, usage.output) : sizeEstimate(catalogue, forwarded.length, answerBytes(text)), latencyMs });
     } finally {
       // Cut off part-way: what arrived is estimated by its size; nothing arrived, nothing is charged.
       if (!settled && signal.aborted) tally.abandoned++;
-      if (!settled) await settle({ actualUsd: received ? null : 0, estimatedUsd: received ? sizeEstimate(catalogue, forwarded.length, received) : null, latencyMs: Date.now() - started, failed: true });
+      if (!settled) await settle({ actualUsd: received ? null : 0, estimatedUsd: received ? sizeEstimate(catalogue, forwarded.length, answerBytes(text)) : null, latencyMs: Date.now() - started, failed: true });
     }
   }
 }

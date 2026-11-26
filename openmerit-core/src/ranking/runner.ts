@@ -174,10 +174,12 @@ export async function runCase(input: {
   const model = client.model(candidate.endpoint, candidate.model);
   const prompts: AgentMessage[] = [...(system === undefined ? [] : [{ role: "system" as const, content: system, timestamp: Date.now() }]), ...piMessages(model, messages)];
 
+  // A JSON task's answer is asked for in its schema, as the application asks for it; a recorded request is sent as it was.
+  const jsonSchema = !trace && bundle.output.kind === "json" ? bundle.output.schema : null;
   const calls: ModelCall[] = [];
   // Each model call is metered under its own key, so a replayed case is charged once.
   const streamFn: StreamFn = async (_model, context) => {
-    const answer = await client.call({ endpoint: candidate.endpoint, model: candidate.model, context, ...(input.maxTokens ? { maxTokens: input.maxTokens } : {}) },
+    const answer = await client.call({ endpoint: candidate.endpoint, model: candidate.model, context, ...(input.maxTokens ? { maxTokens: input.maxTokens } : {}), ...(jsonSchema ? { jsonSchema } : {}) },
       { ledger: input.ledger, key: `${input.key}/call-${calls.length}`, ...(input.signal ? { signal: input.signal } : {}) });
     calls.push(answer);
     const stream = createAssistantMessageEventStream();

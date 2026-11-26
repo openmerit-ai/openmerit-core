@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Retest fixes: refused requests, JSON answers and the eval budget — unreleased, 26 November 2026
+
+Reviewed the homepage against Scout reporting partly refused requests, evals asking for a JSON task's schema, requests waiting for in-flight reservations instead of pausing, and abandoned answers priced by their text. `site/index.html` makes no claim about the proxy, JSON output or the eval budget. No homepage change.
+
 ## Retest fixes: 20-case screens, failed calls, challengers and the estimate — unreleased, 26 November 2026
 
 Reviewed the homepage against screens running on up to 20 cases in every eval, only failed calls being retried, a failing candidate step being skipped instead of ending the challengers, the estimate's `rounds`, and the criteria summary's wording. `site/index.html` makes no claim about screening, retries, challengers, estimates or the criteria bar. No homepage change; its "400+ models" claim is still open in the fix plan.

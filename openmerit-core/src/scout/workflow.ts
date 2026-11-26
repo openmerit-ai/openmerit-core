@@ -62,6 +62,10 @@ interface ModelRef { model: string; endpoint: string; endpointModel: string }
 
 interface PlannedEval extends EvalSpec { source: "saved" | "harness" | "user" | "generated"; helperFiles?: { path: string; content: string; purpose: string }[]; explanation?: string; /** Labelled items the harness counted in the repository's eval, when it could tell. */ items?: number | null }
 
+/** Why some of a model's calls failed: the eval asked the proxy for models outside the allowed pool. */
+const refusedNote = (models: readonly string[], entry: { endpointModel: string; endpoint: string }) =>
+  `OpenMerit's proxy refused the eval's requests for ${models.join(", ")} (HTTP 403), which ${models.length === 1 ? "is" : "are"} not ${entry.endpointModel} or another model this repository allows on ${entry.endpoint}, so those calls failed: make the eval send the model in $OPENMERIT_MODEL`;
+
 /** One eval run's result as recorded in SQLite: pass/fail per item, nothing else from the item. */
 export interface UnitResult {
   items: Record<string, boolean>; passes: number; total: number; source: "eval"; requests: number; durationMs: number;
@@ -69,6 +73,8 @@ export interface UnitResult {
   errored?: string[];
   /** Answers cut off by their token limit before any text (absent in runs saved before it was counted). */
   cutOff?: number;
+  /** Models the eval asked for that the proxy refused with HTTP 403, as outside the allowed pool: those calls failed. */
+  refused?: string[];
   /** For a generated eval: why each failed item failed, in one redacted sentence. */
   reasons?: Record<string, string>;
   /** For a generated eval: the spec's checks each failed item failed, and each answer, redacted, for a person to grade. */
@@ -769,7 +775,7 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
       ...(outcome.errored ?? []).filter(item => results[item] === false),
       ...(callsFailed ? ids.filter(item => !results[item] && (!plan.generated || item.startsWith(REPO_ITEM))) : []),
     ];
-    const result: UnitResult = { items: results, passes, total, source: "eval", requests: tally.requests, durationMs: outcome.durationMs, cutOff: tally.cutOff, ...(errored.length ? { errored } : {}), ...(outcome.reasons && Object.keys(outcome.reasons).length ? { reasons: outcome.reasons } : {}), ...(outcome.checks && Object.keys(outcome.checks).length ? { checks: outcome.checks } : {}), ...(outcome.answers?.length ? { answers: outcome.answers } : {}) };
+    const result: UnitResult = { items: results, passes, total, source: "eval", requests: tally.requests, durationMs: outcome.durationMs, cutOff: tally.cutOff, ...(errored.length ? { errored } : {}), ...(tally.poolViolations.length ? { refused: [...new Set(tally.poolViolations)] } : {}), ...(outcome.reasons && Object.keys(outcome.reasons).length ? { reasons: outcome.reasons } : {}), ...(outcome.checks && Object.keys(outcome.checks).length ? { checks: outcome.checks } : {}), ...(outcome.answers?.length ? { answers: outcome.answers } : {}) };
     // An eval that sends no request through the proxy did not use the model under test, and its spend was neither metered nor capped.
     if (!tally.requests) {
       const violations = [...new Set(tally.poolViolations)];
@@ -781,6 +787,8 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
       if (kind !== "baseline") throw new CandidateUnavailable(unmetered);
       throw new StopTask(`After one run of the current model: ${unmetered}. Make the eval send this task's model calls to OPENAI_BASE_URL with OPENAI_API_KEY, then run \`openmerit scout\` again.`);
     }
+    // Some requests refused while others went through: the eval may still exit 0, with the refused calls as failed items.
+    if (result.refused) state.event(runId, "proxy", `${label}: ${refusedNote(result.refused, entry)}.`);
     state.setUnit(id, { status: "done", result: result as unknown as Record<string, unknown> });
     ctx.log(`  ${passes}/${total} · ${usd(state.spend(runId).totalUsd)} of $${state.getRun(runId)!.budgetUsd.toFixed(2)}`);
     save();
@@ -845,14 +853,16 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
     if (evaluated.status === "below_floor") {
       // A person grades the current model's answers next: they say whether the eval or the model is wrong.
       summary.status = "below_floor";
-      summary.floorNote = floorNote(evaluated.baseline, base.model);
+      const refused = [...new Set(baselineRuns.flatMap(run => run.refused ?? []))];
+      summary.floorNote = `${floorNote(evaluated.baseline, base.model)}${refused.length ? ` ${refusedNote(refused, base)}.` : ""}`;
       save();
       return;
     }
     if (evaluated.status === "too_few_reliable") {
       // A reasoning default on the endpoint can use up a small token limit before any answer: say so, since it is not the model's quality.
       const cutOff = baselineRuns.reduce((sum, run) => sum + (run.cutOff ?? 0), 0), requests = baselineRuns.reduce((sum, run) => sum + run.requests, 0);
-      const why = cutOff ? ` ${cutOff} of its ${requests} answers stopped at the request's output token limit before any text, as when ${base.endpoint} has the model reason first; production may call it elsewhere, where it does not. Raise the eval's token limit, or add the endpoint your application calls with \`openmerit setup\`.` : " Add labelled items the current model gets right.";
+      const refused = [...new Set(baselineRuns.flatMap(run => run.refused ?? []))];
+      const why = refused.length ? ` ${refusedNote(refused, base)}.` : cutOff ? ` ${cutOff} of its ${requests} answers stopped at the request's output token limit before any text, as when ${base.endpoint} has the model reason first; production may call it elsewhere, where it does not. Raise the eval's token limit, or add the endpoint your application calls with \`openmerit setup\`.` : " Add labelled items the current model gets right.";
       throw new StopTask(`The current model passes only ${evaluated.reliable.length} items in ${evaluated.baseline.runs.length === 1 ? "its first run" : `every one of its ${evaluated.baseline.runs.length} runs`}; Scout screens candidates on ${SAMPLE_SIZE} items it passes.${why}`);
     }
     if (evaluated.status === "no_passing_model") { summary.status = "no_passing_model"; save(); return; }
@@ -1129,6 +1139,7 @@ function measure(ctx: Context, runId: string, all: UnitRow[], repeats: number, r
   const status: ModelResult["status"] = !units.length ? "not_run" : done.length === repeats && units.length === repeats ? "measured" : units.some(unit => unit.status === "unavailable") ? "unavailable"
     : units.some(unit => unit.status === "budget_paused") ? "budget_paused" : units.some(unit => unit.status === "failed" || unit.status === "interrupted") ? "failed" : "incomplete";
   const cost = status === "measured" ? unitCost(ctx, runId, all) : null;
+  const refused = [...new Set(results.flatMap(item => item.refused ?? []))];
   const failed = units.find(unit => unit.status === "failed" || unit.status === "unavailable");
   return {
     ...entry, role, eci, status, passes, total, runs: done.length, score: total ? passes / total : null,
@@ -1136,7 +1147,7 @@ function measure(ctx: Context, runId: string, all: UnitRow[], repeats: number, r
     costPerItemUsd: cost?.perItem(total) ?? null, costIsEstimate: cost?.estimate ?? false,
     meanLatencyMs: requests ? usage.reduce((sum, item) => sum + item.latencyMs, 0) / requests : null,
     requests, qualified: false,
-    note: status === "measured" ? (requests === 0 ? "the eval made no model requests through OpenMerit, so its cost is not measured" : "")
+    note: status === "measured" ? (requests === 0 ? "the eval made no model requests through OpenMerit, so its cost is not measured" : refused.length ? refusedNote(refused, entry) : "")
       : status === "unavailable" ? `untested: ${(failed?.error ?? "").split("\n")[0]}` : status === "failed" ? `failed: ${(failed?.error ?? "interrupted").split("\n")[0]}`
       : status === "budget_paused" ? "not measured: the run is paused on its budget" : status === "not_run" ? "not run" : "not every run finished",
     evidence: all.map(unit => unit.id),
