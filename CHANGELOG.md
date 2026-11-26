@@ -4,6 +4,7 @@
 
 - Fix in Scout (0.5.0): when a model call failed in one of a model's full runs and Scout ran that item again, the run counted twice, so the model showed as "not every run finished" with totals such as 84/85, and when it was the current model, no candidate was compared at all. The second attempt now merges into its run.
 - The npm package's description now says what OpenMerit picks and how: an eval written from your code, cheaper models that pass it, on your machine with your own keys and never in your request path, with OpenMerit Cloud at openmerit.ai. The package also gets search keywords and openmerit.ai as its homepage.
+- The README's opening now says the CLI is free and links openmerit.ai, where OpenMerit Cloud runs it for you.
 
 ## 0.5.0 — 2026-11-26
 
