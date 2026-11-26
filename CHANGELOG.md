@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The npm package's description now says what OpenMerit picks and how: an eval written from your code, cheaper models that pass it, on your machine with your own keys and never in your request path, with the hosted version at openmerit.ai. The package also gets search keywords and openmerit.ai as its homepage.
+
 ## 0.5.0 — 2026-11-26
 
 The fixes from real-use testing on 24 November, first stage: stable picks, a judge that sees tool results, run cost next to the saving, and money and security fixes in the cloud app.
