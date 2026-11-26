@@ -31,9 +31,9 @@ RUN cd cloud && npm ci --omit=dev --ignore-scripts \
 COPY openmerit-core/package.json openmerit-core/
 COPY openmerit-core/src/engine openmerit-core/src/engine
 COPY openmerit-core/src/ranking openmerit-core/src/ranking
-COPY openmerit-core/src/eval/proxy.ts openmerit-core/src/eval/loop.ts openmerit-core/src/eval/generated.ts openmerit-core/src/eval/
+COPY openmerit-core/src/eval/proxy.ts openmerit-core/src/eval/loop.ts openmerit-core/src/eval/generated.ts openmerit-core/src/eval/runner.ts openmerit-core/src/eval/
 COPY openmerit-core/src/catalogue openmerit-core/src/catalogue
-COPY openmerit-core/src/connectors/agent-bundle.ts openmerit-core/src/connectors/
+COPY openmerit-core/src/connectors/agent-bundle.ts openmerit-core/src/connectors/eval-command.ts openmerit-core/src/connectors/
 COPY openmerit-core/src/scout/scan.ts openmerit-core/src/scout/
 # The repository review (src/github.ts): its prompt, and the harness that reads a checkout with Pi's read-only tools.
 COPY openmerit-core/src/review openmerit-core/src/review

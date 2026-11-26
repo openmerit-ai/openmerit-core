@@ -9,8 +9,10 @@
 !openmerit-core/src/eval/proxy.ts
 !openmerit-core/src/eval/loop.ts
 !openmerit-core/src/eval/generated.ts
+!openmerit-core/src/eval/runner.ts
 !openmerit-core/src/catalogue
 !openmerit-core/src/connectors/agent-bundle.ts
+!openmerit-core/src/connectors/eval-command.ts
 !openmerit-core/src/scout/scan.ts
 !openmerit-core/src/review
 !openmerit-core/src/job
