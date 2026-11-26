@@ -10,6 +10,14 @@ turndown.addRule('video', { filter: 'video', replacement: (_content, node) => {
   const video = node as HTMLVideoElement;
   return `[${video.getAttribute('aria-label') ?? 'Video'}](${video.querySelector('source')?.getAttribute('src') ?? ''})`;
 } });
+// A form's fields would vanish with the inputs, so list them instead; agents can't submit it.
+turndown.addRule('form', { filter: 'form', replacement: (content, node) => {
+  const fields = Array.from(node.querySelectorAll('label:not([aria-hidden="true"]) .sr-only'), label => (label.textContent ?? '').trim());
+  const list = fields.length ? `\n\nThe form on this page asks for:\n\n${fields.map(field => `- ${field}`).join('\n')}\n\n` : '';
+  const body = content.replace(/\s*\\\* Required\./g, '');
+  // Under the form's own heading when it has one.
+  return `\n\n${/^#+ .*$/m.test(body) ? body.replace(/^(#+ .*)$/m, `$1${list}`) : list + body}\n\n`;
+} });
 turndown.addRule('table', { filter: 'table', replacement: content => `\n\n${content.trim()}\n\n` });
 turndown.addRule('tableSection', { filter: ['thead', 'tbody'], replacement: content => content });
 turndown.addRule('tableRow', { filter: 'tr', replacement: (content, node) => {

@@ -147,6 +147,13 @@ code { font-family: var(--mono); }
 .compare-page pre { margin: 12px 0; padding: 12px 14px; overflow-x: auto; border: 1px solid var(--code-line); border-radius: 8px; background: var(--code-bg); }
 .compare-page pre code { padding: 0; background: none; font-size: 13px; line-height: 1.6; }
 .compare-related { padding-left: 20px; }
+/* The homepage's links to the buyer-question pages, under the film. */
+.home-questions { margin-top: 76px; }
+.home-questions > .thread-rule { width: 48px; margin-bottom: 28px; }
+.home-questions h2 { margin: 0 0 16px; font-family: var(--serif); font-size: 25px; font-weight: 400; line-height: 1.3; letter-spacing: -.02em; }
+.home-questions ul { margin: 0; padding-left: 20px; color: var(--prose); font-size: 16px; line-height: 1.55; }
+.home-questions li + li { margin-top: 8px; }
+.home-questions a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--link-line); text-underline-offset: 3px; }
 /* The contact-sales page at /contact-sales/: intro on the left, the form in a card on the right. */
 .contact-main { width: min(1040px, calc(100% - 96px)); margin: 40px auto 88px; }
 .contact-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); grid-template-areas: 'intro form' 'self form'; grid-template-rows: auto 1fr; column-gap: 64px; align-items: start; }
@@ -263,6 +270,7 @@ code { font-family: var(--mono); }
   .letter-copy { font-size: 19px; line-height: 1.65; }
   .intro-film { width: 100%; margin-top: 52px; padding-top: 30px; }
   .intro-film-heading { margin-bottom: 22px; }
+  .home-questions { margin-top: 52px; }
   .film-stage { border-radius: 6px; }
   .film-cover > span { width: 60px; height: 60px; }
   .film-toolbar { gap: 2px; }
