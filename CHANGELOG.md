@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 — 2026-11-26
+
+The fixes from real-use testing on 24 November, first stage: stable picks, a judge that sees tool results, run cost next to the saving, and money and security fixes in the cloud app.
 
 - **Picks that hold up on a second run.** An eval of 20 cases or fewer now screens every candidate on every case instead of five, and a model call that fails or times out is run again before it counts, so a candidate whose call fails twice is skipped as untested instead of screened out: one slow call used to send the search the other way, and two runs of one eval picked models 3.7 times apart in price. A model now qualifies only if, case by case, it fails none of the cases the current model passed in every run, not just as many cases in total, and a switch is proposed only when it saves at least 10% per call; otherwise the result is to keep the current model. Results carry `evidence` (cases, runs, reliable cases and screen size) and each model's `regressed` cases. In Scout, the result now reads the pool the search ran on against the criteria, qualifies finalists the same way, and Configure proposes the cheapest switch that saves, not a pricier one.
 - **What a run costs, next to what it saves.** `openmerit_recommend` returns an estimate before anything is measured: about how many case runs, how much (never more than the budget per job) and how many minutes. A result's pick has `paybackCalls`, the calls its saving takes to repay what the run cost, and the result, report and run page say it.
