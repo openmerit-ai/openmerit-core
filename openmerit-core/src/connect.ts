@@ -2,15 +2,17 @@
 // proves the connection with one round trip, and saves it to ~/.openmerit/config.json. `openmerit
 // setup` runs the same steps. Nothing switches connection on its own; a failed check keeps the
 // previous settings.
-// - claude-code: Claude Code's own login (`claude auth login`), run through pi-claude-bridge.
+// - claude-code: the user's own Claude Code and its login (`claude auth login`), run through pi-claude-bridge,
+//   which connect installs into ~/.openmerit/claude-bridge.
 // - codex: pi's ChatGPT Plus/Pro sign-in (browser, or a device code on a server). Pi keeps the
 //   tokens in ~/.openmerit/agent/auth.json (0600) and refreshes them. Without --model, connect keeps
 //   the most capable Codex model (by catalogue ECI) that the account's plan accepts.
 // - api: a Pi provider, model and key.
 import type { AuthInteraction, AuthPrompt } from "@earendil-works/pi-ai";
 import type { Prompter } from "./cli/prompt.ts";
-import { DEFAULT_CLAUDE_MODEL } from "./harness/claude-bridge.ts";
 import { loadCatalogue } from "./catalogue/catalogue.ts";
+import { isAbsolute } from "node:path";
+import { bridgeDir, bridgeInstalled, claudeBinary, DEFAULT_CLAUDE_MODEL, installClaudeBridge } from "./harness/claude-bridge.ts";
 import { CODEX_PROVIDER, createHarness, detectAgents, harnessRuntime, runClaude, verifyHarness } from "./harness/harness.ts";
 import { readGlobalConfig, storeSecret, updateGlobalConfig, type CredentialRef, type HarnessKind, type HarnessSettings } from "./state/config.ts";
 
@@ -80,6 +82,13 @@ async function codexModelsByEci(env: Record<string, string | undefined>): Promis
 /** Makes sure the chosen connection is signed in. Returns false when the user declined. */
 async function signIn(ctx: ConnectContext, kind: HarnessKind): Promise<boolean> {
   if (kind === "api") return true;
+  if (kind === "claude-code") {
+    if (!isAbsolute(claudeBinary(ctx.env))) throw new Error("Claude Code is not installed: OpenMerit Harness runs your own `claude`. Install it (https://claude.com/claude-code), then run `openmerit connect claude-code` again; or set OPENMERIT_CLAUDE_BIN to its path.");
+    if (!bridgeInstalled(ctx.env)) {
+      ctx.log(`  Installing the Claude Code bridge into ${bridgeDir(ctx.env)}; it runs your own Claude Code…`);
+      installClaudeBridge(ctx.env);
+    }
+  }
   const agent = (await detectAgents(ctx.env)).find(item => item.kind === kind)!;
   if (agent.loggedIn) return true;
   if (kind === "claude-code") {
