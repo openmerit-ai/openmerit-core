@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## README link and MCP Registry name — npm 0.5.2 release preparation, 26 November 2026
+
+Reviewed the homepage against 0.5.2: the package README now opens with the site's definition and links openmerit.ai, and `package.json` names the MCP server for the official MCP Registry. Neither changes Scout's behaviour, and `site/index.html` makes no claim about either. No homepage change.
+
 ## Scout rerun fix and package description — npm 0.5.1 release preparation, 26 November 2026
 
 Reviewed the homepage against 0.5.1: a rerun of failed calls now counts as part of its run in Scout's results, and the npm package's description, keywords and homepage changed. `site/index.html` makes no claim about either. No homepage copy change.
