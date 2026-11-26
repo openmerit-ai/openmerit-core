@@ -11,6 +11,12 @@ import { tonicUltra } from "./tonic-ultra.ts";
 
 // A task's eval in the fake: the accepted one, any draft under review, the version in the repository, and the task's output shape.
 export interface FakeEval { accepted: Omit<EvalAccepted, "runs">; draft: EvalRevision | null; repo: EvalView["repo"]; output: TaskOutput }
+const later = new Date(Date.now() + 23 * 3600_000).toISOString();
+const confirmations: Record<string, { id: string; title: string; items: string[]; checks: "person" | "reverify"; requestedVia: string | null; status: string; createdAt: string; expiresAt: string; result: { status: number; body: unknown } | null }> = {
+  budget: { id: "budget", title: "Run support ticket triage again with a budget of $8 per job", items: ["Raises the task's budget per job to $8, then starts a paid run"], checks: "reverify", requestedVia: "claude-code", status: "pending", createdAt: new Date().toISOString(), expiresAt: later, result: null },
+  switch: { id: "switch", title: "Approve the switch for support ticket triage", items: ["openai/gpt-5.4 → google/gemini-3-flash (openrouter)", "src/triage/classify.ts:14: const MODEL = \"openai/gpt-5.4\"; → const MODEL = \"google/gemini-3-flash\";"], checks: "person", requestedVia: "codex", status: "pending", createdAt: new Date().toISOString(), expiresAt: later, result: null },
+};
+
 export interface State { me: Me; tasks: Task[]; runs: Run[]; reports: Record<string, Report>; jobs: Record<string, JobView>; endpoints: Endpoint[]; repos: Repo[]; spend: Spend; guardrails: Record<Level, Record<string, Guardrails>>; disconnected: number; deleted: DeletedTask[]; evals: Record<string, FakeEval>; drafts: EvalDraft[] }
 
 // What a project other than the default holds; the State's own fields are the default project's.
@@ -631,6 +637,15 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       if (!task) return error(404, "No such task in this account.");
       Object.assign(task, { state: "retired", watching: false });
       return json(200, task);
+    }
+    // A coding agent's critical requests: /confirm/?id=budget and /confirm/?id=switch.
+    if ((match = /^\/api\/confirmations\/([\w-]+)$/.exec(path))) {
+      const found = confirmations[match[1]!];
+      if (!found) return error(404, "No such confirmation in this organization. It may belong to another organization: switch to the one the coding agent works in.");
+      if (method === "GET") return json(200, found);
+      if (found.status !== "pending") return error(409, "This request was already confirmed.");
+      Object.assign(found, input?.confirm === true ? { status: "done", result: { status: 201, body: { jobId: "rn42" } } } : { status: "declined" });
+      return json(200, found);
     }
     if (path === "/api/eval-drafts" && method === "GET") return json(200, state.drafts.filter((item) => item.status === "pending"));
     if ((match = /^\/api\/eval-drafts\/([\w-]+)\/approve$/.exec(path)) && method === "POST") {

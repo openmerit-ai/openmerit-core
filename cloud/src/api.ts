@@ -5,11 +5,13 @@
 // repositories, environment guardrails, billing and the account itself needs the organization's admin role.
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import type { AppDeps } from "./app.ts";
-import type { AuthResult, Identity } from "./auth.ts";
+import { LOCAL_USER, type AuthResult, type Identity } from "./auth.ts";
+import { confirmUrl } from "./config.ts";
 import { LEVELS, type Guardrails, type Level } from "./engine.ts";
 import { explain, type JobResult } from "../../openmerit-core/src/job/report.ts";
 import { bundleProblem, redactBundle, rerunJob, runTask, settleOrphans, taskIdFor } from "./start.ts";
-import { DEFAULT_PROJECT, specOf, type EvalSpec, type EvalView } from "./actors/account.ts";
+import { DEFAULT_PROJECT, specOf, type ConfirmationView, type EvalSpec, type EvalView } from "./actors/account.ts";
+import { OPENROUTER } from "../../openmerit-core/src/job/pool.ts";
 import type { Answers } from "./actors/job.ts";
 import type { Case, TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 import { isSubscriptionProvider } from "./subscriptions.ts";
@@ -84,8 +86,26 @@ function evalProblem(bundle: TaskBundle, spec: unknown, cases: unknown): string 
   return JSON.stringify(cases).length > 1024 * 1024 ? "The cases are larger than 1 MB." : null;
 }
 
+/** Guardrails that spend money: setting one is a critical action. */
+const MONEY_GUARDRAILS = ["budgetUsd", "spendCapUsd", "customerSpendCapUsd"];
+const escapeHtml = (text: string) => text.replace(/[&<>"']/g, char => `&#${char.charCodeAt(0)};`);
+const page = (status: number, title: string, body: string) => new Response(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>${escapeHtml(title)} · OpenMerit</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:560px;margin:8vh auto;padding:0 16px;color-scheme:light dark}h1{font-size:22px}.sub{opacity:.7;font-size:14px}ul{padding-left:20px}form{display:flex;gap:12px;margin-top:24px}button{font:inherit;padding:10px 18px;border-radius:8px;border:1px solid #8888;cursor:pointer}button[value=confirm]{background:#111;color:#fff}</style></head>
+<body>${body}</body></html>`, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-frame-options": "DENY", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'" } });
+
+/** What the coding agent or a self-hosted client gets back for a critical request held for a person. */
+export function heldReply(config: AppDeps["config"], view: ConfirmationView) {
+  const url = confirmUrl(config, view.id);
+  return {
+    status: "needs_confirmation", confirmation: { id: view.id, url, title: view.title, expiresAt: view.expiresAt },
+    text: `${view.title}: this needs a person's confirmation, which a coding agent cannot give. Ask the user to open ${url} and confirm it before ${view.expiresAt.slice(0, 16).replace("T", " ")} UTC.`,
+  };
+}
+
 export function apiRoutes(deps: AppDeps) {
   const { client, config } = deps;
+  /** Re-verification is Clerk's: a self-hosted server confirms on its own page instead. */
+  const recent = (who: Identity) => config.mode === "hosted" ? reverify(who) : null;
 
   const authenticate = async (request: Request, agentsToo = false): Promise<AuthResult> => {
     if (!deps.auth) return { ok: false, status: 401, error: "Sign-in is not configured on this server." };
@@ -95,7 +115,12 @@ export function apiRoutes(deps: AppDeps) {
     return deps.auth.mcp(request);
   };
 
-  const routes = async (request: Request, url: URL, who: Identity): Promise<Response | null> => {
+  /**
+   * `confirmed`: a person confirmed this request on a confirm page, so a critical route runs it. Otherwise a
+   * critical route holds a self-hosted caller's request for a person, since the server's one token is also the
+   * coding agent's. Hosted, /api takes only the web app's Clerk sessions, which are a person's.
+   */
+  const routes = async (request: Request, url: URL, who: Identity, confirmed = false): Promise<Response | null> => {
     const path = url.pathname;
     const method = request.method;
     const account = client.account.getOrCreate([who.accountId]);
@@ -159,10 +184,34 @@ export function apiRoutes(deps: AppDeps) {
       return null;
     }
 
+    // A coding agent's critical request, for a person to read and confirm or decline. Confirming runs it as the person.
+    if ((match = /^\/api\/confirmations\/([\w-]+)$/.exec(path)) && method === "GET") {
+      const found = await account.confirmation(match[1]!);
+      if (!found) return error(404, "No such confirmation in this organization. It may belong to another organization: switch to the one the coding agent works in.");
+      const { nonce: _nonce, ...view } = found;
+      return json(200, view);
+    }
+    if ((match = /^\/api\/confirmations\/([\w-]+)$/.exec(path)) && method === "POST") {
+      if (config.mode !== "hosted") return error(403, `Confirm it on the confirmation page, ${confirmUrl(config, match[1]!)}, not with this server's token.`);
+      const input = await body(request);
+      if (typeof input?.confirm !== "boolean") return error(400, "Send {confirm: true} to confirm or {confirm: false} to decline.");
+      const found = await account.confirmation(match[1]!);
+      if (!found) return error(404, "No such confirmation in this organization.");
+      if (input.confirm && found.checks === "reverify") { const denied = recent(who); if (denied) return denied; }
+      const decided = await decideConfirmation(who, found.id, input.confirm, url.origin);
+      return decided.ok ? json(200, decided.view) : error(409, decided.error);
+    }
+
     // The project the rest of the routes work in.
     const projectId = request.headers.get("x-openmerit-project")?.trim() || DEFAULT_PROJECT;
     const project = await account.project(projectId);
     if (!project) return error(404, "No such project in this account. Choose another project.");
+    /** Holds a critical request for a person, or null to run it: it was confirmed, or a person sent it from the hosted app. */
+    const hold = async (title: string, items: string[], input: Json | null, checks: "person" | "reverify" = "person"): Promise<Response | null> => {
+      if (confirmed || config.mode === "hosted") return null;
+      const view = await account.requestConfirmation({ projectId, method, path, body: input ? JSON.stringify(input) : "", checks, title, items, requestedBy: who.userId, requestedVia: null });
+      return json(202, heldReply(config, view));
+    };
 
     if (path === "/api/me" && method === "GET") {
       const info = await account.info();
@@ -181,9 +230,10 @@ export function apiRoutes(deps: AppDeps) {
     }
     if (path === "/api/tasks/deleted" && method === "GET") return json(200, await account.deletions(projectId));
     if ((match = /^\/api\/tasks\/([\w-]+)$/.exec(path)) && method === "DELETE") {
-      const denied = admin() ?? reverify(who); if (denied) return denied;
+      const denied = admin() ?? recent(who); if (denied) return denied;
       const row = await account.task(match[1]!);
       if (!row) return error(404, "No such task in this account.");
+      const held = await hold(`Delete the task ${row.name}`, [`${row.environment}: its eval, every run and run page`], null, "reverify"); if (held) return held;
       // A job whose start failed has no actor and never finishes: it is not a run in progress.
       await settleOrphans(client, who.accountId, row.id);
       const jobs = await account.jobs({ taskId: row.id, limit: 100_000 });
@@ -232,7 +282,15 @@ export function apiRoutes(deps: AppDeps) {
     }
     // A task approved from a review has not run: this starts its first run. Any task can run again from here.
     if ((match = /^\/api\/tasks\/([\w-]+)\/run$/.exec(path)) && method === "POST") {
-      const started = await runTask(client, { accountId: who.accountId, userId: who.userId, taskId: match[1]!, trigger: "app" });
+      const input = await body(request) ?? {};
+      if (input.budgetUsd !== undefined && input.budgetUsd !== null && typeof input.budgetUsd !== "number") return error(400, "budgetUsd must be a number of US dollars.");
+      const budgetUsd = typeof input.budgetUsd === "number" ? input.budgetUsd : null;
+      if (budgetUsd !== null) {
+        const row = await account.task(match[1]!);
+        if (!row) return error(404, "No such task in this account.");
+        const held = await hold(`Run ${row.name} with a budget of $${budgetUsd} per job`, [`Raises the task's budget per job to $${budgetUsd}, then starts a paid run`], input, "reverify"); if (held) return held;
+      }
+      const started = await runTask(client, { accountId: who.accountId, userId: who.userId, taskId: match[1]!, budgetUsd, trigger: confirmed ? "mcp" : "app" });
       return started.ok ? json(201, { jobId: started.jobId, taskId: started.taskId }) : error(409, started.error);
     }
     // Retire instead of delete: the task stops watching and keeps its eval and runs. The next recommend call brings it back.
@@ -293,6 +351,11 @@ export function apiRoutes(deps: AppDeps) {
       const handle = client.job.get([jobId]);
       const view = await handle.status();
       if (!view.questions.length) return error(409, "This run has no open questions.");
+      // Grades are a person's judgment of the answers: the coding agent relays them, and the person confirms them.
+      const grades = view.questions.filter(question => question.id.startsWith("grade_") && Object.hasOwn(answers, question.id));
+      if (grades.length) {
+        const held = await hold(`Grades for ${view.task}`, grades.map(question => `${question.prompt.replace(/: does it look right\?$/, "")}: ${String((answers as Answers)[question.id])}`), input); if (held) return held;
+      }
       await handle.send("answers", { answers: answers as Answers, by: who.userId });
       // The job applies them in a moment: answer with its state once it has, or as it stands after a few seconds.
       let next = view;
@@ -306,8 +369,31 @@ export function apiRoutes(deps: AppDeps) {
     if ((match = /^\/api\/runs\/([\w-]+)\/rerun$/.exec(path)) && method === "POST") {
       const input = await body(request) ?? {};
       if (input.budgetUsd !== undefined && input.budgetUsd !== null && typeof input.budgetUsd !== "number") return error(400, "budgetUsd must be a number of US dollars.");
-      const started = await rerunJob(client, { accountId: who.accountId, userId: who.userId, jobId: match[1]!, budgetUsd: typeof input.budgetUsd === "number" ? input.budgetUsd : null, trigger: "app" });
+      if (typeof input.budgetUsd === "number") {
+        const row = await account.job(match[1]!);
+        if (!row) return error(404, `No run ${match[1]!} in this account.`);
+        const task = await account.task(row.taskId);
+        const held = await hold(`Run ${task?.name ?? "the task"} again with a budget of $${input.budgetUsd} per job`, [`Raises the task's budget per job to $${input.budgetUsd}, then starts a paid run`], input, "reverify"); if (held) return held;
+      }
+      const started = await rerunJob(client, { accountId: who.accountId, userId: who.userId, jobId: match[1]!, budgetUsd: typeof input.budgetUsd === "number" ? input.budgetUsd : null, trigger: confirmed ? "mcp" : "app" });
       return started.ok ? json(201, { jobId: started.jobId, taskId: started.taskId }) : error(/^No run /.test(started.error) ? 404 : 409, started.error);
+    }
+    // The person's decision on a finished run's change: recorded once, and an approval moves the task onto the pick.
+    if ((match = /^\/api\/runs\/([\w-]+)\/decision$/.exec(path)) && method === "POST") {
+      const row = await account.job(match[1]!);
+      if (!row) return error(404, "No such run in this account.");
+      const input = await body(request);
+      if (typeof input?.approved !== "boolean") return error(400, "Send {approved: true} once the edit is applied, or {approved: false} to decline it.");
+      const view = await client.job.get([row.id]).status();
+      const result = view.result, pick = result?.pick;
+      if (!result?.approval || !pick) return error(409, "This run proposes no change to decide on.");
+      const change = `${result.baseline?.model ?? view.task} → ${pick.model} (${pick.endpoint})`;
+      const held = await hold(`${input.approved ? "Approve" : "Decline"} the switch for ${view.task}`, [change, ...result.edit.edits.map(edit => `${edit.file}:${edit.line}: ${edit.before} → ${edit.after}`)], input); if (held) return held;
+      const person = await deps.auth?.person(who.userId).catch(() => null) ?? null;
+      const { recorded, decision } = await account.decide({ jobId: row.id, taskId: view.taskId, decision: input.approved ? "approved" : "declined", change, by: who.userId, name: person?.name ?? null, email: person?.email ?? null });
+      if (!recorded) return json(409, { error: "The decision on this run was already recorded.", decision });
+      if (decision.decision === "approved") await client.task.get([who.accountId, view.taskId]).adopt({ model: pick.endpoint === OPENROUTER ? pick.model : pick.endpointModel, endpoint: pick.endpoint === OPENROUTER ? null : pick.endpoint, edits: result.edit.edits });
+      return json(200, { decision, model: pick.model });
     }
     if ((match = /^\/api\/runs\/([\w-]+)\/share$/.exec(path)) && method === "POST") {
       if (!config.keyEncryptionKey) return error(503, "Share links are not available yet: the app has no key-encryption key.");
@@ -318,14 +404,18 @@ export function apiRoutes(deps: AppDeps) {
 
     if (path === "/api/endpoints" && method === "GET") return json(200, await account.endpoints(projectId));
     if (path === "/api/endpoints" && method === "POST") {
-      const denied = admin(); if (denied) return denied;
+      const denied = admin() ?? recent(who); if (denied) return denied;
       const input = await body(request);
       if (!input) return error(400, "Send the endpoint as JSON: {kind, baseUrl, apiKey, allowedModels}.");
+      const held = await hold(`Add the endpoint ${String(input.baseUrl ?? "")}`, [`A ${String(input.kind ?? "")} endpoint with the key ending ${String(input.apiKey ?? "").slice(-4)}`, `Models: ${Array.isArray(input.allowedModels) ? input.allowedModels.join(", ") : "all"}`], input, "reverify"); if (held) return held;
       const added = await account.addEndpoint({ projectId, kind: input.kind as EndpointKind, baseUrl: String(input.baseUrl ?? ""), apiKey: String(input.apiKey ?? ""), allowedModels: input.allowedModels as string[] | "all" });
       return added.ok ? json(201, added.endpoint) : error(400, added.error);
     }
     if ((match = /^\/api\/endpoints\/([\w-]+)$/.exec(path)) && method === "DELETE") {
-      const denied = admin(); if (denied) return denied;
+      const denied = admin() ?? recent(who); if (denied) return denied;
+      const endpoint = (await account.endpoints(projectId)).find(item => item.id === match![1]);
+      if (!endpoint) return error(404, "No such endpoint.");
+      const held = await hold(`Remove the endpoint ${endpoint.baseUrl}`, [`Its key ending ${endpoint.keyLast4} is deleted`], null, "reverify"); if (held) return held;
       return (await account.removeEndpoint({ projectId, id: match[1]! })) ? json(200, { deleted: true }) : error(404, "No such endpoint.");
     }
 
@@ -379,6 +469,10 @@ export function apiRoutes(deps: AppDeps) {
       // Constraints protect the customer: only an admin sets the environment level, from which every constraint starts.
       if (level === "environment") { const denied = admin(); if (denied) return denied; }
       const task = level === "task" ? await account.task(id) : null;
+      const money = Object.entries(input.settings as Json).filter(([key]) => MONEY_GUARDRAILS.includes(key));
+      if (money.length) {
+        const held = await hold(`Change spending limits for ${task?.name ?? id}`, money.map(([key, value]) => `${key === "budgetUsd" ? "Budget per job" : key === "spendCapUsd" ? "Monthly cap on OpenMerit's key" : "Monthly cap on your endpoints"}: ${value === null ? "inherited" : `$${String(value)}`}`), input); if (held) return held;
+      }
       const saved = await account.setGuardrails({ projectId: task?.projectId ?? projectId, level, scope: id, settings: input.settings as Guardrails });
       return json(200, saved);
     }
@@ -403,12 +497,14 @@ export function apiRoutes(deps: AppDeps) {
 
     if (path === "/api/account/export" && method === "POST") return json(200, await account.export(), { "content-disposition": `attachment; filename="openmerit-${who.accountId}.json"` });
     if (path === "/api/disconnect" && method === "POST") {
-      const denied = admin(); if (denied) return denied;
+      const denied = admin() ?? recent(who); if (denied) return denied;
+      const held = await hold("Disconnect every coding agent", ["Their access tokens stop working; each signs in again"], null, "reverify"); if (held) return held;
       await account.disconnect();
       return json(200, { disconnected: true });
     }
     if (path === "/api/account" && method === "DELETE") {
-      const denied = admin() ?? reverify(who); if (denied) return denied;
+      const denied = admin() ?? recent(who); if (denied) return denied;
+      const held = await hold("Delete everything in this account", ["Every task, eval, run, guardrail, endpoint and key. This cannot be undone"], null, "reverify"); if (held) return held;
       const [tasks, jobs] = await Promise.all([account.tasks(), account.jobs({ limit: 100_000 })]);
       await client.catalogue.getOrCreate(["global"]).unsubscribe({ accountId: who.accountId });
       for (const job of jobs) await client.job.get([job.id]).destroy().catch(() => null);
@@ -419,8 +515,52 @@ export function apiRoutes(deps: AppDeps) {
     return null;
   };
 
+  /** Records a person's answer to a confirmation and, when they confirmed, runs the held request as them. */
+  async function decideConfirmation(who: Identity, id: string, confirm: boolean, origin: string): Promise<{ ok: true; view: ConfirmationView } | { ok: false; error: string }> {
+    const account = client.account.getOrCreate([who.accountId]);
+    const decided = await account.decideConfirmation({ id, confirm, by: who.userId });
+    if (!decided.ok) return { ok: false, error: !decided.view ? "No such confirmation." : decided.view.status === "expired" ? "This confirmation expired: ask the coding agent to make the request again." : `This request was already ${decided.view.status === "declined" ? "declined" : "confirmed"}.` };
+    if (!confirm) return { ok: true, view: decided.view };
+    const held = decided.view;
+    const replay = new Request(`${origin}${held.path}`, { method: held.method, headers: { "content-type": "application/json", "x-openmerit-project": held.projectId }, ...(decided.body ? { body: decided.body } : {}) });
+    let status = 500, answer: unknown = { error: "OpenMerit hit an internal error." };
+    try {
+      const response = await routes(replay, new URL(replay.url), who, true);
+      status = response?.status ?? 404;
+      const text = response ? await response.text() : "";
+      try { answer = text ? JSON.parse(text) as unknown : null; } catch { answer = text; }
+    } catch (failure) { console.error(`confirmation ${id} failed:`, failure); }
+    return { ok: true, view: await account.finishConfirmation({ id, result: { status, body: answer } }) };
+  }
+
+  /** A self-hosted server's confirm page: no web app or sign-in, so the page itself, on this machine, is where the person confirms. */
+  async function confirmPage(request: Request, url: URL, id: string): Promise<Response> {
+    const who: Identity = { userId: LOCAL_USER, accountId: LOCAL_USER, accountName: "Local", role: "admin", issuedAt: null, firstFactorAgeMinutes: null };
+    const account = client.account.getOrCreate([LOCAL_USER]);
+    let found = await account.confirmation(id);
+    if (!found) return page(404, "Not found", "<h1>No such confirmation</h1>");
+    let problem = "";
+    if (request.method === "POST") {
+      const form = new URLSearchParams(await request.text());
+      const origin = request.headers.get("origin");
+      if (origin && origin !== new URL(config.publicUrl).origin) return page(403, "Refused", "<h1>Refused</h1><p>Confirm from this server's own page.</p>");
+      if (form.get("nonce") !== found.nonce) return page(403, "Refused", "<h1>Refused</h1><p>Reload the page and try again.</p>");
+      const decided = await decideConfirmation(who, id, form.get("decision") === "confirm", url.origin);
+      if (!decided.ok) problem = decided.error;
+      found = (await account.confirmation(id))!;
+    }
+    const outcome = found.result ? (found.result.status < 400 ? "Done." : `It failed: ${typeof found.result.body === "object" && found.result.body && "error" in found.result.body ? String(found.result.body.error) : `status ${found.result.status}`}`) : "";
+    const state = found.status === "pending" ? "" : found.status === "declined" ? "You declined this." : found.status === "expired" ? "This expired. Ask the coding agent to make the request again." : outcome;
+    return page(200, found.title, `<p class="sub">OpenMerit · a coding agent${found.requestedVia ? ` (${escapeHtml(found.requestedVia)})` : ""} asks you to confirm</p>
+<h1>${escapeHtml(found.title)}</h1><ul>${found.items.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+${problem ? `<p role="alert">${escapeHtml(problem)}</p>` : ""}${state ? `<p><b>${escapeHtml(state)}</b> You can close this page and tell your coding agent.</p>` : `<p class="sub">Expires ${escapeHtml(found.expiresAt.slice(0, 16).replace("T", " "))} UTC.</p>
+<form method="post"><input type="hidden" name="nonce" value="${escapeHtml(found.nonce)}"><button name="decision" value="confirm">Confirm</button><button name="decision" value="decline">Decline</button></form>`}`);
+  }
+
   return async (request: Request, url: URL): Promise<Response | null> => {
     const path = url.pathname;
+    const confirm = /^\/confirm\/([\w-]+)\/?$/.exec(path);
+    if (confirm && config.mode !== "hosted" && (request.method === "GET" || request.method === "POST")) return confirmPage(request, url, confirm[1]!);
     const report = /^\/api\/r\/([\w-]+)\.md$/.exec(path);
     const share = /^\/api\/share\/([\w-]+\.[\w-]+)\.md$/.exec(path);
     if (!path.startsWith("/api/") && !report) return null;

@@ -40,6 +40,8 @@ const pages = [
   { view: "guardrails", title: "Guardrails", nav: "guardrails", path: "guardrails" },
   { view: "plan", title: "Plan and usage", nav: "plan", path: "plan" },
   { view: "data", title: "Your data", nav: "data", path: "data" },
+  // A coding agent's critical request, confirmed from a link, often on a phone: it scales to the screen.
+  { view: "confirm", title: "Confirm", nav: "none", path: "confirm", narrow: true },
 ] as const;
 
 const escape = (text: string): string => text.replace(/[&<>"]/g, (char) => `&#${char.charCodeAt(0)};`);
@@ -60,7 +62,7 @@ const icon = (paths: string): string =>
 // Applied before first paint so a saved Expand-on-hover sidebar does not flash open.
 const initialMode = `<script>try{if(localStorage.getItem("om-sidebar")==="hover")document.documentElement.dataset.sidebar="hover"}catch(e){}</script>`;
 
-function page(title: string, active: string, body: string): string {
+function page(title: string, active: string, body: string, narrow = false): string {
   const current = (id: string): string => (id === active ? ' aria-current="page"' : "");
   const links = nav.map((item) => `<a class="nav-item${"hidden" in item ? " nav-action" : ""}" href="${item.href}" title="${item.label}"${current(item.id)}${"hidden" in item && item.id !== active ? " hidden" : ""}>${icon(item.icon)}<span class="label">${item.label}</span>${"hidden" in item ? '<span class="count" aria-label="waiting"></span>' : ""}</a>`).join("\n        ");
   const menuLinks = accountPages.map((item) => `<a role="menuitem" href="${item.href}"${current(item.id)}>${icon(item.icon)}${item.label}</a>`).join("\n            ");
@@ -69,7 +71,7 @@ function page(title: string, active: string, body: string): string {
 <html lang="en" data-sidebar="fixed">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=1280">
+  <meta name="viewport" content="${narrow ? "width=device-width, initial-scale=1" : "width=1280"}">
   <meta name="color-scheme" content="light dark">
   <meta name="robots" content="noindex">
   <title>${title} · OpenMerit</title>
@@ -135,10 +137,11 @@ const notFound = `        <h1 class="title">Page not found</h1>
 
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
-for (const { view, title, nav, path } of pages) {
+for (const item of pages) {
+  const { view, title, nav, path } = item;
   const target = join(out, path, "index.html");
   mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, page(title, nav, loading(view, title)));
+  writeFileSync(target, page(title, nav, loading(view, title), "narrow" in item));
 }
 writeFileSync(join(out, "404.html"), page("Not found", "none", notFound));
 cpSync(join(source, "assets"), join(out, "assets"), { recursive: true });

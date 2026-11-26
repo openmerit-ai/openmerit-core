@@ -7,6 +7,7 @@ import { html, setLogos, type Html } from "./html.ts";
 import { startLive, stopLive } from "./live.ts";
 import { mount, type Account, type ConfirmOptions, type Ctx, type Mounted } from "./view.ts";
 import { accountView } from "./views/account.ts";
+import { confirmView } from "./views/confirm.ts";
 import { install } from "./views/common.ts";
 import { connectionsView } from "./views/connections.ts";
 import { dataView } from "./views/data.ts";
@@ -23,7 +24,7 @@ setLogos(__LOGOS__);
 
 const views: Record<string, (ctx: Ctx) => Promise<Mounted>> = {
   runs: mount(runsView), run: mount(runView), tasks: mount(tasksView), evals: mount(evalsView), connections: mount(connectionsView),
-  guardrails: mount(guardrailsView), plan: mount(planView), data: mount(dataView), project: mount(projectView), account: mount(accountView),
+  guardrails: mount(guardrailsView), plan: mount(planView), data: mount(dataView), project: mount(projectView), account: mount(accountView), confirm: mount(confirmView),
 };
 
 const root = document.querySelector<HTMLElement>("#view");
@@ -80,7 +81,7 @@ function confirmDialog(options: ConfirmOptions): Promise<boolean | "alternative"
   return new Promise((resolve) => dialog.addEventListener("close", () => { resolve(dialog.returnValue === "alternative" ? "alternative" : dialog.returnValue === "ok"); dialog.remove(); }));
 }
 
-// A deletion needs a sign-in in the last 10 minutes. Clerk's prompt checks a password, code or
+// A critical action (deleting, an endpoint, disconnecting, confirming a budget) needs a sign-in in the last 10 minutes. Clerk's prompt checks a password, code or
 // passkey; an account that signs in only with Google has none, so it signs in again instead, and
 // the fresh sign-in counts. The user then repeats the action.
 async function reverify(level: string | undefined): Promise<boolean> {
@@ -91,7 +92,7 @@ async function reverify(level: string | undefined): Promise<boolean> {
   }
   const ok = await confirmDialog({
     title: "Sign in again to continue",
-    body: "Deleting needs a sign-in from the last 10 minutes. Sign in again with Google, then repeat the delete.",
+    body: "This needs a sign-in from the last 10 minutes. Sign in again the way you usually do, then repeat it.",
     confirm: "Sign in again",
   });
   if (ok) await clerk?.signOut({ redirectUrl: location.href });

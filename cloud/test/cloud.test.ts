@@ -66,7 +66,7 @@ describe("the cloud app", () => {
     const init = await signedIn.rpc("initialize", { protocolVersion: "2025-06-18" });
     assert.equal(init.body.result?.protocolVersion, "2025-06-18");
     const tools = await signedIn.rpc("tools/list");
-    assert.deepEqual(tools.body.result?.tools?.map(tool => tool.name), ["openmerit_recommend", "openmerit_result", "openmerit_answer", "openmerit_tasks", "openmerit_eval", "openmerit_retire"]);
+    assert.deepEqual(tools.body.result?.tools?.map(tool => tool.name), ["openmerit_recommend", "openmerit_result", "openmerit_answer", "openmerit_confirmation", "openmerit_tasks", "openmerit_eval", "openmerit_retire"]);
 
     const noOrganization = await caller(app, "test:user_b").tool("openmerit_tasks", {});
     assert.equal(noOrganization.isError, true);
@@ -326,9 +326,23 @@ test("the coding agent sends back the user's decision on a result's change: an a
     const decide = (jobId: string, answers: Record<string, unknown>) => agent().tool("openmerit_answer", { job_id: jobId, answers });
     assert.equal((await decide(kept, { configure_ticket_classifier: "yes" })).isError, true, "a decision is true or false");
 
+    // The agent relays the decision; it takes effect once the user confirms it in the app, as them.
+    const confirm = async (held: { data: Record<string, unknown> }, answer = true) => {
+      const id = (held.data.confirmation as { id: string }).id;
+      return { id, ...await caller(app, "test:user_d:org_decide:admin").api<{ status: string; result: { status: number } | null }>(`/api/confirmations/${id}`, { method: "POST", body: JSON.stringify({ confirm: answer }) }) };
+    };
     const approved = await decide(kept, { configure_ticket_classifier: true });
-    assert.equal(approved.isError, false, approved.text);
-    assert.match(approved.text, new RegExp(`Decision: openai/gpt-5\\.4 → ${pick.replaceAll(".", "\\.")} \\(openrouter\\), approved by User D on \\d{4}-\\d{2}-\\d{2}\\.`));
+    assert.equal(approved.data.status, "needs_confirmation", approved.text);
+    assert.match(approved.text, /https:\/\/app\.openmerit\.test\/confirm\/\?id=[\w-]+/);
+    assert.equal((await agent().tool("openmerit_tasks", {})).text.includes("switched"), false, "nothing changes before the user confirms");
+    const pending = (approved.data.confirmation as { id: string }).id;
+    const shown = await agent().api<{ title: string; items: string[]; status: string }>(`/api/confirmations/${pending}`);
+    assert.deepEqual([shown.body.title, shown.body.status, shown.body.items[0]], ["Approve the switch for ticket classifier", "pending", `openai/gpt-5.4 → ${pick} (openrouter)`]);
+    const confirmed = await confirm(approved);
+    assert.deepEqual([confirmed.status, confirmed.body.status], [200, "done"], JSON.stringify(confirmed.body));
+    assert.equal((await confirm(approved)).status, 409, "a confirmation runs once");
+    assert.match((await agent().tool("openmerit_confirmation", { confirmation_id: confirmed.id })).text, /^The user confirmed Approve the switch for ticket classifier, and it is done\./);
+    assert.match((await result(kept)).text, new RegExp(`Decision: openai/gpt-5\\.4 → ${pick.replaceAll(".", "\\.")} \\(openrouter\\), approved by User D on \\d{4}-\\d{2}-\\d{2}\\.`));
     // The first decision stands.
     const again = await decide(kept, { configure_ticket_classifier: false });
     assert.equal(again.isError, true);
@@ -338,7 +352,9 @@ test("the coding agent sends back the user's decision on a result's change: an a
     assert.deepEqual([run.body.decision.decision, run.body.decision.by, run.body.decision.name], ["approved", "user_d", "User D"]);
 
     assert.equal((other.data.result as Result).status, "picked", other.text);
-    assert.equal((await decide(dropped, { configure_reply_router: false })).isError, false);
+    const declined = await decide(dropped, { configure_reply_router: false });
+    assert.equal(declined.isError, false, declined.text);
+    assert.equal((await confirm(declined)).body.status, "done");
 
     // The approved task now runs the pick, and its code ref has the edited literal; the declined one is unchanged.
     type TaskRow = { id: string; name: string; currentModel: string; decision: { decision: string } | null };
@@ -630,11 +646,20 @@ test("a job its budget stops offers to raise the budget, and the rerun it asks f
 
     await agent.api("/api/guardrails", { method: "PUT", body: JSON.stringify({ level: "task", id: taskId, settings: { minPassRate: 0.5 } }) });
     assert.equal((await agent.tool("openmerit_recommend", { job_id: jobId, bundle: bundle("rerun classifier", false) })).isError, true, "a rerun takes no bundle");
+    // A higher budget spends more: the user confirms it, after verifying their sign-in, and the run starts then.
     const rerun = await agent.tool("openmerit_recommend", { job_id: jobId, budget_usd: raise.budgetUsd });
-    assert.equal(rerun.isError, false, rerun.text);
+    assert.equal(rerun.data.status, "needs_confirmation", rerun.text);
+    const held = (rerun.data.confirmation as { id: string }).id;
+    const confirmAs = (token: string) => caller(app, token).api<{ status: string; result: { body: { jobId: string } } }>(`/api/confirmations/${held}`, { method: "POST", body: JSON.stringify({ confirm: true }) });
+    assert.equal((await confirmAs("test:user_u:org_rerun:admin:30")).status, 403, "a stale sign-in verifies first");
+    assert.equal((await caller(app, "test:user_x:org_other:admin").api(`/api/confirmations/${held}`)).status, 404, "another organization cannot see it");
+    const confirmed = await confirmAs("test:user_u:org_rerun:admin");
+    assert.equal(confirmed.body.status, "done", JSON.stringify(confirmed.body));
+    const rerunJob = confirmed.body.result.body.jobId;
+    assert.match((await agent.tool("openmerit_confirmation", { confirmation_id: held })).text, new RegExp(`started job ${rerunJob}`));
     const task = (await agent.api<{ settings: { key: string; value: unknown }[] }>(`/api/guardrails?level=task&id=${taskId}`)).body;
     assert.deepEqual(Object.fromEntries(task.settings.map(item => [item.key, item.value])), { minPassRate: 0.5, budgetUsd: 1 }, "the budget is raised and the task's other settings kept");
-    const done = await settle(rerun.data.job_id as string);
+    const done = await settle(rerunJob);
     assert.equal(done.data.status, "done", done.text);
     assert.equal((done.data.result as Result).status, "picked");
 
@@ -842,8 +867,24 @@ test("a self-hosted server starts a job without a plan, and its Stripe settings 
   const models = await fakeModels();
   const app = await startApp({ models, env: { ...CLERK, OPENMERIT_MODE: "self-hosted", STRIPE_SECRET_KEY: "sk_test", STRIPE_WEBHOOK_SECRET: "whsec_test", STRIPE_PRICE_ID: "price_test" } });
   try {
-    const agent = caller(app, "test:user_s:org_self:admin");
+    const agent = caller(app, "test:local:local:admin");
     assert.equal((await agent.api<{ mode: string }>("/api/me")).body.mode, "self-hosted");
+    // The server's one token is also the coding agent's: a critical /api request waits for the server's own confirm page.
+    const held = await agent.api<{ status: string; confirmation: { id: string; url: string } }>("/api/guardrails", { method: "PUT", body: JSON.stringify({ level: "environment", id: "acme/support", settings: { budgetUsd: 3 } }) });
+    assert.deepEqual([held.status, held.body.status], [202, "needs_confirmation"]);
+    const { id } = held.body.confirmation;
+    assert.equal(held.body.confirmation.url, `https://openmerit.test/confirm/${id}`);
+    assert.equal((await agent.api(`/api/confirmations/${id}`, { method: "POST", body: JSON.stringify({ confirm: true }) })).status, 403, "the token cannot confirm");
+    const budget = async () => (await agent.api<{ settings: { key: string; value: unknown }[] }>("/api/guardrails?level=environment&id=acme/support")).body.settings;
+    assert.deepEqual(await budget(), []);
+    const shown = await (await fetch(`${app.url}/confirm/${id}`)).text();
+    assert.match(shown, /Change spending limits for acme\/support[^]*Budget per job: \$3/);
+    const nonce = /name="nonce" value="([\w-]+)"/.exec(shown)![1]!;
+    const post = (form: Record<string, string>, origin?: string) => fetch(`${app.url}/confirm/${id}`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", ...(origin ? { origin } : {}) }, body: new URLSearchParams(form).toString() });
+    assert.equal((await post({ nonce: "wrong", decision: "confirm" })).status, 403);
+    assert.equal((await post({ nonce, decision: "confirm" }, "https://elsewhere.test")).status, 403, "another site cannot post the form");
+    assert.match(await (await post({ nonce, decision: "confirm" })).text(), /<b>Done\.<\/b>/);
+    assert.deepEqual(await budget(), [{ key: "budgetUsd", value: 3, kind: "default" }]);
     const started = await agent.tool("openmerit_recommend", { bundle: bundle(), environment: "acme/support" });
     assert.equal(started.isError, false, started.text);
     await waitFor(() => agent.tool("openmerit_result", { job_id: started.data.job_id }), value => value.data.status === "needs_input");
