@@ -62,6 +62,11 @@ const SCHEMA = [
   // The version the coding agent last wrote to the repository's .openmerit/evals/.
   `CREATE TABLE IF NOT EXISTS eval_sync (task_id TEXT PRIMARY KEY, version INTEGER NOT NULL, synced_by TEXT NOT NULL, client TEXT, synced_at INTEGER NOT NULL)`,
   // Evals a repository review wrote, waiting for a person to approve (which creates the task) or dismiss them.
+  // Critical requests a coding agent made, waiting for a person to confirm them (api.ts). body is the request's JSON, sealed with the
+  // key-encryption key when the server has one, since an endpoint's key can be in it; it is cleared once the request ran.
+  `CREATE TABLE IF NOT EXISTS confirmations (id TEXT PRIMARY KEY, nonce TEXT NOT NULL, project_id TEXT NOT NULL, method TEXT NOT NULL, path TEXT NOT NULL, body TEXT NOT NULL,
+    checks TEXT NOT NULL, title TEXT NOT NULL, items TEXT NOT NULL, requested_by TEXT NOT NULL, requested_via TEXT, status TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+    decided_by TEXT, decided_at INTEGER, result TEXT)`,
   `CREATE TABLE IF NOT EXISTS eval_drafts (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, repo_id TEXT, environment TEXT NOT NULL, name TEXT NOT NULL, bundle TEXT NOT NULL,
     cases TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL, decided_by TEXT, decided_at INTEGER, task_id TEXT)`,
 ];
@@ -135,7 +140,28 @@ export interface RepoView {
 }
 export type Started = { ok: true } | { ok: false; error: string };
 
+/**
+ * A critical request a coding agent made, which runs only once a person confirms it. checks is what the
+ * person must show: `person`, a signed-in person, or `reverify`, one who verified their sign-in in the last
+ * 10 minutes (hosted). result is the request's answer once it ran: `done` when it succeeded, `failed` when not.
+ */
+export type ConfirmationStatus = "pending" | "confirming" | "done" | "failed" | "declined" | "expired";
+export interface ConfirmationView {
+  id: string; projectId: string; method: string; path: string; checks: "person" | "reverify"; title: string; items: string[];
+  requestedBy: string; requestedVia: string | null; status: ConfirmationStatus; createdAt: string; expiresAt: string; decidedBy: string | null; decidedAt: string | null;
+  result: { status: number; body: unknown } | null;
+}
+/** How long a confirmation waits for a person. */
+export const CONFIRM_HOURS = 24;
+
 const iso = (ms: unknown) => (typeof ms === "number" ? new Date(ms).toISOString() : null);
+const confirmationRow = (row: Row): ConfirmationView => ({
+  id: String(row.id), projectId: String(row.project_id), method: String(row.method), path: String(row.path), checks: row.checks === "reverify" ? "reverify" : "person",
+  title: String(row.title), items: JSON.parse(String(row.items)) as string[], requestedBy: String(row.requested_by), requestedVia: (row.requested_via as string | null) ?? null,
+  status: row.status === "pending" && Number(row.expires_at) <= Date.now() ? "expired" : String(row.status) as ConfirmationStatus,
+  createdAt: iso(row.created_at)!, expiresAt: iso(row.expires_at)!, decidedBy: (row.decided_by as string | null) ?? null, decidedAt: iso(row.decided_at),
+  result: row.result ? JSON.parse(String(row.result)) as { status: number; body: unknown } : null,
+});
 const startOfMonth = (now: number) => { const date = new Date(now); return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1); };
 const scopeKey = (level: Level, input: { environment: string; agent?: string | null; taskId?: string }) =>
   level === "environment" ? input.environment : level === "agent" ? `${input.environment}:${input.agent ?? ""}` : input.taskId ?? "";
@@ -625,6 +651,37 @@ export const account = actor({
     /** Refuses MCP access tokens issued before now. */
     disconnect: async (c): Promise<void> => {
       await c.db.execute(`INSERT INTO account (id, mcp_revoked_before) VALUES (1, ?) ON CONFLICT (id) DO UPDATE SET mcp_revoked_before = excluded.mcp_revoked_before`, Math.floor(Date.now() / 1000));
+    },
+
+    /** Saves a coding agent's critical request until a person confirms or declines it. */
+    requestConfirmation: async (c, input: { projectId: string; method: string; path: string; body: string; checks: "person" | "reverify"; title: string; items: string[]; requestedBy: string; requestedVia: string | null }): Promise<ConfirmationView> => {
+      const id = randomBytes(18).toString("base64url"), now = Date.now(), key = services().config.keyEncryptionKey;
+      const body = key && input.body ? `sealed:${encryptKey(key, c.key[0]!, input.body)}` : input.body;
+      await c.db.execute(`INSERT INTO confirmations (id, nonce, project_id, method, path, body, checks, title, items, requested_by, requested_via, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+        id, randomBytes(18).toString("base64url"), input.projectId, input.method, input.path, body, input.checks, input.title, JSON.stringify(input.items), input.requestedBy, input.requestedVia, now, now + CONFIRM_HOURS * 3600_000);
+      const [row] = await c.db.execute(`SELECT * FROM confirmations WHERE id = ?`, id);
+      return confirmationRow(row!);
+    },
+    /** A confirmation, with the nonce the self-hosted confirm page's form sends back. */
+    confirmation: async (c, id: string): Promise<(ConfirmationView & { nonce: string }) | null> => {
+      const [row] = await c.db.execute(`SELECT * FROM confirmations WHERE id = ?`, id);
+      return row ? { ...confirmationRow(row), nonce: String(row.nonce) } : null;
+    },
+    /** Moves a pending confirmation to confirming or declined, once; for a confirmation, returns the request to run, with its body unsealed. */
+    decideConfirmation: async (c, input: { id: string; confirm: boolean; by: string }): Promise<{ ok: true; view: ConfirmationView; body: string } | { ok: false; view: ConfirmationView | null }> => {
+      const [row] = await c.db.execute(`UPDATE confirmations SET status = ?, decided_by = ?, decided_at = ? WHERE id = ? AND status = 'pending' AND expires_at > ? RETURNING *`,
+        input.confirm ? "confirming" : "declined", input.by, Date.now(), input.id, Date.now());
+      if (!row) {
+        const [found] = await c.db.execute(`SELECT * FROM confirmations WHERE id = ?`, input.id);
+        return { ok: false, view: found ? confirmationRow(found) : null };
+      }
+      const sealed = String(row.body), key = services().config.keyEncryptionKey;
+      return { ok: true, view: confirmationRow(row), body: sealed.startsWith("sealed:") && key ? decryptKey(key, c.key[0]!, sealed.slice(7)) : sealed };
+    },
+    /** Records a confirmed request's answer and forgets its body. */
+    finishConfirmation: async (c, input: { id: string; result: { status: number; body: unknown } }): Promise<ConfirmationView> => {
+      const [row] = await c.db.execute(`UPDATE confirmations SET status = ?, result = ?, body = '' WHERE id = ? RETURNING *`, input.result.status < 400 ? "done" : "failed", JSON.stringify(input.result), input.id);
+      return confirmationRow(row!);
     },
 
     /** Records the user's decision on a job's change, as the coding agent sent it; the first decision stands. */

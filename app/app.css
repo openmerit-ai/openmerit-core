@@ -330,3 +330,11 @@ fieldset.grade legend { font-weight: 600; padding: 0; float: left; width: 100%; 
 .grade-choice input { accent-color: var(--green); width: auto; padding: 0; margin: 0; }
 .grade-choice label { white-space: nowrap; }
 .grade-note { display: grid; gap: 2px; }
+
+/* A coding agent's request to confirm: one column that fits a phone. */
+.confirm-page { width: 100%; max-width: 560px; min-width: 0; display: grid; gap: 14px; }
+.confirm-page .title { overflow-wrap: anywhere; }
+.confirm-items { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--prose); overflow-wrap: anywhere; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.confirm-actions .btn { min-height: 44px; padding-inline: 20px; }
+@media (max-width: 600px) { body.standalone main { padding: 6vh 16px 24px; } .confirm-actions .btn { flex: 1; } }

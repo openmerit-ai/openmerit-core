@@ -11,7 +11,7 @@ import type { AppClient } from "./registry.ts";
 import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 import { bundleProblem, DEFAULT_ENVIRONMENT, rerunJob, runTask, startJob } from "./start.ts";
 import { evalDir, type Decision } from "./actors/account.ts";
-import { OPENROUTER } from "../../openmerit-core/src/job/pool.ts";
+import { heldReply } from "./api.ts";
 import { estimateLine } from "../../openmerit-core/src/job/workflow.ts";
 
 export const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
@@ -51,7 +51,7 @@ const BUNDLE_SCHEMA = {
 export const TOOLS = [
   {
     name: "openmerit_recommend", title: "OpenMerit: recommend a model",
-    description: "Starts measuring cheaper models for one model call in the user's code. Send an idempotency_key, and the same one on a retry, so a retried call does not start a second paid job. Send a task bundle: the task, the current model, the prompt, tools, output shape, examples and where the code names the model. Or, to run a past job's task again on the bundle OpenMerit saved, as a result's Fix line says, send its job_id instead, with budget_usd to raise the task's budget per job first. Returns a provisional pick from the catalogue at once, and a job_id; call openmerit_result with it later for the measured pick. A task whose prompt, tools or output changed since its eval was accepted is refused until the user reviews the eval in the app; tell them. Measuring makes paid model calls within the account's plan and budget: ask the user before a rerun or a higher budget.",
+    description: "Starts measuring cheaper models for one model call in the user's code. Send an idempotency_key, and the same one on a retry, so a retried call does not start a second paid job. Send a task bundle: the task, the current model, the prompt, tools, output shape, examples and where the code names the model. Or, to run a past job's task again on the bundle OpenMerit saved, as a result's Fix line says, send its job_id instead, with budget_usd to raise the task's budget per job first. Returns a provisional pick from the catalogue at once, and a job_id; call openmerit_result with it later for the measured pick. A task whose prompt, tools or output changed since its eval was accepted is refused until the user reviews the eval in the app; tell them. Measuring makes paid model calls within the account's plan and budget: ask the user before a rerun. A higher budget needs the user's confirmation on a page this tool links to.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       bundle: BUNDLE_SCHEMA, environment: { type: "string", description: "The repository or workspace, such as owner/repo. Default: default" },
       project: { type: "string", description: "The OpenMerit project, by name, when the user names one. Default: the project whose GitHub repository the environment names, else the default project" }, agent: { type: "string", description: "The agent this task belongs to, when the code groups calls into agents" },
@@ -70,9 +70,15 @@ export const TOOLS = [
   },
   {
     name: "openmerit_answer", title: "OpenMerit: answer a job's questions",
-    description: "Sends the user's answers to a job's questions, keyed by question id, such as a label check, or a person's grades of a run's answers (good or bad, with an optional note after a colon; never grade them yourself). After a result, it also takes the user's decision on its change, keyed by the result's approval id (configure_<task>): true once you applied the edit they approved, false when they declined. Returns the job's state, as openmerit_result does.",
+    description: "Sends the user's answers to a job's questions, keyed by question id, such as a label check, or a person's grades of a run's answers (good or bad, with an optional note after a colon; never grade them yourself). After a result, it also takes the user's decision on its change, keyed by the result's approval id (configure_<task>): true once you applied the edit they approved, false when they declined. Grades and decisions take effect once the user confirms them on the page this tool links to; give them the link, then check with openmerit_confirmation. Returns the job's state, as openmerit_result does.",
     inputSchema: { type: "object", required: ["job_id", "answers"], additionalProperties: false, properties: { job_id: string, answers: { type: "object", description: "Answers keyed by question id: strings, string lists, booleans or numbers", additionalProperties: { type: ["string", "array", "boolean", "number"] } } } },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
+  {
+    name: "openmerit_confirmation", title: "OpenMerit: a confirmation's outcome",
+    description: "Whether the user confirmed a critical request another tool held for them (a higher budget, grades, a decision on a switch), and its outcome, such as the job a confirmed run started. You cannot confirm it: only the user can, on the page the holding tool linked to.",
+    inputSchema: { type: "object", required: ["confirmation_id"], additionalProperties: false, properties: { confirmation_id: string } },
+    annotations: { readOnlyHint: true, openWorldHint: false },
   },
   {
     name: "openmerit_tasks", title: "OpenMerit: tasks",
@@ -207,11 +213,31 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
     if (!row) return { text: `No job ${String(jobId)} in this account.`, data: {}, isError: true };
     return client.job.get([row.id]).status();
   };
+  /** Holds a critical request for the user to confirm; it runs, as the /api request it names, once they do. */
+  const hold = async (input: { projectId: string; method: string; path: string; body: Json; checks: "person" | "reverify"; title: string; items: string[] }): Promise<ToolResult> => {
+    const view = await account.requestConfirmation({ ...input, body: JSON.stringify(input.body), requestedBy: identity.userId, requestedVia: askedBy });
+    const reply = heldReply(deps.config, view);
+    return { text: `${reply.text} Then call openmerit_confirmation with confirmation_id "${view.id}" for the outcome.`, data: { status: reply.status, confirmation: reply.confirmation } };
+  };
   if (name === "openmerit_recommend") {
     const unknown = Object.keys(args).filter(key => !["bundle", "environment", "agent", "project", "job_id", "task_id", "budget_usd", "idempotency_key"].includes(key));
     if (unknown.length) return { text: `Unknown argument ${unknown.join(", ")}. No tool takes keys: the user adds endpoint keys at ${deps.config.appUrl}.`, data: {}, isError: true };
     if (args.idempotency_key !== undefined && (typeof args.idempotency_key !== "string" || !args.idempotency_key.trim() || args.idempotency_key.length > 200)) return { text: "idempotency_key must be a non-empty string of at most 200 characters.", data: {}, isError: true };
     const key = typeof args.idempotency_key === "string" ? args.idempotency_key.trim() : null;
+    // A higher budget spends more of the user's money: the user confirms it, and the run starts then.
+    if (args.budget_usd !== undefined && (args.job_id !== undefined || args.task_id !== undefined)) {
+      if (typeof args.budget_usd !== "number" || !Number.isFinite(args.budget_usd) || args.budget_usd <= 0) return { text: "budget_usd must be a positive number of US dollars.", data: {}, isError: true };
+      const viaTask = args.task_id !== undefined;
+      if (viaTask && (args.bundle !== undefined || args.job_id !== undefined || args.environment !== undefined || args.agent !== undefined || args.project !== undefined)) return { text: "Send task_id on its own: the task keeps its project, environment, agent and bundle.", data: {}, isError: true };
+      if (!viaTask && (args.bundle !== undefined || args.environment !== undefined || args.agent !== undefined || args.project !== undefined)) return { text: "Send either a bundle, or the job_id of a past job to run its task again, not both: a rerun keeps the job's project, environment and agent.", data: {}, isError: true };
+      const job = viaTask ? null : await account.job(String(args.job_id));
+      const task = await account.task(viaTask ? String(args.task_id) : job?.taskId ?? "");
+      if (!task) return { text: viaTask ? `No task ${String(args.task_id)} in this account.` : `No run ${String(args.job_id)} in this account.`, data: {}, isError: true };
+      return hold({
+        projectId: task.projectId, method: "POST", path: viaTask ? `/api/tasks/${task.id}/run` : `/api/runs/${job!.id}/rerun`, body: { budgetUsd: args.budget_usd }, checks: "reverify",
+        title: `Run ${task.name} ${viaTask ? "" : "again "}with a budget of $${args.budget_usd} per job`, items: [`Raises the task's budget per job to $${args.budget_usd}, then starts a paid run`],
+      });
+    }
     if (key) {
       const claim = await account.claimRecommendKey(key);
       if (!claim.claimed) {
@@ -270,8 +296,15 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
     if (!answers || typeof answers !== "object" || Array.isArray(answers)) return { text: "answers must be an object keyed by question id.", data: {}, isError: true };
     // The user's decision on a finished result's change: recorded once, and an approval moves the task onto the pick.
     const approval = view.result?.approval;
-    if (approval && Object.hasOwn(answers, approval.id)) return decide(deps, identity, view, answers as Answers);
+    if (approval && Object.hasOwn(answers, approval.id)) return decide(view, (answers as Answers)[approval.id], { decision: await account.decision(view.jobId), projectId: (await account.job(view.jobId))!.projectId }, hold);
     if (!view.questions.length) return { text: `Job ${view.jobId} has no open questions.\n${describeJob(view, await account.decision(view.jobId))}`, data: jobData(view) };
+    // Grades are the user's judgment of the answers: they confirm the grades you relay.
+    const grades = view.questions.filter(question => question.id.startsWith("grade_") && Object.hasOwn(answers, question.id));
+    if (grades.length) {
+      const row = await account.job(view.jobId);
+      return hold({ projectId: row!.projectId, method: "POST", path: `/api/runs/${view.jobId}/answers`, body: { answers }, checks: "person", title: `Grades for ${view.task}`,
+        items: grades.map(question => `${question.prompt.replace(/: does it look right\?$/, "")}: ${String((answers as Answers)[question.id])}`) });
+    }
     const handle = client.job.get([view.jobId]);
     await handle.send("answers", { answers: answers as Answers, by: identity.userId });
     // The job applies the answers in a moment; return the state once it has, or as it stands after a few seconds.
@@ -282,6 +315,20 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
       if (next.updatedAt !== view.updatedAt) break;
     }
     return { text: describeJob(next), data: jobData(next) };
+  }
+  if (name === "openmerit_confirmation") {
+    const found = typeof args.confirmation_id === "string" ? await account.confirmation(args.confirmation_id) : null;
+    if (!found) return { text: `No confirmation ${String(args.confirmation_id)} in this account.`, data: {}, isError: true };
+    const { nonce: _nonce, ...view } = found;
+    const answer = (view.result?.body ?? {}) as Json;
+    const started = typeof answer.jobId === "string" ? ` It started job ${answer.jobId}: call openmerit_result with job_id "${answer.jobId}".` : "";
+    const text = view.status === "pending" ? `Waiting for the user to confirm ${view.title} at ${heldReply(deps.config, view).confirmation.url}.`
+      : view.status === "expired" ? `${view.title}: the user did not confirm it in time. Ask them, then make the request again.`
+      : view.status === "declined" ? `The user declined: ${view.title}.`
+      : view.status === "confirming" ? `The user confirmed ${view.title}; it is running.`
+      : view.status === "done" ? `The user confirmed ${view.title}, and it is done.${started}`
+      : `The user confirmed ${view.title}, but it failed: ${typeof answer.error === "string" ? answer.error : `status ${view.result?.status}`}.`;
+    return { text, data: { confirmation: view }, ...(view.status === "failed" ? { isError: true } : {}) };
   }
   if (name === "openmerit_tasks") {
     const [tasks, ready, decisions, projects, heads] = await Promise.all([account.tasks(), account.readySince(identity.userId), account.taskDecisions(), account.projects(), account.evalHeads()]);
@@ -344,22 +391,17 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
 }
 
 /**
- * Records the user's decision on a finished job's change, which the coding agent sends after asking
- * the result's approval question. The first decision stands. An approval means the agent applied the
- * edit, so the task's later runs measure the pick as its current model.
+ * The user's decision on a finished job's change, which the coding agent relays after asking the result's
+ * approval question. The user confirms it; an approval means the agent applied the edit, so the task's
+ * later runs measure the pick as its current model.
  */
-async function decide(deps: McpDeps, identity: Identity, view: JobView, answers: Answers): Promise<ToolResult> {
+async function decide(view: JobView, value: unknown, known: { decision: Decision | null; projectId: string }, hold: (input: { projectId: string; method: string; path: string; body: Json; checks: "person" | "reverify"; title: string; items: string[] }) => Promise<ToolResult>): Promise<ToolResult> {
   const result = view.result!, approval = result.approval!, pick = result.pick;
-  const value = answers[approval.id];
   if (typeof value !== "boolean") return { text: `${approval.id} takes true (the user approved and you applied the edit) or false (they declined).`, data: {}, isError: true };
   if (!pick) return { text: `Job ${view.jobId} proposes no change to decide on.`, data: jobData(view), isError: true };
-  const account = deps.client.account.getOrCreate([identity.accountId]);
-  const person = await deps.auth?.person(identity.userId).catch(() => null) ?? null;
-  const change = `${result.baseline?.model ?? view.task} → ${pick.model} (${pick.endpoint})`;
-  const { recorded, decision } = await account.decide({ jobId: view.jobId, taskId: view.taskId, decision: value ? "approved" : "declined", change, by: identity.userId, name: person?.name ?? null, email: person?.email ?? null });
-  if (!recorded) return { text: `The decision on job ${view.jobId} was already recorded. ${decisionLine(decision)}`, data: jobData(view, decision), isError: true };
-  if (decision.decision === "approved") await deps.client.task.get([identity.accountId, view.taskId]).adopt({ model: pick.endpoint === OPENROUTER ? pick.model : pick.endpointModel, endpoint: pick.endpoint === OPENROUTER ? null : pick.endpoint, edits: result.edit.edits });
-  return { text: `Recorded. ${decisionLine(decision)}${decision.decision === "approved" ? ` OpenMerit now watches ${view.task} on ${pick.model}.` : ""}`, data: jobData(view, decision) };
+  if (known.decision) return { text: `The decision on job ${view.jobId} was already recorded. ${decisionLine(known.decision)}`, data: jobData(view, known.decision), isError: true };
+  return hold({ projectId: known.projectId, method: "POST", path: `/api/runs/${view.jobId}/decision`, body: { approved: value }, checks: "person",
+    title: `${value ? "Approve" : "Decline"} the switch for ${view.task}`, items: [`${result.baseline?.model ?? view.task} → ${pick.model} (${pick.endpoint})`, ...result.edit.edits.map(edit => `${edit.file}:${edit.line}: ${edit.before} → ${edit.after}`)] });
 }
 
 /** /mcp. A missing or invalid token gets 401 with the protected-resource metadata, which starts the client's Clerk sign-in. */

@@ -281,7 +281,7 @@ export interface Api {
   send<T>(method: "POST" | "PUT" | "DELETE", path: string, body?: unknown): Promise<T>;
 }
 
-// Deleting needs a recent sign-in. The cloud app answers 403 with Clerk's reverification hint;
+// A critical action needs a recent sign-in. The cloud app answers 403 with Clerk's reverification hint;
 // reverify opens Clerk's prompt and resolves true once the user verified, and the call is retried once.
 export type Reverify = (level: string | undefined) => Promise<boolean>;
 interface ReverificationHint { clerk_error: { reason: "reverification-error"; metadata?: { reverification?: { level?: string } } } }

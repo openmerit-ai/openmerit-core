@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Critical actions need a person's confirmation.** In the cloud app, a coding agent's higher budget, grades and decision on a switch no longer take effect when it sends them: the MCP tools answer `needs_confirmation` with a link, and the user confirms on a page that fits a phone and names the organization (hosted: app.openmerit.ai, verifying a recent sign-in for a budget; self-hosted: the server's own page). The new `openmerit_confirmation` tool reports the outcome. A self-hosted server also holds endpoint keys, deletes, spending limits and disconnecting for its confirm page, since its token is the coding agent's too. Hosted, adding or removing an endpoint and disconnecting coding agents now need a recent sign-in, as deleting does.
 - A case the judge's provider refuses to grade (a content filter, as a `rm -rf` guardrail case did in testing) is left out for every model in the run, the current one included, with a notice, instead of failing the candidate whose answer reached it. Scout and the cloud app both.
 - The label check shows each written case's input and expected answer in full; it cut them at about 100 characters, so people unticked cases they could not read.
 - In Scout, a run on an accepted eval says it runs version N of the eval you accepted, with no review or grading, instead of describing a new eval to accept; it no longer shows "pass rate ≥ null"; a run paused mid-search no longer says it "stopped before screening"; and the comparison no longer gives a count of eval runs that left out screens.

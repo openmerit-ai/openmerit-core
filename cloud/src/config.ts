@@ -173,3 +173,7 @@ export function loadConfig(env: Env = process.env): Config {
     posthog: mode === "hosted" && env.POSTHOG_PROJECT_TOKEN ? { token: env.POSTHOG_PROJECT_TOKEN, host: (env.POSTHOG_HOST || "https://us.i.posthog.com").replace(/\/$/, "") } : null,
   };
 }
+
+/** Where a person confirms a coding agent's critical request: the web app when hosted, the server's own page when self-hosted. */
+export const confirmUrl = (config: Pick<Config, "mode" | "appUrl" | "publicUrl">, id: string): string =>
+  config.mode === "hosted" ? `${config.appUrl}/confirm/?id=${encodeURIComponent(id)}` : `${config.publicUrl}/confirm/${encodeURIComponent(id)}`;
