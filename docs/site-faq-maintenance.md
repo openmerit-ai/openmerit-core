@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Comparison with routers and gateways — unreleased, 26 November 2026
+
+Added `/vs-routers/`, a public page comparing OpenMerit with LLM routers and gateways, and linked the homepage's existing "not a router" to it. Its claims about OpenMerit follow the released CLI as `openmerit-core/README.md` describes it: one model per task checked against an eval written from the code, outside the request path, a switch proposed only after approval and only at a 10% saving per call, qualification losing no case the current model always passes, and the cloud app reached through `openmerit.ai/mcp`. It names no plan, price or licence. Its claims about OpenRouter's Auto Router and Not Diamond link to those products' own docs, read on 26 November 2026; recheck them when the page changes. The homepage has no FAQ block, so nothing else changed.
+
 ## Real-use test fixes, first stage — npm 0.5.0 release preparation, 26 November 2026
 
 Reviewed the homepage against the 0.5.0 changes: the screening, paired-qualification, 10% saving and cost-estimate entries below, the judge reading tool results, the eval budget's capped estimates and aborted calls, and the cloud app's share links, overage billing, idempotent `openmerit_recommend` and removed Claude sign-in. `site/index.html` makes no claim about any of these. No homepage copy change. Its "400+ models" and fallback claims are still open in the fix plan's second stage.

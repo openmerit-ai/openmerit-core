@@ -1,5 +1,5 @@
 // Keep the public boundary identical at the domain router and the web Worker:
-// the landing page, the playground walkthrough and the Clerk sign-in.
+// the landing page, the playground walkthrough, the comparison page and the Clerk sign-in.
 const sharedAssets = new Set([
   '/',
   '/favicon.svg',
@@ -7,6 +7,9 @@ const sharedAssets = new Set([
   // A shareable walkthrough of the Sahra Health playground; nothing else under /playground.
   '/playground/scout',
   '/playground/scout/',
+  // The comparison with routers and gateways.
+  '/vs-routers',
+  '/vs-routers/',
 ]);
 
 export function publicSiteResponse(request: Request): Response | null {

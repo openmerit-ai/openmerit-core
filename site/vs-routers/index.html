@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="LLM routers and gateways pick a model on every request, inside your live request path. OpenMerit picks one model per task ahead of time, checked against an eval written from your code, and stays out of the request path.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f8f7f4" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#171915" media="(prefers-color-scheme: dark)">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="OpenMerit vs LLM routers and gateways">
+  <meta property="og:description" content="Routers pick a model on every request. OpenMerit picks one per task ahead of time, against an eval written from your code, and never sits in your request path.">
+  <meta property="og:url" content="https://openmerit.ai/vs-routers/">
+  <meta property="og:site_name" content="OpenMerit">
+  <meta property="og:image" content="https://openmerit.ai/assets/openmerit-og-v1.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <title>OpenMerit vs LLM routers and gateways · OpenMerit</title>
+  <link rel="canonical" href="https://openmerit.ai/vs-routers/">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="preload" href="/assets/geist-sans.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/styles.css?v=20261126-compare-v1">
+</head>
+<body class="landing-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="letter-header">
+    <a class="brand" href="/" aria-label="OpenMerit home">
+      <svg class="brand-mark" viewBox="0 0 28 30" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M3 27V13a11 11 0 0 1 22 0v14M8 27V13a6 6 0 0 1 12 0v14M14 16v11"/></svg>
+      <span>openmerit</span>
+    </a>
+    <nav aria-label="Primary navigation"><a href="/scout/">Scout</a><a href="/memo/">Memo</a></nav>
+  </header>
+  <main id="main" class="letter-main compare-page">
+    <h1>OpenMerit vs LLM routers and gateways</h1>
+    <p class="compare-lede">A router or gateway decides at run time: each request goes through it, and it picks or forwards a model for that request. OpenMerit decides ahead of time. It writes an eval for each model call in your code, tests cheaper models against that eval and proposes changing the model name in your code. Your app keeps calling its provider directly, as it does today.</p>
+
+    <h2 id="differences">How they differ</h2>
+    <div class="compare-table">
+      <table>
+        <thead><tr><th scope="col"><span class="sr-only">Question</span></th><th scope="col">Router or gateway</th><th scope="col">OpenMerit</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Where it runs</th><td>In the live request path, on every call</td><td>Outside it. It runs when you start Scout, not when users call your app</td></tr>
+          <tr><th scope="row">What it decides</th><td>A model, and sometimes a provider or reasoning effort, for each request</td><td>One model per task in your code, checked against an eval for that task</td></tr>
+          <tr><th scope="row">Evidence for the choice</th><td>The request’s content, benchmarks, prices and usage signals</td><td>Your task’s own eval: cases written from your code, plus your repository’s evals when it has them</td></tr>
+          <tr><th scope="row">If it goes down</th><td>Requests that pass through it are affected</td><td>Nothing changes. Your app already calls the chosen model directly</td></tr>
+          <tr><th scope="row">What changes in your app</th><td>The endpoint or model name your app sends requests to</td><td>The model name for one call, after you approve it</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="examples">Named examples</h2>
+    <ul>
+      <li><strong>OpenRouter Auto Router</strong> (<code>openrouter/auto</code>): you send it as the model, and it <a href="https://openrouter.ai/docs/guides/routing/routers/auto-router">picks a model and reasoning effort for each request</a> through OpenRouter. OpenRouter charges no surcharge for the router.</li>
+      <li><strong>Not Diamond</strong>: a router that <a href="https://www.notdiamond.ai/blog/model-routing-vs-gateways-breaking-down-the-difference">returns a model recommendation for each request</a>. Not Diamond Code <a href="https://www.notdiamond.ai/blog/not-diamond-code-intelligent-model-routing-for-coding-agents">runs as a local proxy</a> next to the coding agent and sends derived metadata, not the payload, to its service.</li>
+      <li><strong>Gateways such as LiteLLM, Portkey and Cloudflare AI Gateway</strong>: a single endpoint for access, keys, budgets and failover. You can host some of them yourself.</li>
+    </ul>
+
+    <h2 id="router-fit">When a router is the better fit</h2>
+    <ul>
+      <li><strong>Your traffic is open-ended</strong>, such as a chat product where you can’t predict what users will ask. A per-request router can adapt to each prompt.</li>
+      <li><strong>You want failover between providers</strong> at run time.</li>
+    </ul>
+    <p>OpenMerit fits best when your code makes the same kinds of calls over and over, such as classifying a ticket or drafting a reply. A fixed model checked against an eval is enough for those. The two can work together: OpenMerit can pick the model a gateway serves.</p>
+
+    <h2 id="run">Two ways to run OpenMerit</h2>
+    <ul>
+      <li><strong>On your machine</strong>: <code>npm install -g openmerit</code>. A CLI and MCP server for Claude Code and Codex. You use your own keys, there’s no OpenMerit account, and your code goes only to the model provider you choose.</li>
+      <li><strong>Hosted</strong>: connect your coding agent to <code>openmerit.ai/mcp</code>, and OpenMerit runs the code review and the evals for you.</li>
+    </ul>
+
+    <h2 id="faq">FAQ</h2>
+    <dl class="compare-faq">
+      <dt>Is OpenMerit a router?</dt>
+      <dd>No. It never handles your app’s requests.</dd>
+      <dt>Does it replace my gateway?</dt>
+      <dd>No. Keep your gateway for access, keys and failover. OpenMerit chooses which model your gateway calls.</dd>
+      <dt>How does it know a cheaper model is good enough?</dt>
+      <dd>A candidate qualifies only if it passes at least as many eval runs as your current model and loses no case your current model always passes. A switch also has to cost at least 10% less per call; a smaller saving is within what the measurement can tell apart.</dd>
+    </dl>
+  </main>
+</body>
+</html>

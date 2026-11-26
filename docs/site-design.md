@@ -2,6 +2,10 @@
 
 Domain operations: see the [primary domain migration](site-domain-migration.md) for current routing, email, auth, and deployment constraints. Historical publication records below retain their original domains.
 
+## Routers comparison page — unreleased source, 26 November 2026
+
+`site/vs-routers/index.html` is a static page in the homepage's layout: the same header, `.letter-main` width and serif lede, with `.compare-*` styles in `site/styles.css` for its table and FAQ. The table scrolls sideways under 580px. It loads no client script. `demo/public-site.ts` allows `/vs-routers` and `/vs-routers/` at both the domain router and the web Worker, which redirects the slashless path, and `scripts/build-scout.mjs` packages it. It is indexable, unlike the playground walkthrough, so assistants and search engines can cite it. Local checks do not publish it; deploy `scout-serving` and the domain router through the normal workflow.
+
 ## OpenMerit logo default — unreleased source
 
 The nested-arches mark already used on Scout is the default OpenMerit logo. The homepage, generated documentation and data policy, memo article and access-page templates, retained engineering article and favicon use the same SVG geometry and rounded strokes. Existing wordmarks, page typography, layout and theme colors are unchanged. Generated pages are updated through their generators, not edited directly. This source change does not publish retired routes or deploy the protected memo Worker; that Worker remains blocked until its newer production source is reconciled.

@@ -68,6 +68,7 @@ export default {
     if (unavailable) return unavailable;
     if (path === '/scout') return Response.redirect(`${url.origin}/scout/${url.search}`, 308);
     if (path === '/playground/scout') return Response.redirect(`${url.origin}/playground/scout/${url.search}`, 308);
+    if (path === '/vs-routers') return Response.redirect(`${url.origin}/vs-routers/${url.search}`, 308);
     if (path.startsWith('/scout/api/')) return signInApi(request, env, path);
     return ['GET', 'HEAD'].includes(request.method) ? env.ASSETS.fetch(request) : json({ error: 'Not found.' }, 404);
   },
