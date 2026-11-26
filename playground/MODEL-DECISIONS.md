@@ -2,6 +2,20 @@
 
 Every application model choice goes through Scout first (see `AGENTS.md` and `POLICY.md`). Each entry records the task text, the policy given, what Scout recommended, what we chose, and how residency was handled. Raw Scout responses are in `scout-results/`.
 
+## 26 Nov 2026: claims intake agent, Scout Model Binary Search (published openmerit 0.5.2)
+
+**Task and policy:** the claims intake agent, current model `openrouter/anthropic/claude-sonnet-5.5`, chosen from the six tasks Scout mapped. Policy went in through `.openmerit/config.json`: one OpenRouter endpoint with every model allowed, under the recorded residency gap for fictional data. The run was `run-20261126-133311-db3b` in a standalone copy of this directory.
+
+**Eval:** a 19-case eval Scout wrote from the task's spec, plus the repository's `intake-eval.ts`. The owner delegated grading to the agent, so no person graded it. Version 2, written from those grades, passed Sonnet on 25/63 item runs.
+
+**Scout recommended:** nothing. The search stopped when a timed-out candidate (`openai/gpt-5.4-pro`) was not retried (FINDINGS 0.5.2, finding 1). Meta Muse Wonder, GPT-5.5 and Meta Muse Ember passed their five-item screens but never reached finalist runs.
+
+**Choice:** keep Sonnet 5.5; no change to `src/models.ts`. A 40% baseline on an agent-graded eval is not evidence for any switch.
+
+**Spend:** Scout eval USD 6.78, harness USD 0.93.
+
+**Residency:** every candidate is an OpenRouter route of unverified location, accepted only as the recorded gap for fictional data.
+
 ## 14 Nov 2026: coding review agent, Scout Model Binary Search (published openmerit 0.4.2)
 
 **Task and policy:** the coding review agent, current model `openrouter/anthropic/claude-sonnet-5.5`, chosen from `scout-tasks/agent-models.txt`. Version 0.4.2 takes no written brief: Scout mapped our usages to tasks itself, and we chose "Coding agent". Policy went in through `.openmerit/config.json`: one OpenRouter endpoint with every model allowed, under the recorded residency gap for fictional data. The fresh Claude Code session ran Scout through the `openmerit` MCP tool, in a standalone `git init` copy of this directory, because of FINDINGS 0.4.2 finding 2. The harness was API key over OpenRouter, Sonnet 5.5. The catalogue was 2026-11-12. The run was `run-20261114-212008-0118`.

@@ -1,0 +1,155 @@
+{
+  "runId": "run-20261126-133311-db3b",
+  "status": "done",
+  "phase": "done",
+  "questions": [],
+  "notices": [],
+  "spend": {
+    "settledUsd": 6.776345669779995,
+    "estimatedUsd": 2.25441,
+    "inFlightUsd": 0,
+    "inFlight": 0,
+    "unknown": 0,
+    "requests": 689,
+    "totalUsd": 6.776345669779995
+  },
+  "budgetUsd": 10,
+  "harnessUsage": {
+    "calls": 40,
+    "costUsd": 0.9295502000000001,
+    "unknownCost": 0,
+    "inputTokens": 1437478,
+    "outputTokens": 44315
+  },
+  "result": {
+    "model": "anthropic/claude-sonnet-5.5",
+    "tasks": [
+      {
+        "task": "Claims intake agent",
+        "eval": {
+          "command": "openmerit eval .openmerit/evals/claims-intake-agent",
+          "source": "generated",
+          "threshold": null
+        },
+        "baseline": {
+          "model": "anthropic/claude-sonnet-5.5",
+          "endpoint": "openrouter",
+          "endpointModel": "anthropic/claude-sonnet-5.5",
+          "role": "baseline",
+          "eci": 166.56,
+          "status": "measured",
+          "passes": 25,
+          "total": 63,
+          "runs": 3,
+          "score": 0.3968253968253968,
+          "source": "eval",
+          "costPerItemUsd": 0.015971111111111113,
+          "costIsEstimate": false,
+          "meanLatencyMs": 2332.772486772487,
+          "requests": 189,
+          "qualified": false,
+          "note": "",
+          "evidence": [
+            "run-20261126-133311-db3b|claims_intake_agent~2|baseline|openrouter|anthropic/claude-sonnet-5.5|r1",
+            "run-20261126-133311-db3b|claims_intake_agent~2|baseline|openrouter|anthropic/claude-sonnet-5.5|r2",
+            "run-20261126-133311-db3b|claims_intake_agent~2|baseline|openrouter|anthropic/claude-sonnet-5.5|r3"
+          ]
+        },
+        "candidates": [],
+        "top": [],
+        "status": "stopped",
+        "note": "The search stopped, so no model is recommended: screen openai/gpt-5.4-pro failed and was not retried: the endpoint refused openai/gpt-5.4-pro: openai/gpt-5.4-pro on candidate: candidate did not answer (no answer in 120 s)",
+        "search": {
+          "status": "stopped",
+          "pool": 220,
+          "unranked": 46,
+          "sampleIds": [],
+          "pick": null,
+          "trials": [
+            {
+              "stage": "search",
+              "model": "nvidia/nemotron-3-ultra-550b-a55b",
+              "eci": 146.95,
+              "passes": 3,
+              "total": 5,
+              "accepted": false
+            },
+            {
+              "stage": "search",
+              "model": "x-ai/grok-4.5",
+              "eci": 154.98,
+              "passes": 8,
+              "total": 10,
+              "accepted": false
+            },
+            {
+              "stage": "search",
+              "model": "xiaomi/mimo-v2.6-flash",
+              "eci": 158.53,
+              "passes": 2,
+              "total": 5,
+              "accepted": false
+            },
+            {
+              "stage": "search",
+              "model": "meta/muse-wonder",
+              "eci": 161.68,
+              "passes": 5,
+              "total": 5,
+              "accepted": true
+            },
+            {
+              "stage": "search",
+              "model": "openai/gpt-5.5",
+              "eci": 160.1,
+              "passes": 5,
+              "total": 5,
+              "accepted": true
+            },
+            {
+              "stage": "search",
+              "model": "deepseek/deepseek-v4.1-flash-1017",
+              "eci": 159.41,
+              "passes": 2,
+              "total": 5,
+              "accepted": false
+            },
+            {
+              "stage": "search",
+              "model": "anthropic/claude-opus-4.8",
+              "eci": 159.94,
+              "passes": 2,
+              "total": 5,
+              "accepted": false
+            },
+            {
+              "stage": "search",
+              "model": "meta/muse-ember",
+              "eci": 160.08,
+              "passes": 5,
+              "total": 5,
+              "accepted": true
+            },
+            {
+              "stage": "neighbour",
+              "model": "tencent/hy4-preview",
+              "eci": 160.17,
+              "passes": 2,
+              "total": 5,
+              "accepted": false
+            }
+          ],
+          "skipped": [],
+          "finalists": [],
+          "challengers": []
+        },
+        "basedOn": [
+          "Grader: your eval's pass or fail per item, from eval-command (node .openmerit/evals/intake-eval.ts); and a judge model against each case's reference answer, on 4 criteria and 3 guardrails, from repo-review (.openmerit/evals/claims-intake-agent).",
+          "Cases: 7 example cases from repo-review (.openmerit/evals/claims-intake-agent); 12 written cases from repo-review (the case writer); 2 items of your eval from eval-command (node .openmerit/evals/intake-eval.ts).",
+          "Priority: you asked about this task, from repo-scan (the task you chose)."
+        ]
+      }
+    ],
+    "configuration": {}
+  }
+}
