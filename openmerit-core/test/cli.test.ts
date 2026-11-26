@@ -2,11 +2,11 @@
 // for the npm registry.
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { askQuestion, terminalPrompter } from "../src/cli/prompt.ts";
@@ -65,10 +65,12 @@ test("version comparison, and offline or failing registries continue on the inst
   assert.equal((await checkForUpdate({}, missing)).available, false);
 });
 
-test("Claude Code login runs the executable bundled with the Claude Agent SDK, so no `claude` on PATH is needed", () => {
-  const binary = claudeBinary({});
-  assert.ok(isAbsolute(binary) && existsSync(binary), `expected the bundled executable, got ${binary}`);
+test("OpenMerit Harness runs the user's own Claude Code: OPENMERIT_CLAUDE_BIN, else claude on the PATH", () => {
   assert.equal(claudeBinary({ OPENMERIT_CLAUDE_BIN: "/opt/claude" }), "/opt/claude");
+  const bin = mkdtempSync(join(tmpdir(), "openmerit-bin-"));
+  writeFileSync(join(bin, "claude"), "#!/bin/sh\n", { mode: 0o755 });
+  assert.equal(claudeBinary({ PATH: bin }), join(bin, "claude"));
+  assert.equal(claudeBinary({ PATH: mkdtempSync(join(tmpdir(), "openmerit-empty-")) }), "claude", "no claude installed: the bare name, which connect reports as not installed");
 });
 
 test("an update installs only with approval and continues on the chosen version", async () => {

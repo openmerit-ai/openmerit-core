@@ -25,7 +25,7 @@ OpenMerit needs Node.js 22.19 or newer and the local Rivet engine that runs Scou
 | macOS arm64 (Apple silicon) | Supported, but not currently tested in CI |
 | Windows | Not supported: Rivet publishes no Windows engine, so Scout and the MCP server cannot start the daemon. WSL 2 is untested |
 
-A global install takes about 790 MB on Linux x64, 770 MB on Linux arm64 and 660 MB on Apple silicon, most of it the engine and the bundled Claude Code (see [Limitations](#limitations)). An install with an empty npm cache downloads 610 to 660 MB.
+A global install takes about 440 MB on Linux x64, most of it the local engine (see [Limitations](#limitations)), and fills about 490 MB of an empty npm cache. Connecting Claude Code adds about 30 MB for its bridge; it uses the Claude Code you installed.
 
 ### Setup
 
@@ -76,7 +76,7 @@ openmerit connect api --api-provider anthropic --api-model claude-sonnet-5-5 --a
 
 `openmerit connect` signs in where needed, makes one round trip through the harness and saves the connection only when that works. A failed check keeps the previous connection. `--model <id>` picks the model for Claude Code (default `claude-sonnet-5-5`) or Codex. Which Codex models a ChatGPT account may use depends on its plan, so without `--model` `openmerit connect codex` tries them from the highest catalogue ECI down and saves the first one the plan accepts.
 
-- **Claude Code** runs through pi-claude-bridge with the Claude Agent SDK's bundled Claude Code, so you do not need Claude Code installed. It uses your Claude Code login in `~/.claude`; when you are not logged in, `openmerit connect claude-code` offers `claude auth login`. On a server, set `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`, or `ANTHROPIC_API_KEY`. Claude Code gets no tools of its own and loads no project `.claude` settings.
+- **Claude Code** runs your own installed Claude Code (`claude` on your `PATH`, or the path in `OPENMERIT_CLAUDE_BIN`) through pi-claude-bridge, which `openmerit connect claude-code` installs into `~/.openmerit/claude-bridge/` (about 30 MB) on first use. OpenMerit no longer bundles a copy of Claude Code. It uses your Claude Code login in `~/.claude`; when you are not logged in, `openmerit connect claude-code` offers `claude auth login`. On a server, set `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`, or `ANTHROPIC_API_KEY`. Claude Code gets no tools of its own and loads no project `.claude` settings.
 - **Codex** uses pi's ChatGPT Plus or Pro sign-in, the same one pi's own `/login` offers. It is a browser sign-in, or a code you enter at `auth.openai.com/codex/device` from any device with `--device-code`, which also works on a server. You do not need the Codex CLI installed. Pi keeps the tokens in `~/.openmerit/agent/auth.json` (mode 0600) and refreshes them; OpenMerit does not read the Codex CLI's own login.
 - **An API key** uses any provider pi knows, with a key from an environment variable or typed in and stored in `~/.openmerit/secrets.json`.
 
@@ -283,7 +283,6 @@ The first client that finds no daemon starts it, so set `OPENMERIT_DAEMON_PORT` 
 - The binary search assumes that a higher ECI means a model that is at least as capable on the task. It screens about log₂ of the pool size, so a cheaper model that the ranking places out of order can be missed.
 - Harness inference through Claude Code or a ChatGPT sign-in is billed by your plan, so its cost is shown as tokens, not dollars.
 - pi-claude-bridge drives Claude Code through the Claude Agent SDK with your subscription. Anthropic has changed its stated billing for that use before and may again.
-- The install is larger with the bridge: the Claude Agent SDK's bundled Claude Code is about 330 MB on Linux.
 - The local Rivet engine makes the install larger: about 300 MB on Linux and 160 MB on macOS. An empty engine store takes about 130 MB on disk.
 - Stopping the daemon (or `openmerit daemon stop`) while a step runs interrupts that run; it does not continue on its own.
 

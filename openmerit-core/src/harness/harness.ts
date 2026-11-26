@@ -116,7 +116,7 @@ export async function createHarness(settings: HarnessSettings, env: Env = proces
     apiKey = resolveCredential(settings.api.apiKey, env) ?? undefined;
     if (!apiKey) throw new Error(`The harness API key (${JSON.stringify(settings.api.apiKey)}) is not set. Run \`openmerit connect api\`.`);
   } else if (settings.kind === "claude-code") {
-    bridge = await loadClaudeBridge();
+    bridge = await loadClaudeBridge(env);
     runtime.registerProvider(CLAUDE_BRIDGE_PROVIDER, bridge.provider);
     model = runtime.getModel(CLAUDE_BRIDGE_PROVIDER, settings.model ?? DEFAULT_CLAUDE_MODEL);
     if (!model) throw new Error(`Claude Code has no model ${settings.model}. Run \`openmerit connect claude-code --model <id>\` with one of: ${runtime.getModels(CLAUDE_BRIDGE_PROVIDER).map(item => item.id).join(", ")}.`);
