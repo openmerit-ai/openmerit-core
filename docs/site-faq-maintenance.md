@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Get Demo replaces Try Scout — unreleased, 26 November 2026
+
+The homepage's call to action is now **Get Demo**, linking `/contact-sales/`, and Scout's sign-in page at `/scout/` redirects there. The hero copy and its Scout coverage figures are unchanged, so no claim changed; the paragraph no longer links to a Scout page. The homepage has no FAQ block.
+
 ## Homepage description and common questions — unreleased, 26 November 2026
 
 The homepage's meta and Open Graph description now say what the buyer-question pages say: OpenMerit finds cheaper models that pass an eval written from your code, stays out of the live request path, is free to run on your machine, and OpenMerit Cloud runs it for you. The title, visible copy and Scout claims are unchanged. A new "Common questions" list under the film links the five buyer-question pages. Recheck the description when those pages' claims change.

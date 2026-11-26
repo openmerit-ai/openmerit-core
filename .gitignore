@@ -1,7 +1,6 @@
 node_modules
 dist/
 site/memo/
-site/scout/sign-in.js
 site/memo-access.js
 demo/memo/generated/
 site/assets/video-player.js
