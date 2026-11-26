@@ -144,6 +144,9 @@ code { font-family: var(--mono); }
 .compare-table thead th { border-top: 0; color: var(--ink); font-weight: 600; }
 .compare-table tbody th { color: var(--ink); font-weight: 500; width: 24%; }
 .compare-faq dd { margin: 4px 0 18px; }
+.compare-page pre { margin: 12px 0; padding: 12px 14px; overflow-x: auto; border: 1px solid var(--code-line); border-radius: 8px; background: var(--code-bg); }
+.compare-page pre code { padding: 0; background: none; font-size: 13px; line-height: 1.6; }
+.compare-related { padding-left: 20px; }
 @media (max-width: 580px) { .compare-page h1 { font-size: 28px; } .compare-table table { min-width: 560px; } }
 .intro-film { width: min(1040px, calc(100vw - 96px)); margin: 76px 0 0 50%; transform: translateX(-50%); }
 .intro-film > .thread-rule { margin-bottom: 36px; }

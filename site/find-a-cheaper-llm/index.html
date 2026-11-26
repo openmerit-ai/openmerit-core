@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Test cheaper models on your own task, not a leaderboard. OpenMerit writes an eval for each LLM call in your code and proposes a cheaper model only when it passes everything your current model passes.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f8f7f4" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#171915" media="(prefers-color-scheme: dark)">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="How to find a cheaper LLM that works as well as the one your app uses">
+  <meta property="og:description" content="Test cheaper models on your own task, not a leaderboard. OpenMerit writes an eval for each LLM call in your code and proposes a cheaper model only when it passes everything your current model passes.">
+  <meta property="og:url" content="https://openmerit.ai/find-a-cheaper-llm/">
+  <meta property="og:site_name" content="OpenMerit">
+  <meta property="og:image" content="https://openmerit.ai/assets/openmerit-og-v1.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <title>How to find a cheaper LLM that works as well as the one your app uses · OpenMerit</title>
+  <link rel="canonical" href="https://openmerit.ai/find-a-cheaper-llm/">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="preload" href="/assets/geist-sans.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/styles.css?v=20261126-compare-v2">
+</head>
+<body class="landing-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="letter-header">
+    <a class="brand" href="/" aria-label="OpenMerit home">
+      <svg class="brand-mark" viewBox="0 0 28 30" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M3 27V13a11 11 0 0 1 22 0v14M8 27V13a6 6 0 0 1 12 0v14M14 16v11"/></svg>
+      <span>openmerit</span>
+    </a>
+    <nav aria-label="Primary navigation"><a href="/scout/">Scout</a><a href="/memo/">Memo</a></nav>
+  </header>
+  <main id="main" class="letter-main compare-page">
+    <h1>How to find a cheaper LLM that works as well as the one your app uses</h1>
+    <p class="compare-lede">Test cheaper models on your own task, not on a leaderboard. OpenMerit’s Scout finds each LLM call in your code, writes an eval for what that call has to do, searches cheaper models against it and proposes a switch only when a cheaper model passes everything your current model passes.</p>
+
+<h2 id="leaderboards">Why leaderboards aren’t enough</h2>
+<p>A benchmark score tells you a model is capable in general. It doesn’t tell you whether it returns the JSON fields your parser expects, follows your refund policy or calls your tools in the right order. Only a test of your own task shows that.</p>
+
+<h2 id="search">How Scout searches</h2>
+<ul>
+<li><strong>Candidates:</strong> models on the endpoints you allow, such as OpenRouter, OpenAI or another OpenAI-compatible endpoint. Each has to cost less per token than your current model and support what the task needs, such as tool calls, images or structured output.</li>
+<li><strong>Search:</strong> Scout ranks candidates by the <a href="https://epoch.ai/benchmarks/eci">Epoch Capabilities Index</a>, then binary-searches that ranking on your eval. It screens about log₂ of the pool, not every model.</li>
+<li><strong>Qualifying:</strong> a model qualifies only if it passes at least as many eval runs as your current model and loses no case your current model always gets right.</li>
+<li><strong>Saving:</strong> a switch has to cost at least 10% less per call. A smaller difference is within measurement noise, so Scout keeps your current model.</li>
+<li><strong>Spending:</strong> evals run on your keys. The default budget is $10 per run, and nothing runs until you approve it.</li>
+</ul>
+
+<h2 id="result">What you get</h2>
+<p>The search path, the top three candidates beside your current model with their passes, cost per call and latency, and the eval runs behind every number. When you say yes, Scout changes the model name on that one line of your code.</p>
+
+<h2 id="limits">Limits</h2>
+<ul>
+<li>A cheaper model that the ranking places out of order can be missed.</li>
+<li>An eval every model passes can’t tell them apart. Scout says when that happens.</li>
+</ul>
+
+<h2 id="start">Try it</h2>
+<p>Running OpenMerit on your machine is free:</p>
+<pre><code>npm install -g openmerit
+cd your-repo &amp;&amp; openmerit setup &amp;&amp; openmerit scout</code></pre>
+<p>Or let OpenMerit run it for you: for hosted pricing, <a href="mailto:lazim@openmerit.ai">contact us</a>.</p>
+    <h2 id="related">Related questions</h2>
+    <ul class="compare-related"><li><a href="/vs-routers/">OpenMerit vs LLM routers and gateways</a></li><li><a href="/evals-from-your-code/">A tool that writes evals from your codebase and tests cheaper models against them</a></li><li><a href="/claude-code-and-codex/">Compare and pick LLMs for your app from inside Claude Code or Codex</a></li><li><a href="/run-locally/">Choose an AI model for your code without your code going through OpenMerit</a></li></ul>
+  </main>
+</body>
+</html>

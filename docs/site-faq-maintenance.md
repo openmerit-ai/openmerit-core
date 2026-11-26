@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Buyer-question pages, free self-hosting and hosted pricing — unreleased, 26 November 2026
+
+Added four public pages beside `/vs-routers/`: `/find-a-cheaper-llm/`, `/evals-from-your-code/`, `/claude-code-and-codex/` and `/run-locally/`, each answering one question buyers ask AI assistants, with a list linking all five. Their claims about Scout, the eval, the MCP server, data handling, telemetry, requirements and limits follow `openmerit-core/README.md`. With the owner's approval they say running OpenMerit yourself is free and that hosted pricing is on request, linking `mailto:lazim@openmerit.ai`; `/vs-routers/` now says the same. They name no price and make no licensing claim. Recheck them when the Scout workflow, data handling, telemetry, supported platforms, install size or default budget change. The homepage has no FAQ block, so nothing else changed.
+
 ## Comparison with routers and gateways — unreleased, 26 November 2026
 
 Added `/vs-routers/`, a public page comparing OpenMerit with LLM routers and gateways, and linked the homepage's existing "not a router" to it. Its claims about OpenMerit follow the released CLI as `openmerit-core/README.md` describes it: one model per task checked against an eval written from the code, outside the request path, a switch proposed only after approval and only at a 10% saving per call, qualification losing no case the current model always passes, and the cloud app reached through `openmerit.ai/mcp`. It names no plan, price or licence. Its claims about OpenRouter's Auto Router and Not Diamond link to those products' own docs, read on 26 November 2026; recheck them when the page changes. The homepage has no FAQ block, so nothing else changed.

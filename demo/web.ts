@@ -3,7 +3,7 @@
 // to the site Worker instead.
 import { createClerkClient } from '@clerk/backend';
 import { parsePublishableKey } from '@clerk/shared/keys';
-import { publicSiteResponse } from './public-site.ts';
+import { contentPages, publicSiteResponse } from './public-site.ts';
 
 export interface WebEnv {
   ASSETS: { fetch(request: Request): Promise<Response> };
@@ -68,7 +68,7 @@ export default {
     if (unavailable) return unavailable;
     if (path === '/scout') return Response.redirect(`${url.origin}/scout/${url.search}`, 308);
     if (path === '/playground/scout') return Response.redirect(`${url.origin}/playground/scout/${url.search}`, 308);
-    if (path === '/vs-routers') return Response.redirect(`${url.origin}/vs-routers/${url.search}`, 308);
+    if (contentPages.includes(`${path}/`)) return Response.redirect(`${url.origin}${path}/${url.search}`, 308);
     if (path.startsWith('/scout/api/')) return signInApi(request, env, path);
     return ['GET', 'HEAD'].includes(request.method) ? env.ASSETS.fetch(request) : json({ error: 'Not found.' }, 404);
   },

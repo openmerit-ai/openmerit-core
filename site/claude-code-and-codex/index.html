@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="OpenMerit is an MCP server for Claude Code and Codex. Ask your coding agent to find a cheaper model for a call in your app, and it runs the same eval-backed workflow as the CLI.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f8f7f4" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#171915" media="(prefers-color-scheme: dark)">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Compare and pick LLMs for your app from inside Claude Code or Codex">
+  <meta property="og:description" content="OpenMerit is an MCP server for Claude Code and Codex. Ask your coding agent to find a cheaper model for a call in your app, and it runs the same eval-backed workflow as the CLI.">
+  <meta property="og:url" content="https://openmerit.ai/claude-code-and-codex/">
+  <meta property="og:site_name" content="OpenMerit">
+  <meta property="og:image" content="https://openmerit.ai/assets/openmerit-og-v1.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <title>Compare and pick LLMs for your app from inside Claude Code or Codex · OpenMerit</title>
+  <link rel="canonical" href="https://openmerit.ai/claude-code-and-codex/">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="preload" href="/assets/geist-sans.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/styles.css?v=20261126-compare-v2">
+</head>
+<body class="landing-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="letter-header">
+    <a class="brand" href="/" aria-label="OpenMerit home">
+      <svg class="brand-mark" viewBox="0 0 28 30" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M3 27V13a11 11 0 0 1 22 0v14M8 27V13a6 6 0 0 1 12 0v14M14 16v11"/></svg>
+      <span>openmerit</span>
+    </a>
+    <nav aria-label="Primary navigation"><a href="/scout/">Scout</a><a href="/memo/">Memo</a></nav>
+  </header>
+  <main id="main" class="letter-main compare-page">
+    <h1>Compare and pick LLMs for your app from inside Claude Code or Codex</h1>
+    <p class="compare-lede">OpenMerit is an MCP server. <code>openmerit setup</code> registers it with Claude Code and Codex when either CLI is installed. Then you ask your coding agent to find a cheaper model for a call in your app, and it runs the same workflow as the CLI.</p>
+
+<h2 id="agent">How it works in your agent</h2>
+<ul>
+<li>The <code>openmerit_scout</code> tool returns questions instead of prompting: which task, approve this eval, raise the budget, apply this change. Your agent asks you, then passes your answers back.</li>
+<li>A run started in the terminal can continue in your agent, and the other way round.</li>
+<li><code>openmerit_status</code> and <code>openmerit_history</code> are read-only.</li>
+</ul>
+
+<h2 id="harness">What powers the reasoning</h2>
+<p>OpenMerit’s harness, built on <a href="https://pi.dev">Pi</a>, reviews the code and writes the evals. It can use your Claude login through Claude Code, a ChatGPT Plus or Pro sign-in for Codex models, or an API key. The evals run on the candidate endpoints you choose, with their own keys.</p>
+
+<h2 id="clients">Other MCP clients and the hosted version</h2>
+<p>If neither CLI is installed, setup prints the stdio command to register with another client. For the hosted version, add <code>https://openmerit.ai/mcp</code> as an HTTP MCP server instead.</p>
+
+<h2 id="start">Try it</h2>
+<p>Running OpenMerit on your machine is free: <code>npm install -g openmerit</code>, then <code>openmerit setup</code>. For hosted pricing, <a href="mailto:lazim@openmerit.ai">contact us</a>.</p>
+    <h2 id="related">Related questions</h2>
+    <ul class="compare-related"><li><a href="/vs-routers/">OpenMerit vs LLM routers and gateways</a></li><li><a href="/find-a-cheaper-llm/">How to find a cheaper LLM that works as well as the one your app uses</a></li><li><a href="/evals-from-your-code/">A tool that writes evals from your codebase and tests cheaper models against them</a></li><li><a href="/run-locally/">Choose an AI model for your code without your code going through OpenMerit</a></li></ul>
+  </main>
+</body>
+</html>
