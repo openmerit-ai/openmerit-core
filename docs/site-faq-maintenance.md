@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Real-use test fixes, first stage — npm 0.5.0 release preparation, 26 November 2026
+
+Reviewed the homepage against the 0.5.0 changes: the screening, paired-qualification, 10% saving and cost-estimate entries below, the judge reading tool results, the eval budget's capped estimates and aborted calls, and the cloud app's share links, overage billing, idempotent `openmerit_recommend` and removed Claude sign-in. `site/index.html` makes no claim about any of these. No homepage copy change. Its "400+ models" and fallback claims are still open in the fix plan's second stage.
+
 ## Screening, paired qualification, the 10% saving and cost estimates — unreleased, 25 November 2026
 
 Reviewed the homepage against small evals screening on every case, failed calls being run again before they count, models qualifying only when they lose no case the current model always passes, switches needing a 10% saving, `openmerit_recommend` returning a cost and time estimate, and results giving the calls a switch takes to repay its run. `site/index.html` makes no claim about screening, qualification, run cost or payback. No homepage change is needed.
