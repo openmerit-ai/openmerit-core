@@ -1,0 +1,18 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.openmerit-ai/openmerit",
+  "title": "OpenMerit",
+  "description": "Finds cheaper LLMs that pass an eval written from your code, outside your request path.",
+  "websiteUrl": "https://openmerit.ai",
+  "repository": { "url": "https://github.com/openmerit-ai/openmerit-core", "source": "github", "subfolder": "openmerit-core" },
+  "version": "0.5.3",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "openmerit",
+      "version": "0.5.3",
+      "transport": { "type": "stdio" },
+      "packageArguments": [{ "type": "positional", "value": "mcp" }]
+    }
+  ]
+}

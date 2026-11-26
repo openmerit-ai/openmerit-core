@@ -1,0 +1,53 @@
+name: Publish to MCP Registry
+
+# Publishes openmerit-core/server.json to the official MCP Registry as io.github.openmerit-ai/openmerit.
+# Run it by hand after the npm version it names is published; publishing needs the same approval as npm.
+# GitHub's OIDC token proves the openmerit-ai namespace, so no secret is needed.
+on:
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      MCP_PUBLISHER_VERSION: v1.8.16
+    defaults:
+      run:
+        working-directory: openmerit-core
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check server.json names the published npm version
+        run: |
+          set -euo pipefail
+          version="$(jq -r .version package.json)"
+          test "$(jq -r .version server.json)" = "$version"
+          test "$(jq -r '.packages[0].version' server.json)" = "$version"
+          test "$(npm view "openmerit@$version" mcpName)" = "$(jq -r .name server.json)"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Download and verify mcp-publisher
+        run: |
+          set -euo pipefail
+          archive="mcp-publisher_linux_amd64.tar.gz"
+          base_url="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
+          curl --fail --location --silent --show-error --output "$archive" "$base_url/$archive"
+          curl --fail --location --silent --show-error --output "$archive.sigstore.json" "$base_url/$archive.sigstore.json"
+          cosign verify-blob \
+            --bundle "$archive.sigstore.json" \
+            --certificate-identity "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/${MCP_PUBLISHER_VERSION}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$archive"
+          tar xzf "$archive" mcp-publisher
+          rm -f "$archive" "$archive.sigstore.json"
+
+      - name: Authenticate to MCP Registry
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish
+        run: ./mcp-publisher publish
