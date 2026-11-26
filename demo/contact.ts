@@ -29,7 +29,7 @@ function page(status: number, title: string, body: string) {
   <meta name="color-scheme" content="light dark">
   <title>${title} · OpenMerit</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-  <link rel="stylesheet" href="/styles.css?v=20261126-contact-v1">
+  <link rel="stylesheet" href="/styles.css?v=20261126-contact-v4">
 </head>
 <body class="landing-page">
   <main class="letter-main compare-page">

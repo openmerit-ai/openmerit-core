@@ -18,7 +18,7 @@
   <link rel="canonical" href="https://openmerit.ai/contact-sales/">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="preload" href="/assets/geist-sans.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/styles.css?v=20261126-contact-v1">
+  <link rel="stylesheet" href="/styles.css?v=20261126-contact-v4">
 </head>
 <body class="landing-page">
   <a class="skip-link" href="#main">Skip to content</a>
@@ -29,24 +29,40 @@
     </a>
     <nav aria-label="Primary navigation"><a href="/scout/">Scout</a><a href="/memo/">Memo</a></nav>
   </header>
-  <main id="main" class="letter-main compare-page">
-    <h1>Talk to us about hosted OpenMerit</h1>
-    <p class="compare-lede">Running OpenMerit on your own machine is free. If you’d rather we run it for you, we review your code, write the evals and find cheaper models that pass them, outside your request path. Tell us about your team and we’ll reply with pricing.</p>
+  <main id="main" class="contact-main">
+    <div class="contact-layout">
+      <section class="contact-intro" aria-labelledby="contact-title">
+        <p class="contact-eyebrow">Contact sales</p>
+        <h1 id="contact-title">Talk to us about hosted OpenMerit</h1>
+        <p class="contact-lede">We review your code, write the evals and find cheaper models that pass them, outside your request path. Tell us about your team and we’ll reply with pricing.</p>
+        <ul class="contact-points">
+          <li><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="8"/><path d="m4.8 8.2 2.1 2.1 4.3-4.6"/></svg>Pricing for your team</li>
+          <li><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="8"/><path d="m4.8 8.2 2.1 2.1 4.3-4.6"/></svg>We run the reviews and evals for you</li>
+          <li><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="8"/><path d="m4.8 8.2 2.1 2.1 4.3-4.6"/></svg>Never in your live request path</li>
+        </ul>
+      </section>
 
-    <form class="contact-form" method="post" action="/contact-sales/api">
-      <label><span>Full name<span class="contact-req" aria-hidden="true">*</span></span><input name="name" autocomplete="name" maxlength="120" required></label>
-      <label><span>Work email<span class="contact-req" aria-hidden="true">*</span></span><input name="email" type="email" autocomplete="email" maxlength="254" required></label>
-      <label><span>Company<span class="contact-req" aria-hidden="true">*</span></span><input name="company" autocomplete="organization" maxlength="160" required></label>
-      <label><span>Company size<span class="contact-req" aria-hidden="true">*</span></span><select name="size" required><option value="">Choose one</option><option>1–10</option><option>11–50</option><option>51–200</option><option>201–1,000</option><option>1,001+</option></select></label>
-      <label><span>What would you like OpenMerit to help with?</span><textarea name="use" rows="4" maxlength="4000"></textarea></label>
-      <label><span>How did you hear about us?</span><input name="heard" maxlength="500"></label>
-      <label class="contact-trap" aria-hidden="true">Leave this empty<input name="website" tabindex="-1" autocomplete="off"></label>
-      <button class="letter-cta" type="submit">Send</button>
-      <p class="contact-note">We use these details only to reply to you. Fields marked * are required.</p>
-    </form>
+      <section class="contact-self" aria-labelledby="self-hosted">
+        <h2 id="self-hosted">Prefer to run it yourself?</h2>
+        <p>Running OpenMerit on your own machine is free: <code>npm install -g openmerit</code>. Read <a href="/run-locally/">where your code and data go when you run it locally</a>.</p>
+      </section>
 
-    <h2 id="self-hosted">Prefer to run it yourself?</h2>
-    <p>Install the free CLI with <code>npm install -g openmerit</code>, or read <a href="/run-locally/">where your code and data go when you run it locally</a>.</p>
+      <form class="contact-card" method="post" action="/contact-sales/api" aria-labelledby="contact-form-title">
+        <h2 id="contact-form-title">How can we help?</h2>
+        <label><span class="sr-only">Full name (required)</span><input name="name" autocomplete="name" maxlength="120" placeholder="Full name *" required></label>
+        <label><span class="sr-only">Work email (required)</span><input name="email" type="email" autocomplete="email" maxlength="254" placeholder="Work email *" required></label>
+        <label><span class="sr-only">Company (required)</span><input name="company" autocomplete="organization" maxlength="160" placeholder="Company *" required></label>
+        <label class="contact-select"><span class="sr-only">Company size (required)</span><select name="size" required><option value="" disabled selected>Company size *</option><option>1–10</option><option>11–50</option><option>51–200</option><option>201–1,000</option><option>1,001+</option></select></label>
+        <label><span class="sr-only">What would you like OpenMerit to help with?</span><textarea name="use" rows="4" maxlength="4000" placeholder="What would you like OpenMerit to help with?"></textarea></label>
+        <label><span class="sr-only">How did you hear about us?</span><input name="heard" maxlength="500" placeholder="How did you hear about us?"></label>
+        <label class="contact-trap" aria-hidden="true">Leave this empty<input name="website" tabindex="-1" autocomplete="off"></label>
+        <div class="contact-actions">
+          <p>You can also email us at <a href="mailto:lazim@openmerit.ai">lazim@openmerit.ai</a>.</p>
+          <button type="submit">Send message</button>
+        </div>
+        <p class="contact-note">We use these details only to reply to you. * Required.</p>
+      </form>
+    </div>
   </main>
 </body>
 </html>
