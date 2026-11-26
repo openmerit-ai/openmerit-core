@@ -832,3 +832,18 @@ test("a job whose start fails after the account recorded it is marked failed, an
     assert.equal((await agent.api<{ plan: { usedEvals: number } }>("/api/me")).body.plan.usedEvals, 0, "a job that never started is not charged an evaluation");
   } finally { await stop(app); await models.close(); }
 });
+
+test("a self-hosted server starts a job without a plan, and its Stripe settings and webhooks are off", async () => {
+  const models = await fakeModels();
+  const app = await startApp({ models, env: { ...CLERK, OPENMERIT_MODE: "self-hosted", STRIPE_SECRET_KEY: "sk_test", STRIPE_WEBHOOK_SECRET: "whsec_test", STRIPE_PRICE_ID: "price_test" } });
+  try {
+    const agent = caller(app, "test:user_s:org_self:admin");
+    assert.equal((await agent.api<{ mode: string }>("/api/me")).body.mode, "self-hosted");
+    const started = await agent.tool("openmerit_recommend", { bundle: bundle(), environment: "acme/support" });
+    assert.equal(started.isError, false, started.text);
+    await waitFor(() => agent.tool("openmerit_result", { job_id: started.data.job_id }), value => value.data.status === "needs_input");
+    const metadata = await (await fetch(`${app.url}/.well-known/oauth-protected-resource`)).json() as Data;
+    assert.deepEqual(metadata.authorization_servers, [], "self-hosted names no Clerk issuer");
+    assert.equal((await subscribe(app, "org_self")).status, 503, "no Stripe webhook is applied");
+  } finally { await stop(app); await models.close(); }
+});

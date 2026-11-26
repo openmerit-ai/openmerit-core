@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The cloud app runs self-hosted: `OPENMERIT_MODE=self-hosted` starts it for one person on 127.0.0.1 with a local engine, signs in with a token written to `~/.openmerit/server/token` on first start, and needs no plan, Clerk, Stripe or PostHog; spend caps still apply. Not yet reachable from the `openmerit` CLI.
+
 ## 0.5.1 — 2026-11-26
 
 - Fix in Scout (0.5.0): when a model call failed in one of a model's full runs and Scout ran that item again, the run counted twice, so the model showed as "not every run finished" with totals such as 84/85, and when it was the current model, no candidate was compared at all. The second attempt now merges into its run.

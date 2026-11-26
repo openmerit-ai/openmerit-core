@@ -288,8 +288,9 @@ export const account = actor({
     startJob: async (c, input: { jobId: string; projectId: string; taskId: string; kind: "run" | "watch"; askedBy?: string | null }): Promise<Started> => c.db.transaction(async (tx): Promise<Started> => {
       const { limits, appUrl } = services().config;
       const current = await plan(tx);
-      if (!current || !ACTIVE_PLAN.has(current.status)) return { ok: false, error: planRefusal(current)! };
-      if (current.overage === "refuse" && current.usedEvals >= current.includedEvals) return { ok: false, error: `This month's ${current.includedEvals} evaluations are used. More start at ${current.periodEnd ? new Date(current.periodEnd * 1000).toISOString().slice(0, 10) : "the next period"}, or change the plan at ${appUrl}/plan/.` };
+      const unpaid = planRefusal(current);
+      if (unpaid) return { ok: false, error: unpaid };
+      if (current?.overage === "refuse" && current.usedEvals >= current.includedEvals) return { ok: false, error: `This month's ${current.includedEvals} evaluations are used. More start at ${current.periodEnd ? new Date(current.periodEnd * 1000).toISOString().slice(0, 10) : "the next period"}, or change the plan at ${appUrl}/plan/.` };
       const now = Date.now();
       const [hour] = await tx.execute(`SELECT count(*) AS n FROM jobs WHERE started_at > ?`, now - 3_600_000);
       if (Number(hour?.n) >= limits.jobsPerHour) return { ok: false, error: `This account started ${limits.jobsPerHour} jobs in the last hour, its limit. Try again later.` };
@@ -824,11 +825,12 @@ async function plan(database: Database): Promise<Plan | null> {
 }
 
 /**
- * Why the account cannot start paid work, or null: every evaluation and every repository review needs a
- * plan that Stripe says is active or trialing. There is no free cloud plan; the CLI is the free option.
+ * Why the account cannot start paid work, or null: on the hosted server, every evaluation and every repository
+ * review needs a plan that Stripe says is active or trialing. There is no free hosted plan; a self-hosted
+ * server needs no plan, and its spend caps still apply.
  */
 function planRefusal(current: Plan | null): string | null {
-  if (current && ACTIVE_PLAN.has(current.status)) return null;
+  if (services().config.mode === "self-hosted" || (current && ACTIVE_PLAN.has(current.status))) return null;
   return `This account has no active OpenMerit plan${current ? ` (Stripe says ${current.status})` : ""}. Subscribe at ${services().config.appUrl}/plan/, then try again.`;
 }
 
