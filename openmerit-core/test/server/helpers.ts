@@ -250,11 +250,13 @@ export const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, 
  * Polls openmerit_result until the job finishes. A grading round is graded by OpenMerit's own grades,
  * relayed by the coding agent and confirmed by the same caller as the person, as the app would.
  */
-export async function untilDone<T extends { text: string; data: Record<string, unknown> }>(agent: { tool: (name: string, args: Record<string, unknown>) => Promise<T>; api: (path: string, init?: RequestInit) => Promise<{ status: number; body: unknown }> }, jobId: string, timeoutMs = 180_000): Promise<T> {
+/** Runs a job to its end, grading each answer as OpenMerit did; `onGrades` sees each set of grading questions. */
+export async function untilDone<T extends { text: string; data: Record<string, unknown> }>(agent: { tool: (name: string, args: Record<string, unknown>) => Promise<T>; api: (path: string, init?: RequestInit) => Promise<{ status: number; body: unknown }> }, jobId: string, timeoutMs = 180_000, onGrades?: (questions: { id: string; detail: string }[]) => void): Promise<T> {
   return waitFor(async () => {
     const value = await agent.tool("openmerit_result", { job_id: jobId });
     if (value.data.status === "needs_input" && value.data.phase === "grading") {
       const questions = value.data.questions as { id: string; detail: string }[];
+      onGrades?.(questions);
       const held = await agent.tool("openmerit_answer", { job_id: jobId, answers: Object.fromEntries(questions.map(question => [question.id, question.detail.includes("OpenMerit's grade: passed") ? "good" : "bad"])) });
       const confirmation = held.data.confirmation as { id: string } | undefined;
       if (!confirmation) throw new Error(`Grades were not held for confirmation: ${held.text}`);

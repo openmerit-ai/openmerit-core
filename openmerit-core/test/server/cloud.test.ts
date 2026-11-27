@@ -578,14 +578,27 @@ test("a person grades a run's answers: a disagreement writes the eval again, agr
     const again = await waitFor(result, value => value.data.phase === "grading" && (value.data.questions as { id: string }[])[0]!.id.includes("_r2_"), 120_000);
     assert.ok(models.calls.some(call => call.ticket === "reviser"), "the reviser ran on OpenMerit's key");
     assert.ok((again.data.notices as string[]).includes("OpenMerit wrote the eval again from your grades of round 1."), JSON.stringify(again.data.notices));
-    const done = await untilDone(agent, jobId);
+    const spotChecked: { id: string; detail: string }[][] = [];
+    const done = await untilDone(agent, jobId, undefined, questions => spotChecked.push(questions));
     assert.equal(done.data.status, "done", done.text);
     const report = (await agent.api<{ grading: { rounds: number; accepted: boolean; bar: string; summary: string | null }; evalVersion: number }>(`/api/runs/${jobId}`)).body;
-    assert.deepEqual([report.grading.rounds, report.grading.accepted, report.grading.bar, report.evalVersion], [2, true, "criteria", 1]);
+    // Two trial rounds, then the spot-check of the pick, which counts toward the 3 rounds.
+    assert.deepEqual([report.grading.rounds, report.grading.accepted, report.grading.bar, report.evalVersion], [3, true, "criteria", 1]);
     assert.match(report.grading.summary ?? "", /^Your current model meets your checks(, though it fails \d+ of its \d+ case runs)?[;,]/);
     const evaluation = (await agent.api<{ accepted: { version: number; source: string; by: string | null; bar: string; spec: { criteria?: string[] } } }>(`/api/tasks/${task!.id}/eval`)).body.accepted;
     assert.deepEqual([evaluation.version, evaluation.source, evaluation.by, evaluation.bar], [1, "grading", "user_g", "criteria"]);
     assert.deepEqual(evaluation.spec.criteria, ["The queue is the one the ticket's main problem belongs to."]);
+
+    // Before it was recommended, the person checked a few of the pick's answers, in a round of their own.
+    const spot = (asked: { id: string; detail: string }[]) => asked.filter(question => /\(a candidate\)/.test(question.detail));
+    assert.ok(spotChecked.some(questions => spot(questions).length > 0 && spot(questions).length <= 4), "a spot-check of the pick's answers");
+
+    // The accepted eval keeps the answers the person graded. One the judge now grades differently is flagged on the next run.
+    const rivet = createClient<Registry>({ endpoint: `http://127.0.0.1:${app.enginePort}`, token: "test-token" });
+    const accountActor = rivet.account.getOrCreate(["org_grade"]);
+    const kept = (await accountActor.evalGrades({ taskId: task!.id, version: 1 }))!;
+    assert.ok(kept.length > 0 && kept.every(item => item.verdict === "good" || item.verdict === "bad"), JSON.stringify(kept).slice(0, 300));
+    await accountActor.saveEvalGrades({ taskId: task!.id, version: 1, grades: kept.map((item, index) => (index === 0 ? { ...item, verdict: item.verdict === "good" ? "bad" : "good" } : item)) });
 
     // The next run measures on the accepted eval against its bar, and asks nothing.
     const next = await agent.tool("openmerit_recommend", { bundle: bundle("graded classifier", false), environment: "acme/grade" });
@@ -595,6 +608,7 @@ test("a person grades a run's answers: a disagreement writes the eval again, agr
     assert.equal(second.data.status, "done", second.text);
     const later = (await agent.api<{ grading: { rounds: number; accepted: boolean; bar: string }; evalVersion: number }>(`/api/runs/${String(next.data.job_id)}`)).body;
     assert.deepEqual([later.grading.rounds, later.grading.accepted, later.grading.bar, later.evalVersion], [0, true, "criteria", 1]);
+    assert.match(second.text, new RegExp(`The eval now grades 1 of the ${kept.length} answers you graded when you accepted version 1 differently from you: ${kept[0]!.caseId}`));
   } finally { await stop(app); await models.close(); }
 });
 
