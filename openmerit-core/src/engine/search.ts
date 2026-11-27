@@ -108,6 +108,33 @@ export async function binarySearch<T extends Rung>(ladder: readonly T[], screen:
   };
 }
 
+/**
+ * The option a grading trial runs, so a person sees a cheaper model's answers before any search: the
+ * binary search's first probe, the middle of the ladder. `run` measures it and says whether it failed
+ * anything worth grading; while it does not, the trial moves to the middle of the weaker half, as the
+ * search does after a pass, down to the weakest option. An option that cannot run is dropped, as the
+ * search drops it. Returns the last option that ran, or null when none could.
+ */
+export async function trialOption<T extends Rung>(ladder: readonly T[], run: (candidate: T) => Promise<boolean>): Promise<T | null> {
+  const ordered = [...ladder];
+  let upper = ordered.length - 1, last: T | null = null;
+  while (upper >= 0) {
+    const middle = Math.floor(upper / 2);
+    const candidate = ordered[middle]!;
+    try {
+      const found = await run(candidate);
+      last = candidate;
+      if (found) return candidate;
+      upper = middle - 1;
+    } catch (error) {
+      if (!unavailable(error)) throw error;
+      ordered.splice(middle, 1);
+      upper -= 1;
+    }
+  }
+  return last;
+}
+
 export interface ChallengerOptions<T extends Rung> {
   count?: number;
   /**

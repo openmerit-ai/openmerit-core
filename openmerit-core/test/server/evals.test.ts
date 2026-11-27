@@ -23,7 +23,7 @@ describe("evals", () => {
     const first = await me.tool("openmerit_recommend", { bundle: bundle("eval classifier"), environment: "acme/app" });
     const firstJob = first.data.job_id as string;
     await waitFor(result(firstJob), value => value.data.status === "needs_input");
-    await me.tool("openmerit_answer", { job_id: firstJob, answers: { "label_example-7": "billing", label_check: ["written-1"] } });
+    await me.tool("openmerit_answer", { job_id: firstJob, answers: { "label_example-7": "billing" } });
     const done = await untilDone(me, firstJob);
     assert.equal(done.data.status, "done", done.text);
 
@@ -34,7 +34,7 @@ describe("evals", () => {
     assert.deepEqual([first1.accepted!.version, first1.accepted!.source, first1.accepted!.runs, first1.draft], [1, "grading", 1, null]);
     const cases = first1.accepted!.cases as Case[];
     assert.equal(cases.find(item => item.id === "example-7")!.expected, "billing", "the label-check answer is in the eval");
-    assert.deepEqual(cases.filter(item => item.origin === "written").map(item => [item.id, item.approved]), [["written-1", true], ["written-2", false]]);
+    assert.deepEqual(cases.filter(item => item.origin === "written").map(item => [item.id, item.approved]), [["written-1", true], ["written-2", true]]);
     assert.equal((await me.api<JobRow[]>("/api/runs")).body[0]!.evalVersion, 1);
 
     // An accepted eval is not edited in place: a person revises it into a draft, which pauses the task's runs.

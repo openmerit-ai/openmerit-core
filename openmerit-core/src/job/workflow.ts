@@ -1,6 +1,6 @@
 // The task job: one task's measurement as a Rivet workflow, the same in every host.
 //
-//   Source ▶ Cases (label check: wait for answers) ▶ Eval ▶ Models ▶ Ranking (grading loop) ▶ Agent eval ▶ Action
+//   Source ▶ Cases (label check: wait for answers) ▶ Eval ▶ Models ▶ Trial ⇄ grading loop ▶ Ranking ▶ Agent eval ▶ Action
 //
 // Every step is recorded, so a crash or a deploy resumes at the first unfinished step, and a job that
 // waits on a question sleeps on its queue until the answers arrive. Each measure call is its own step.
@@ -19,7 +19,7 @@
 import { createHash } from "node:crypto";
 import { Loop } from "@rivet-dev/workflows";
 import { applyLabelCheck, BudgetRefused, caseKind, checksBasedOn, completeWith, createClient, createMeasure, flow, graderFor, invalidCases, labelCheck, LABEL_CHECK_QUESTION, writeCases, WRITTEN_CASES, type Case, type Complete, type EndpointConfig, type MeasureResult, type TaskBundle } from "../ranking/index.ts";
-import { approvalQuestion, basedOn, baselineResult, byKind, CandidateUnavailable, catalogueIndex, CHALLENGERS, checkAgent, DEFAULT_REPEATS, EndChallengers, evaluateTask, stableSample, ungradableNotice, FINALISTS, floorNote, mergeEvidence, modelResult, newProgress, redact, SAMPLE_SIZE, score, SMALL_EVAL, strongest, taskResult, type AgentRun, type Catalogue, type CatalogueModel, type Funding, type Ledger, type ModelResult, type ReserveResult, type ResolvedGuardrails, type Settlement, settledUsd } from "../engine/index.ts";
+import { approvalQuestion, basedOn, baselineResult, byKind, CandidateUnavailable, trialOption, catalogueIndex, CHALLENGERS, checkAgent, DEFAULT_REPEATS, EndChallengers, evaluateTask, stableSample, ungradableNotice, FINALISTS, floorNote, mergeEvidence, modelResult, newProgress, redact, SAMPLE_SIZE, score, SMALL_EVAL, strongest, taskResult, type AgentRun, type Catalogue, type CatalogueModel, type Funding, type Ledger, type ModelResult, type ReserveResult, type ResolvedGuardrails, type Settlement, settledUsd } from "../engine/index.ts";
 import { agentBundle, caseEvidence } from "../connectors/agent-bundle.ts";
 import { evalEvidence } from "../connectors/eval-command.ts";
 import { EvalProxy, retryable } from "../eval/proxy.ts";
@@ -319,8 +319,9 @@ export function plannedSteps(ranked: number, unplaced: number, repeats: number):
 
 /** What a job will make, cost and take, roughly, before it spends: case runs, dollars (null when a price is unknown), the budget that caps them, and a range of minutes. */
 /**
- * `caseRuns`, `usd` and `minutes` are for one search. `rounds` is the most searches the job may run: in a task's
- * first run, each grading round that writes the eval again searches again, up to MAX_ROUNDS.
+ * `caseRuns`, `usd` and `minutes` are for one search, with a grading trial's run of a cheaper model when the job grades.
+ * `rounds` is the most grading rounds the job may run: in a task's first run, each round that writes the eval again runs
+ * the trial again, up to MAX_ROUNDS, before the one search.
  */
 export interface JobEstimate { caseRuns: number; usd: number | null; budgetUsd: number; minutes: { low: number; high: number }; rounds: number }
 
@@ -336,7 +337,7 @@ export function estimateJob(pool: Pool, bundle: TaskBundle, input: { repeats: nu
   const challengers = Math.min(CHALLENGERS, ranked) + unplaced;
   const fullRuns = (Math.min(FINALISTS, ranked) + challengers) * input.repeats;
   const screenRuns = (searchScreens + challengers) * Math.min(cases, SMALL_EVAL);
-  const baselineRuns = input.repeats * cases, candidateRuns = screenRuns + fullRuns * cases;
+  const baselineRuns = input.repeats * cases, candidateRuns = screenRuns + (fullRuns + (input.grading ? 1 : 0)) * cases;
   const prices = [...pool.ranked, ...pool.unplaced].map(option => input.costPerCall(option.endpointModel)).filter((value): value is number => value !== null).sort((a, b) => a - b);
   const median = prices.length ? prices[Math.floor(prices.length / 2)]! : null;
   const baseline = pool.baseline ? input.costPerCall(pool.baseline.endpointModel) : null;
@@ -348,7 +349,7 @@ export function estimateJob(pool: Pool, bundle: TaskBundle, input: { repeats: nu
 
 /** The estimate in one sentence, for the coding agent and the person it asks. */
 export const estimateLine = (estimate: JobEstimate) =>
-  `Measuring makes about ${estimate.caseRuns.toLocaleString("en-US")} case runs, ${estimate.usd === null ? "at a cost OpenMerit cannot estimate" : `about $${estimate.usd < 0.1 ? estimate.usd.toFixed(3) : estimate.usd.toFixed(2)}`}, never more than the $${estimate.budgetUsd.toFixed(2)} budget per job, and takes about ${estimate.minutes.low === estimate.minutes.high ? estimate.minutes.low : `${estimate.minutes.low} to ${estimate.minutes.high}`} minutes.${estimate.rounds > 1 ? ` That is one round: when your grades of its answers make OpenMerit write the eval again, it searches again, up to ${estimate.rounds} rounds, each about as much again or more, within the same budget.` : ""}`;
+  `Measuring makes about ${estimate.caseRuns.toLocaleString("en-US")} case runs, ${estimate.usd === null ? "at a cost OpenMerit cannot estimate" : `about $${estimate.usd < 0.1 ? estimate.usd.toFixed(3) : estimate.usd.toFixed(2)}`}, never more than the $${estimate.budgetUsd.toFixed(2)} budget per job, and takes about ${estimate.minutes.low === estimate.minutes.high ? estimate.minutes.low : `${estimate.minutes.low} to ${estimate.minutes.high}`} minutes.${estimate.rounds > 1 ? ` Before it searches, you grade answers of the current model and a cheaper one: when your grades make OpenMerit write the eval again, it runs that trial again, up to ${estimate.rounds} rounds, within the same budget.` : ""}`;
 
 /** The result's pick: its figures, the saving per call against the current model, and the calls that repay `runUsd`. */
 function pickOf(chosen: MeasuredModel, baseline: MeasuredModel, runUsd: number): NonNullable<JobResult["pick"]> {
@@ -477,8 +478,13 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
     const written = Array.isArray(step) ? { cases: step as Case[], version: null, spec: null, source: "openmerit" as EvalSource, bar: "current" as EvalBar } : step;
     // The bundle and cases change when the grading loop writes the eval again.
     let bundle: TaskBundle = written.spec ? { ...sent, ...written.spec } : sent;
+    // Grading first: a task's first run, a person started, on cases OpenMerit wrote, skips the label check of the written
+    // cases. A person grades a trial's answers instead, before any search. Jobs past this point before it are as they began.
+    const order = await ctx.getVersion("grade-first", 2);
+    const gradeFirst = order === 2 && await ctx.step("grade-first-run", async s =>
+      s.state.input.kind === "run" && written.version === null && written.cases.some(item => item.origin === "written" && item.expected !== undefined) && !!host.settings().config.openrouter.apiKey);
     let cases = await ctx.loop({
-      name: "label-check", state: written.cases,
+      name: "label-check", state: gradeFirst ? written.cases.map(item => (item.origin === "written" && item.approved === undefined ? { ...item, approved: true } : item)) : written.cases,
       run: async (loop, current) => {
         // An accepted eval was reviewed already: its unanswered cases are left out, not asked about.
         const questions = written.version === null ? labelQuestions(bundle, current) : [];
@@ -514,13 +520,15 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
     };
     let { invalid, usable, caseIds, kinds, counts } = casesOf(cases);
 
-    // The grading loop: in a task's first run, a person started, on cases OpenMerit wrote, a person grades sampled answers
-    // after each search (openmerit-core's eval/loop.ts, as the CLI's Scout does), and that is the review that accepts the
-    // eval. Where they and the eval disagree, OpenMerit writes the eval again and searches again; once they agree on every
-    // answer, the run accepts it as version 1. Jobs that had passed this point before the loop existed accept it here, as they began.
-    const gradingVersion = await ctx.getVersion("grading-loop", 2);
-    const grade = gradingVersion === 2 && await ctx.step("grading", async s =>
-      s.state.input.kind === "run" && written.version === null && usable.some(item => item.origin === "written") && !!host.settings().config.openrouter.apiKey);
+    // The grading loop (openmerit-core's eval/loop.ts), graded first: a trial runs the current model and one cheaper model,
+    // a person grades sampled answers, and that is the review that accepts the eval. Where they and the eval disagree,
+    // OpenMerit writes the eval again and runs the trial again; once they agree on every answer, the run accepts it as
+    // version 1 and only then searches the models on it. Jobs that had passed this point before the loop existed accept it
+    // here, as they began; a job that graded after its search (version 2) cannot resume in this order.
+    const gradingVersion = await ctx.getVersion("grading-loop", 3);
+    // Its recorded step says whether it was grading.
+    const gradedAfterSearch = gradingVersion === 2 && await ctx.step("grading", async () => false);
+    const grade = gradingVersion === 3 && gradeFirst && usable.some(item => item.origin === "written");
     /** Accepts a first run's eval as version 1, as the job measures it, and records the version the job ran on. */
     const acceptFirst = (name: string, source: EvalSource, bar: EvalBar, by: string | null) => ctx.step({
       name, timeout: 60_000,
@@ -664,6 +672,8 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
       };
     };
     let counter = 0;
+    /** The share of case runs the current model passed in the grading trial, for the live view of the trial's cheaper model. */
+    let trialRate: number | null = null;
     /** How many measure steps the job takes in all, once the search knows its size. Set outside steps, from the step count, so a replay sets the same. */
     let plannedTotal: number | null = null;
     /**
@@ -676,7 +686,8 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
       const name = `measure-${++counter}`;
       if (command) return ctx.step({ name, timeout: 0, maxRetries: INTERRUPTIONS, run: async s => { const result = await measureCommand(command, option, ids, `${jobId}/${name}`, host.account(s, s.state.input.accountId), s.abortSignal); if (result.kind === "ok" || result.kind === "unavailable") done(s); return result; } }) as Promise<Measured>;
       if (!ids) throw new Error("measuring without an eval command needs the cases");
-      const against = option !== pool.baseline && progress.baseline.length ? score(progress.baseline).score : null;
+      // Against the current model's runs so far: the search's, else the grading trial's.
+      const against = option === pool.baseline ? null : progress.baseline.length ? score(progress.baseline).score : trialRate;
       return ctx.step({
         name, timeout: 0, maxRetries: INTERRUPTIONS,
         run: async s => {
@@ -736,14 +747,24 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
     let endedFix: FixFor | null = null;
 
     try {
+      if (gradedAfterSearch) throw new JobStop("failed", "failed", "The run was grading its eval when a deploy changed OpenMerit to grade the eval before searching, so it cannot resume. Nothing is charged for it; run the task again to start over.", { kind: "rerun" });
       if (policy === 1) throw new JobStop("failed", "failed", "The job started measuring before a deploy changed how OpenMerit measures, so it cannot resume. Nothing is charged for it; call openmerit_recommend again to rerun it.", { kind: "rerun" });
       if (!command && !usable.length) throw new JobStop("stopped", "no_cases", "No case has a known correct answer. Add examples with expected answers to the bundle, or answer the label check.",
         { kind: "ask_agent", prompt: `OpenMerit found no test case with a known correct answer for the task "${bundle.task}". Add examples with their expected answers to its task bundle, taken from the code's tests or fixtures, then call openmerit_recommend again.` });
       if (!pool.baseline) throw new JobStop("failed", "baseline_failed", "No endpoint can run the current model: OpenMerit's OpenRouter key is not configured, and no endpoint of yours serves it.", { kind: "open", label: "Add an endpoint", path: "/connections/#endpoints" });
       const current = pool.baseline;
 
-      /** Each option's answers on its first full run of the round, for the samples. */
-      const answersOf = new Map<string, CaseAnswer[]>();
+      /**
+       * The trial's runs, which the search reads instead of measuring again: the current model's, by repeat, and the
+       * trial model's, by option. A screen takes its cases from the trial model's full run, at its share of the cost.
+       */
+      const trialRuns = new Map<string, Extract<Measured, { kind: "ok" }>>();
+      const fromTrial = (key: string, ids: readonly string[] | null): Measured | null => {
+        const run = trialRuns.get(key);
+        if (!run || !ids || !ids.every(id => run.results.some(item => item.caseId === id))) return null;
+        const wanted = new Set(ids), share = ids.length / Math.max(1, run.results.length);
+        return { ...run, results: run.results.filter(item => wanted.has(item.caseId)), costUsd: run.costUsd * share, graderCostUsd: run.graderCostUsd * share, costIsEstimate: run.costIsEstimate || share < 1, answers: [] };
+      };
 
       // 4. Ranking: openmerit/engine's evaluateTask, the policy the CLI runs too. Each of its measure calls is one step.
       // The agent was told the provisional pick: when no measured model beats the current one per call, it is measured before keeping the current model.
@@ -760,7 +781,8 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
           measure: async (option, items, call) => {
             const target = option ?? current;
             if (call.provisional && call.role === "screen") plannedTotal = counter + 1 + repeats;
-            const result = await measure(target, items ? [...items] : command ? null : [...caseIds], grade && call.role !== "screen" && call.repeat === 1);
+            const ids = items ? [...items] : command ? null : [...caseIds];
+            const result = (call.attempt ?? 1) === 1 && (call.role === "baseline" || call.role === "screen" && call.repeat === 1) && fromTrial(option ? option.key : `current-${call.repeat}`, ids) || await measure(target, ids);
             if (result.kind === "unavailable") {
               if (!option) throw new JobStop("stopped", "baseline_failed", `${current.model} could not run: ${result.reason}`, { kind: "rerun" });
               throw new CandidateUnavailable(result.reason);
@@ -774,7 +796,6 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
               throw stop;
             }
             if (!option) for (const item of result.results) if (!item.pass && item.failure !== "ungradable" && item.reason && !failedCases.has(item.caseId)) failedCases.set(item.caseId, { caseId: item.caseId, kind: kinds[item.caseId] ?? "case", reason: item.reason });
-            if (result.answers && !answersOf.has(target.key)) answersOf.set(target.key, result.answers);
             // The checks a failed case missed, for the criteria bar (meetsCriteria).
             const checks = Object.fromEntries(result.results.flatMap(item => (item.failedChecks?.length ? [[item.caseId, item.failedChecks]] : [])));
             // Cases lost to a failed or timed-out call, not a wrong answer: the engine measures them once more.
@@ -795,24 +816,46 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
           },
         });
       };
-      let loop: LoopState = startLoop(1, acceptedBar);
-      let evaluated = await rank(1, loop.bar);
+      /**
+       * The trial a person grades before the search: the current model on every case, `repeats` times (the search's
+       * baseline, which it reads back), and one cheaper model once: the search's first probe, the middle of the pool,
+       * moving down the weaker half while it fails no case the current model passed in every run (trialOption).
+       */
+      const trial = async () => {
+        trialRuns.clear();
+        const runs: Extract<Measured, { kind: "ok" }>[] = [];
+        const reliable = () => caseIds.filter(id => runs.every(run => run.results.some(item => item.caseId === id && item.pass)));
+        for (let repeat = 1; repeat <= repeats; repeat++) {
+          const result = await measure(current, [...caseIds], repeat === 1);
+          if (result.kind === "unavailable") throw new JobStop("stopped", "baseline_failed", `${current.model} could not run: ${result.reason}`, { kind: "rerun" });
+          if (result.kind !== "ok") throw stopFor(result, `the current model ${current.model}`);
+          runs.push(result); trialRuns.set(`current-${repeat}`, result);
+          // The search stops repeating here too, as too few cases are left to screen on.
+          if (reliable().length < SAMPLE_SIZE) break;
+        }
+        const passed = new Set(reliable());
+        trialRate = runs.flatMap(run => run.results).filter(item => item.pass).length / Math.max(1, runs.flatMap(run => run.results).length);
+        let answers: CaseAnswer[] = [];
+        const picked = await trialOption(pool.ranked, async option => {
+          const result = await measure(option, [...caseIds], true);
+          if (result.kind === "unavailable" || result.kind === "error") throw new CandidateUnavailable(result.reason);
+          if (result.kind !== "ok") throw stopFor(result, option.model);
+          trialRuns.set(option.key, result); answers = result.answers ?? [];
+          return result.results.some(item => !item.pass && passed.has(item.caseId));
+        });
+        return pickSamples([
+          { model: current.model, role: "current", answers: runs[0]?.answers ?? [] },
+          ...(picked ? [{ model: picked.model, role: "trial" as const, answers }] : []),
+        ]);
+      };
+      let loop: LoopState = startLoop(1, acceptedBar, true);
       let widened = acceptedBar === "criteria";
       while (grade) {
         const round = loop.round, suffix = round === 1 ? "" : `-r${round}`;
-        // The answers a person grades: the current model's first run, and the pick's, else the best measured finalist's.
-        const ranked = taskResult(evaluated, describe, describe(current), rules);
-        const others = [...answersOf.entries()].filter(([key]) => key !== current.key);
-        const rate = (answers: readonly CaseAnswer[]) => answers.filter(answer => answer.pass).length / Math.max(1, answers.length);
-        const candidateKey = (ranked.pick && answersOf.has(optionOf(ranked.pick).key) ? optionOf(ranked.pick).key : null) ?? others.sort(([, a], [, b]) => rate(b) - rate(a))[0]?.[0] ?? null;
-        const candidate = candidateKey ? [...pool.ranked, ...pool.unplaced].find(option => option.key === candidateKey) ?? null : null;
-        const samples = pickSamples([
-          { model: current.model, role: "current", answers: answersOf.get(current.key) ?? [] },
-          ...(candidate ? [{ model: candidate.model, role: "candidate" as const, answers: answersOf.get(candidate.key)! }] : []),
-        ]);
+        const samples = await trial();
         // No answer to grade: the eval is accepted as a first run's is without grading.
         if (!samples.length) { evalVersion = await acceptFirst(`eval${suffix}`, written.source, loop.bar, null); break; }
-        loop = advanceLoop(loop, { type: "searched", artifact: { samples } });
+        loop = advanceLoop(loop, { type: "tried", artifact: { samples } });
         const questions = gradeQuestions(bundle.task, loop);
         const graded = await ctx.loop({
           name: `grade${suffix}`, state: { grades: {} as Record<string, Omit<SampleGrade, "sampleId">>, by: null as string | null },
@@ -892,11 +935,10 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
           ({ invalid, usable, caseIds, kinds, counts } = casesOf(cases));
           loop = advanceLoop(loop, { type: "regenerated" });
         }
-        // The next round measures from scratch, on the wide pool once the bar is the criteria.
-        if (loop.bar === "criteria" && !widened) { models = await poolStep("models-criteria", true); pool = models.pool as Pool; widened = true; }
-        progress = newProgress<Option>(); failedCases.clear(); answersOf.clear();
-        evaluated = await rank(loop.round, loop.bar);
       }
+      // The search, on the eval a person accepted: on the wide pool once the bar is the criteria.
+      if (loop.bar === "criteria" && !widened) { models = await poolStep("models-criteria", true); pool = models.pool as Pool; widened = true; }
+      const evaluated = await rank(loop.round, loop.bar);
 
       // The floor: the current model fails too much of its own eval for it to rank anything. A result, not a failure: it says why, with the failed cases.
       if (evaluated.status === "below_floor") {

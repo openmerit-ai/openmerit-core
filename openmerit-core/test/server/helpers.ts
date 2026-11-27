@@ -35,7 +35,8 @@ export function costOf(model: string): number {
  * Offered tools, the fake acts as an agent: it looks the ticket up once, then answers. A model `misuse`
  * picks calls a tool the request does not offer instead, then answers the same.
  */
-export interface FakeModels { url: string; calls: { model: string; ticket: string; auth: string }[]; onCall: ((index: number) => Promise<void>) | null; cost: ((model: string) => number | undefined) | null; keyStatus?: number; misuse?: (model: string) => boolean; close: () => Promise<void> }
+/** `writes: false` makes the case writer answer with no cases. */
+export interface FakeModels { url: string; calls: { model: string; ticket: string; auth: string }[]; onCall: ((index: number) => Promise<void>) | null; cost: ((model: string) => number | undefined) | null; keyStatus?: number; misuse?: (model: string) => boolean; writes?: boolean; close: () => Promise<void> }
 
 /**
  * An OpenAI chat completions answer with OpenRouter's usage and cost: streamed as server-sent events
@@ -78,7 +79,7 @@ export async function fakeModels(): Promise<FakeModels> {
       // A writer asked through a harness (the reviser's) gives each input as a list of {name, value}.
       const listed = text.includes("list of {name, value}");
       const answer = reviser ? JSON.stringify({ criteria: ["The queue is the one the ticket's main problem belongs to."], guardrails: [] })
-        : writer ? JSON.stringify({ cases: Object.entries(WRITTEN).map(([written, queue]) => (listed ? { kind: "typical", input: [{ name: "ticket", value: written }], expected: queue, toolResults: [] } : { input: { ticket: written }, expected: queue })) })
+        : writer ? JSON.stringify({ cases: Object.entries(fake.writes === false ? {} : WRITTEN).map(([written, queue]) => (listed ? { kind: "typical", input: [{ name: "ticket", value: written }], expected: queue, toolResults: [] } : { input: { ticket: written }, expected: queue })) })
         : weak ? "other" : QUEUES[ticket] ?? "other";
       const usage = { prompt_tokens: 50, completion_tokens: 2, cost: fake.cost?.(parsed.model) ?? costOf(parsed.model) };
       if (parsed.tools?.length && !parsed.messages.some(message => message.role === "tool")) {

@@ -1,7 +1,7 @@
 // `openmerit/engine`: the parts of Scout the local CLI and the cloud app share. Pure TypeScript with
 // no Node.js-only imports at load time: the task-evaluation policy, the search over an ordered ladder, the catalogue types, the
 // spend ledger, the task result, the pool rule, the provisional pick, the proposed edit, the evidence and its quality rule, the connector ports, the guardrail resolver, the agent-eval rule and the redaction rules.
-export { binarySearch, challengers, order, outward, CandidateUnavailable, SAMPLE_SIZE, FINALISTS, CHALLENGERS, type Rung, type Ranked, type Stage, type SearchResult, type ChallengerOptions } from "./search.ts";
+export { binarySearch, trialOption, challengers, order, outward, CandidateUnavailable, SAMPLE_SIZE, FINALISTS, CHALLENGERS, type Rung, type Ranked, type Stage, type SearchResult, type ChallengerOptions } from "./search.ts";
 export { evaluateTask, stableSample, ungradableNotice, meetsCriteria, CRITERIA_PASS_RATE, score, shortfall, rankTop, newProgress, byKind, floorNote, EndChallengers, DEFAULT_REPEATS, TOP, EVAL_FLOOR, MIN_SAVING, SMALL_EVAL, type KindRate, type EvaluateInput, type EvaluateResult, type Evaluated, type Measurement, type MeasureCall, type Progress, type Rules, type Score, type Shortfall, type Criteria } from "./evaluate.ts";
 export { pool, ladder, blendedPrice, eligible, type Needs } from "./pool.ts";
 export { taskResult, criteriaSummary, modelResult, baselineResult, qualificationNote, cheaperThanCurrent, type ModelResult, type TaskResult, type Described } from "./result.ts";
