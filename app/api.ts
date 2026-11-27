@@ -67,7 +67,7 @@ export interface Task {
 // draft is open the task's runs and watch wait.
 export interface EvalCase { id: string; input: Record<string, string>; expected?: unknown; origin: "example" | "written" | "trace"; kind?: string; approved?: boolean; toolResults?: unknown }
 export interface EvalSpec { description?: string; input?: { description: string }; steps?: { description: string; tools?: string[]; access?: string; required?: boolean; after?: number[] }[]; criteria?: string[]; guardrails?: string[] }
-export type EvalSource = "openmerit" | "chatgpt" | "examples" | "app" | "grading";
+export type EvalSource = "openmerit" | "chatgpt" | "harness" | "examples" | "app" | "grading";
 export type TaskPart = "prompt" | "tools" | "output";
 export interface EvalAccepted { version: number; spec: EvalSpec; cases: EvalCase[]; source: EvalSource; by: string | null; byName?: string | null; at: string; runs: number }
 export interface EvalRevision { reason: "task_changed" | "revise"; changed: TaskPart[]; spec: EvalSpec; cases: EvalCase[]; output: TaskOutput | null; by: string | null; byName?: string | null; at: string }

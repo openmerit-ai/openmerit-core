@@ -7,7 +7,7 @@
 // `node scripts/smoke-packed.ts` from openmerit-core/ after `npm ci`.
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -119,7 +119,25 @@ try {
   const url = `http://localhost:${port}`;
   assert.match(await openmerit("server", "status"), new RegExp(`^running: ${url}`));
   assert.match(await (await fetch(`${url}/`)).text(), /<html/i, "the server serves the web app");
-  assert.equal((await fetch(link, { redirect: "manual" })).status, 303, "the sign-in link opens a browser session");
+  // A coding agent's new endpoint waits, sealed with the server's own key, for the person; it opens after a restart.
+  const token = readFileSync(join(home, "server", "token"), "utf8").trim();
+  const endpoint = { kind: "openai-compatible", baseUrl: `${models.url}/v1`, apiKey: "sk-smoke-endpoint", allowedModels: ["openai/gpt-5-nano"] };
+  const held = await (await fetch(`${url}/api/endpoints`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(endpoint) })).json() as { status: string; confirmation: { id: string } };
+  assert.equal(held.status, "needs_confirmation", JSON.stringify(held));
+  const keyFile = join(home, "server", "key");
+  const key = readFileSync(keyFile, "utf8");
+  assert.equal(statSync(keyFile).mode & 0o777, 0o600, "the key is readable by its owner only");
+  await openmerit("server", "stop");
+  const again = /https?:\/\/\S+\/signin\?code=\S+/.exec(await openmerit("server", "start", "--port", String(port)))![0];
+  assert.equal(readFileSync(keyFile, "utf8"), key, "a restart keeps the key");
+  const opened = await fetch(again, { redirect: "manual" });
+  assert.equal(opened.status, 303, "the sign-in link opens a browser session");
+  assert.equal((await fetch(link, { redirect: "manual" })).status, 401, "the first server's link no longer works");
+  const person = { cookie: opened.headers.get("set-cookie")!.split(";")[0]!, origin: url, "content-type": "application/json" };
+  const confirmed = await (await fetch(`${url}/api/confirmations/${held.confirmation.id}`, { method: "POST", headers: person, body: JSON.stringify({ confirm: true }) })).json() as { status: string };
+  assert.equal(confirmed.status, "done", `the person confirmed the endpoint: ${JSON.stringify(confirmed)}`);
+  const endpoints = await (await fetch(`${url}/api/endpoints`, { headers: person })).json() as { baseUrl: string; keyLast4: string }[];
+  assert.ok(endpoints.some(item => item.baseUrl === endpoint.baseUrl), `the endpoint was saved: ${JSON.stringify(endpoints)}`);
 
   const me = JSON.parse(await openmerit("whoami", "--json")) as { server: string; mode: string };
   assert.deepEqual([me.server, me.mode], [url, "self-hosted"]);

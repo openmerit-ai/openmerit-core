@@ -49,7 +49,7 @@ function table(tasks: Task[]): Html {
 
 // Who wrote the accepted eval, in the page's words.
 const SOURCES: Record<EvalSource, string> = {
-  openmerit: "OpenMerit wrote the cases", chatgpt: "Written on a member's ChatGPT subscription",
+  openmerit: "OpenMerit wrote the cases", chatgpt: "Written on a member's ChatGPT subscription", harness: "Written by OpenMerit Harness on your plan",
   examples: "The coding agent's examples", app: "Accepted in the app",
   grading: "Accepted by grading a run's answers",
 };

@@ -3,7 +3,7 @@
 // cloud/README.md.
 import { createServer } from "node:http";
 import { startApp } from "./app.ts";
-import { ClerkAuth, LocalAuth, localToken } from "./auth.ts";
+import { ClerkAuth, LocalAuth, localKey, localToken } from "./auth.ts";
 import { StripeBilling } from "./billing.ts";
 import { loadConfig } from "./config.ts";
 import { fetchCatalogue } from "../catalogue/build.ts";
@@ -24,6 +24,8 @@ if (local) {
   process.env.RIVETKIT_STORAGE_PATH ??= config.dataDir;
   // The local engine's admin token is the server's token, so nothing without it reaches the engine either.
   process.env.RIVET__AUTH__ADMIN_TOKEN = local.token;
+  // Endpoint keys and held confirmations are sealed with a key kept beside the token, unless OPENMERIT_KEY_ENCRYPTION_KEY names one.
+  config.keyEncryptionKey ??= localKey(config.dataDir);
 }
 const localAuth = local ? new LocalAuth(local.token, local.file) : null;
 const { registry } = await startApp({

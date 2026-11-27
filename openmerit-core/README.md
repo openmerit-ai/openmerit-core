@@ -35,7 +35,7 @@ A global install takes about 450 MB on Linux x64, most of it the local Rivet eng
 | File | Holds |
 | --- | --- |
 | `~/.openmerit/login.json` (mode 0600) | The CLI's sign-in: openmerit.ai's OAuth tokens, or which self-hosted server and token file |
-| `~/.openmerit/server/` | A self-hosted server's data: its engine store (tasks, runs, ledger), `token` (mode 0600), `server.json` and `server.log` |
+| `~/.openmerit/server/` | A self-hosted server's data: its engine store (tasks, runs, ledger), `token` and `key` (mode 0600), `server.json` and `server.log` |
 | `~/.openmerit/config.json` | The harness choice (see [Connect the harness](#connect-the-harness)) |
 | `~/.openmerit/agent/` | The harness's files: `auth.json` (mode 0600) with the ChatGPT sign-in, and pi-claude-bridge's config and log |
 | `~/.openmerit/secrets.json` (mode 0600) | Keys you type in at the prompt |
@@ -53,7 +53,7 @@ openmerit connect codex --device-code --yes   # the same on a server without a b
 openmerit connect api --api-provider anthropic --api-model claude-sonnet-5-5 --api-key-env ANTHROPIC_API_KEY
 ```
 
-The harness is meant to write a self-hosted server's cases on your own Claude or ChatGPT plan. The self-hosted server does not use it yet: it writes cases on OpenRouter (see [Server](#server)).
+On a self-hosted server, the harness writes each task's cases, and rewrites them from your grades, on your own Claude or ChatGPT plan or API key, so writing an eval costs OpenMerit nothing. The server reads the connection when a job writes cases, so a new `openmerit connect` applies to the next job without a restart.
 
 `openmerit connect` signs in where needed, makes one round trip through the harness and saves the connection only when that works. A failed check keeps the previous connection. `--model <id>` picks the model for Claude Code (default `claude-sonnet-5-5`) or Codex. Which Codex models a ChatGPT account may use depends on its plan, so without `--model` `openmerit connect codex` tries them from the highest catalogue ECI down and saves the first one the plan accepts.
 
@@ -77,7 +77,8 @@ Whichever powers it, the harness reads the repository only through pi's read-onl
 
 - It listens on `127.0.0.1` only, on port 7330 (`--port` or `OPENMERIT_PORT`). Its local Rivet engine takes the next two ports and the port 11 above, and its metrics the port 3 above: 7330 uses 7330 to 7333 and 7341.
 - It keeps its tasks, runs, ledger, token and log in `~/.openmerit/server` (`OPENMERIT_DATA_DIR`). No account, plan or Clerk sign-in; the spend caps still apply.
-- It writes cases and judges answers on OpenRouter with `OPENROUTER_API_KEY` from the environment `server start` runs in; without it, a task measures on its examples and your own eval only.
+- It writes each task's cases with the harness `openmerit connect` set up; without one, on OpenRouter with `OPENROUTER_API_KEY` from the environment `server start` runs in. That key also judges text answers and runs candidates on OpenRouter. Without either, a task measures on its examples and your own eval only. When the harness fails, such as a lapsed sign-in, the job says so and falls back to OpenRouter.
+- Your own endpoints (`openmerit_recommend` measures on the models you allow on them) keep their keys encrypted with a key the server writes to `~/.openmerit/server/key` (mode 0600) on first start, or with `OPENMERIT_KEY_ENCRYPTION_KEY`. Keep the file: without it the server cannot open the endpoint keys it saved.
 - It serves the web app at its own address. `start` prints a sign-in link for it, which works once, for ten minutes; `openmerit server link` prints a new one. The link opens a browser session of 30 days, which ends when the server restarts.
 - Coding agents and scripts sign in with the token in `~/.openmerit/server/token`; `openmerit mcp` and the CLI read it for you. A critical request sent with the token, such as a higher budget, grades or a decision on a switch, waits until you confirm it in the web app: the token cannot confirm.
 - `openmerit server status` shows whether it runs; `openmerit server stop` stops it. Its log is `~/.openmerit/server/server.log`.

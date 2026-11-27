@@ -129,7 +129,8 @@ export async function startApp(options: { models: FakeModels; env?: Record<strin
   const port = options.enginePort ?? await enginePort();
   // Only what the app needs: no credential from the orb reaches it.
   const env: Record<string, string> = {
-    PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", TEST_STORAGE: storage, TEST_LOCAL_TOKEN: LOCAL_TOKEN, TEST_ENGINE_PORT: String(port), PORT: "0", RIVET_LOG_LEVEL: "error",
+    // OPENMERIT_HOME in the storage: a self-hosted app reads `openmerit connect`'s harness there, never this machine's.
+    PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", OPENMERIT_HOME: storage, TEST_STORAGE: storage, TEST_LOCAL_TOKEN: LOCAL_TOKEN, TEST_ENGINE_PORT: String(port), PORT: "0", RIVET_LOG_LEVEL: "error",
     OPENROUTER_API_KEY: "or-test-key", OPENROUTER_BASE_URL: options.models.url, OPENMERIT_ALLOW_PRIVATE_ENDPOINTS: "1",
     OPENMERIT_KEY_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"), OPENMERIT_PUBLIC_URL: "https://openmerit.test", OPENMERIT_APP_URL: "https://app.openmerit.test",
     ...options.env,
