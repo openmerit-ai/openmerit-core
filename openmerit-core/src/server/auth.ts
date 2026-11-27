@@ -190,6 +190,20 @@ export class LocalAuth implements Auth {
   }
 }
 
+/**
+ * The self-hosted server's key-encryption key: `<dataDir>/key`, 32 random bytes written on first start,
+ * readable only by its owner. It encrypts endpoint keys and held confirmations, so it must outlive
+ * restarts: a new key could not open what the old one sealed.
+ */
+export function localKey(dataDir: string): Buffer {
+  const file = join(dataDir, "key");
+  if (existsSync(file)) return Buffer.from(readFileSync(file, "utf8").trim(), "base64");
+  mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+  const key = randomBytes(32);
+  writeFileSync(file, `${key.toString("base64")}\n`, { mode: 0o600, flag: "wx" });
+  return key;
+}
+
 /** The self-hosted server's token: `<dataDir>/token`, written with a new random token on first start, readable only by its owner. */
 export function localToken(dataDir: string): { token: string; file: string } {
   const file = join(dataDir, "token");

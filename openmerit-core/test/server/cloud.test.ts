@@ -2,7 +2,7 @@
 // billing webhooks, endpoints, guardrails and watches. Sign-in, Stripe and every model are local
 // fakes, and the app runs in a child process so a test can SIGKILL it mid-job.
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
@@ -902,6 +902,26 @@ test("a self-hosted server starts a job without a plan, and its Stripe settings 
     const metadata = await (await fetch(`${app.url}/.well-known/oauth-protected-resource`)).json() as Data;
     assert.deepEqual(metadata.authorization_servers, [], "self-hosted names no Clerk issuer");
     assert.equal((await subscribe(app, "org_self")).status, 503, "no Stripe webhook is applied");
+  } finally { await stop(app); await models.close(); }
+});
+
+test("a self-hosted server writes a task's cases with the OpenMerit Harness openmerit connect set up, not on OpenMerit's key", async () => {
+  const models = await fakeModels();
+  // `openmerit connect api` with a Pi provider on the fake model server: what ~/.openmerit holds afterwards.
+  const home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
+  writeFileSync(join(home, "config.json"), JSON.stringify({ harness: { kind: "api", api: { provider: "fake", model: "harness", apiKey: { env: "FAKE_HARNESS_KEY" } } } }));
+  mkdirSync(join(home, "agent"));
+  writeFileSync(join(home, "agent", "models.json"), JSON.stringify({ providers: { fake: { baseUrl: models.url, api: "openai-completions", apiKey: "sk-fake", models: [{ id: "harness" }] } } }));
+  const app = await startApp({ models, env: { OPENMERIT_MODE: "self-hosted", OPENMERIT_HOME: home, FAKE_HARNESS_KEY: "sk-fake" } });
+  try {
+    const agent = caller(app, LOCAL_TOKEN);
+    const started = await agent.tool("openmerit_recommend", { bundle: bundle(), environment: "acme/support" });
+    assert.equal(started.isError, false, started.text);
+    const waiting = await waitFor(() => agent.tool("openmerit_result", { job_id: started.data.job_id }), value => value.data.status === "needs_input");
+    const writers = models.calls.filter(call => call.ticket.startsWith("writer:"));
+    assert.ok(writers.length > 0 && writers.every(call => call.model === "harness"), `the harness wrote the cases: ${JSON.stringify(writers)}`);
+    assert.ok((waiting.data.notices as string[]).some(notice => /OpenMerit Harness \(api:fake\/harness\) wrote the cases/.test(notice)), JSON.stringify(waiting.data.notices));
+    assert.match(JSON.stringify(waiting.data.questions), /I was charged after I cancelled/, "the label check asks about the harness's cases");
   } finally { await stop(app); await models.close(); }
 });
 

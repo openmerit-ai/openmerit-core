@@ -24,6 +24,7 @@ import { agentBundle, caseEvidence } from "../connectors/agent-bundle.ts";
 import { evalEvidence } from "../connectors/eval-command.ts";
 import { EvalProxy, retryable } from "../eval/proxy.ts";
 import { runEval } from "../eval/runner.ts";
+import type { Harness } from "../harness/harness.ts";
 import { advanceLoop, completeHarness, criteriaOf, feedbackOf, gradeQuestions, MAX_ROUNDS, pickSamples, readGrade, reviseEval, startLoop, type CaseAnswer, type LoopState, type SampleGrade } from "../eval/loop.ts";
 import { buildPool, OPENROUTER, regionNotice, type EndpointInfo, type Option, type Pool, type Provisional } from "./pool.ts";
 import { paybackCalls, proposeEdit, renderMarkdown, type AgentEvalSummary, type Fix, type JobResult, type MeasuredModel } from "./report.ts";
@@ -40,7 +41,7 @@ export type EvalSpec = Pick<TaskBundle, "description" | "input" | "steps" | "cri
  * Who wrote the accepted eval: OpenMerit's case writer, a member's subscription or the coding agent's examples alone (each by a first run),
  * a person in the app, or a person grading a run's answers, after OpenMerit wrote it again from any grades that disagreed.
  */
-export type EvalSource = "openmerit" | "chatgpt" | "examples" | "app" | "grading";
+export type EvalSource = "openmerit" | "chatgpt" | "harness" | "examples" | "app" | "grading";
 /** What a model must meet: the current model's score, or the eval's checks once a person marked the current model's own answers wrong. */
 export type EvalBar = "current" | "criteria";
 export const specOf = (bundle: TaskBundle): EvalSpec => Object.fromEntries((["description", "input", "steps", "criteria", "guardrails"] as const).filter(key => bundle[key] !== undefined).map(key => [key, bundle[key]])) as EvalSpec;
@@ -193,10 +194,12 @@ export interface JobHost<S extends JobStepContext> {
   task(s: S, accountId: string, taskId: string): JobTask;
   catalogue(s: S): Promise<Catalogue>;
   /**
-   * The case writer of the member who started the run, on their own subscription: its source, its
-   * provider's name and a way to open it. Null when they chose none; rejects when their sign-in cannot be used.
+   * The case writer on the user's own plan instead of OpenMerit's key: hosted, the subscription of the
+   * member who started the run; self-hosted, OpenMerit Harness as `openmerit connect` set it up. Its
+   * source, a sentence saying who wrote the cases, and a way to open it for a task whose answer is JSON
+   * or not; `harness` also rewrites an eval from grades. Null when there is none; rejects when it cannot be used.
    */
-  memberWriter(s: S, userId: string): Promise<{ source: EvalSource; name: string; open: (signal: AbortSignal) => Promise<{ complete: Complete; model: string }> } | null>;
+  memberWriter(s: S, userId: string | null): Promise<{ source: EvalSource; by: (model: string) => string; open: (signal: AbortSignal, json: boolean) => Promise<{ complete: Complete; model: string; harness?: Harness }> } | null>;
   settings(): {
     config: { mode: "hosted" | "self-hosted"; appUrl: string; openrouter: { apiKey: string | null }; models: { caseWriter: string; judge: string }; limits: { defaultJobBudgetUsd: number } };
     fetch: typeof fetch;
@@ -423,23 +426,25 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
         const { config, fetch } = host.settings();
         let complete: Complete = async () => "";
         let count = 0;
-        // The member who started the run may write its cases on their own Claude or ChatGPT subscription.
-        // When that sign-in cannot be used, the job says so and writes them on OpenMerit's key.
-        const userId = s.state.input.userId ?? null;
-        const mine = approved === null && userId ? await host.memberWriter(s, userId).catch((error: unknown) => {
-          const notice = `Your subscription did not write the cases (${redact(error instanceof Error ? error.message : String(error)).slice(0, 300)}): OpenMerit's key wrote them.`;
+        // The cases may be written on the user's own plan: a member's subscription, or a self-hosted server's
+        // OpenMerit Harness. When it cannot be used, the job says so and writes them on OpenMerit's key.
+        const mine = approved === null ? await host.memberWriter(s, s.state.input.userId ?? null).catch((error: unknown) => {
+          const selfHosted = config.mode === "self-hosted";
+          const notice = `${selfHosted ? "OpenMerit Harness" : "Your subscription"} did not write the cases (${redact(error instanceof Error ? error.message : String(error)).slice(0, 300)}): ${config.openrouter.apiKey ? "OpenMerit's key wrote them" : "the job measures on the bundle's examples"}.`;
           s.state.notices.push(notice);
-          s.state.fixes = [...(s.state.fixes ?? []), { kind: "open", label: "Account settings", path: "/account/", notice }];
+          s.state.fixes = [...(s.state.fixes ?? []), selfHosted
+            ? { kind: "ask_agent", notice, prompt: "Ask the user to run `openmerit connect` in a terminal to fix OpenMerit Harness, then call openmerit_recommend again." }
+            : { kind: "open", label: "Account settings", path: "/account/", notice }];
           return null;
         }) : null;
         let writtenBy: string | null = null;
         let source: EvalSource = approved === null ? "examples" : "openmerit";
         if (mine) {
           source = mine.source;
-          const writer = await mine.open(s.abortSignal);
+          const writer = await mine.open(s.abortSignal, sent.output.kind === "json");
           complete = writer.complete;
           count = WRITTEN_CASES;
-          writtenBy = `${mine.name} (${writer.model}) wrote the cases, on the subscription of the member who started the run.`;
+          writtenBy = mine.by(writer.model);
         } else if (approved === null && config.openrouter.apiKey) {
           const index = catalogueIndex(await host.catalogue(s));
           const account = host.account(s, accountId);
@@ -858,13 +863,18 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
               s.state.phase = "cases"; s.state.live = null; s.state.updatedAt = now();
                       const account = host.account(s, s.state.input.accountId);
               const { config, fetch } = host.settings();
-              const index = catalogueIndex(await host.catalogue(s));
-              const writer = createClient(await keysFor(jobId, account), { fetch, model: model => index.find(model), timeoutMs: 600_000 });
-              // The reviser and the case writer run on OpenMerit's key, metered in the job's ledger under this round's keys.
-              const complete = completeWith(writer, { endpoint: OPENROUTER, model: config.models.caseWriter }, jobLedger(account, jobId), `${jobId}/revise-r${round}`, s.abortSignal);
               let value;
               try {
-                value = await reviseEval({ bundle: from.bundle, cases: from.usable }, feedbackOf(artifact, grades), completeHarness(complete), s.abortSignal);
+                // A self-hosted server's OpenMerit Harness rewrites the eval when it is connected. Otherwise the reviser
+                // and the case writer run on OpenMerit's key, metered in the job's ledger under this round's keys.
+                const own = config.mode === "self-hosted" ? await (await host.memberWriter(s, s.state.input.userId ?? null))?.open(s.abortSignal, from.bundle.output.kind === "json") : undefined;
+                let harness = own?.harness;
+                if (!harness) {
+                  const index = catalogueIndex(await host.catalogue(s));
+                  const writer = createClient(await keysFor(jobId, account), { fetch, model: model => index.find(model), timeoutMs: 600_000 });
+                  harness = completeHarness(completeWith(writer, { endpoint: OPENROUTER, model: config.models.caseWriter }, jobLedger(account, jobId), `${jobId}/revise-r${round}`, s.abortSignal));
+                }
+                value = await reviseEval({ bundle: from.bundle, cases: from.usable }, feedbackOf(artifact, grades), harness, s.abortSignal);
               } catch (error) {
                 if (s.abortSignal.aborted) throw error;
                 return { error: redact(error instanceof Error ? error.message : String(error)).slice(0, 300) };

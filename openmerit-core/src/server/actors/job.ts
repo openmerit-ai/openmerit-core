@@ -5,13 +5,16 @@
 //
 // The account actor holds the guardrails, the accepted eval, the endpoints and their keys, and the
 // ledger; the task actor holds saved labels and the results; the catalogue actor the catalogue. A
-// member's Claude or ChatGPT subscription can write the cases. Endpoint keys stay in this process's
+// member's ChatGPT subscription, or a self-hosted server's OpenMerit Harness, can write the cases. Endpoint keys stay in this process's
 // memory; they are never in step results or actor state, which are on disk.
 import { workflow, type WorkflowStepContext } from "@rivet-dev/workflows";
 import { queue } from "rivetkit";
 import { forgetJob, jobView, newJobState, runTaskJob, type AnswersMessage, type JobHost, type JobInput, type JobState, type JobView } from "../../job/workflow.ts";
 import { capture } from "../analytics.ts";
 import { services } from "../services.ts";
+import { harnessWriter } from "../../eval/generated.ts";
+import { createHarness } from "../../harness/harness.ts";
+import { readGlobalConfig } from "../../state/config.ts";
 import { PROVIDER_NAMES, subscriptionWriter } from "../subscriptions.ts";
 import type { AppClient } from "../registry.ts";
 
@@ -31,8 +34,22 @@ const host: JobHost<StepContext> = {
   task: (s, accountId, taskId) => clientOf(s).task.getOrCreate([accountId, taskId]),
   catalogue: s => clientOf(s).catalogue.getOrCreate(["global"]).get(),
   memberWriter: async (s, userId) => {
+    if (services().config.mode === "self-hosted") {
+      // The person's own plan, as `openmerit connect` saved it in ~/.openmerit, on the machine the server runs on.
+      const settings = readGlobalConfig().harness;
+      if (!settings) return null;
+      const harness = await createHarness(settings);
+      return {
+        source: "harness", by: model => `OpenMerit Harness (${model}) wrote the cases, on the plan you connected with \`openmerit connect\`.`,
+        open: async (signal, json) => ({ complete: harnessWriter(harness, json, signal), model: harness.label, harness }),
+      };
+    }
+    if (!userId) return null;
     const mine = await clientOf(s).user.getOrCreate([userId]).writer();
-    return mine && { source: mine.provider, name: PROVIDER_NAMES[mine.provider], open: signal => subscriptionWriter(mine.provider, mine.credential, services().config.subscriptions, signal) };
+    return mine && {
+      source: mine.provider, by: model => `${PROVIDER_NAMES[mine.provider]} (${model}) wrote the cases, on the subscription of the member who started the run.`,
+      open: signal => subscriptionWriter(mine.provider, mine.credential, services().config.subscriptions, signal),
+    };
   },
   settings: () => services(),
   completed: (s, status) => {
