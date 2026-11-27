@@ -4,7 +4,7 @@
 import { readFile } from "node:fs/promises";
 import { CATALOGUE_FORMAT, type Catalogue, type CatalogueModel } from "../engine/catalogue.ts";
 import { ECI_ATTRIBUTION, ECI_SCORES_URL, parseEciEstimates, parseEciScores } from "../engine/eci.ts";
-import { rankCandidates } from "../scout/candidates.ts";
+import { rankCandidates } from "./candidates.ts";
 
 export const OPENROUTER_MODELS = "https://openrouter.ai/api/v1/models";
 const ESTIMATES = new URL("../../data/eci-estimates.csv", import.meta.url);

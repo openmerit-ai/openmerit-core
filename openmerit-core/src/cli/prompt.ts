@@ -1,7 +1,6 @@
 // Terminal prompts on stderr, so stdout stays clean for --json output.
 import { createInterface } from "node:readline/promises";
 import { Writable } from "node:stream";
-import type { Answer, Question } from "../scout/workflow.ts";
 
 export interface Prompter {
   /** `signal` cancels a pending question, which then rejects. */
@@ -58,62 +57,4 @@ export function terminalPrompter(input: NodeJS.ReadableStream = process.stdin, o
     },
     close() { rl.close(); },
   };
-}
-
-const WORKING = ["eval-ing", "checking", "understanding", "proof-reading", "comparing", "tallying", "weighing", "cross-checking", "pondering", "measuring"];
-const SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
-
-/**
- * On a terminal, shows that Scout is still working when nothing has been printed for `quietMs`: one
- * line with a spinner, a rotating word and the seconds since the last output. `log` clears it before
- * printing. Without a terminal it only prints.
- */
-export function workingTicker(output: NodeJS.WriteStream = process.stderr, quietMs = 3000) {
-  let last = Date.now(), shown = false, frame = 0;
-  const first = Math.floor(Math.random() * WORKING.length);
-  const clear = () => { if (shown) { output.write("\r\x1b[2K"); shown = false; } };
-  const timer = output.isTTY ? setInterval(() => {
-    const quiet = Date.now() - last;
-    if (quiet < quietMs) return;
-    output.write(`\r\x1b[2K${SPINNER[frame++ % SPINNER.length]} ${WORKING[(first + Math.floor(quiet / 4000)) % WORKING.length]}… ${Math.round(quiet / 1000)}s`);
-    shown = true;
-  }, 120) : null;
-  timer?.unref();
-  return {
-    log(line: string) { clear(); output.write(`${line}\n`); last = Date.now(); },
-    stop() { if (timer) clearInterval(timer); clear(); },
-  };
-}
-
-/** Asks one workflow question in the terminal. */
-export async function askQuestion(prompter: Prompter, question: Question, log: (line: string) => void): Promise<Answer> {
-  if (question.detail) log(`\n${question.detail}\n`);
-  switch (question.kind) {
-    case "confirm": return prompter.confirm(question.prompt, question.default === true);
-    case "choice": {
-      const options = question.options ?? [];
-      if (!question.hint) return prompter.choose(question.prompt, options, typeof question.default === "string" ? question.default : undefined);
-      // A choice with a hint, such as a grade, also takes a note after a colon: "2: <why>" or "bad: <why>".
-      log(`${question.prompt}\n${options.map((option, index) => `  ${index + 1}. ${option.label}`).join("\n")}`);
-      for (;;) {
-        const [, head = "", note] = /^([^:]*?)\s*(?::\s*([\s\S]*))?$/.exec(await prompter.ask("Choose a number, and add a note after a colon if you like, such as 2: <why>")) ?? [];
-        const picked = options[Number(head) - 1] ?? options.find(option => option.value === head.toLowerCase());
-        if (picked) return note?.trim() ? `${picked.value}: ${note.trim()}` : picked.value;
-      }
-    }
-    case "multi": {
-      const options = question.options ?? [];
-      log(`${question.prompt}\n${options.map((option, index) => `  ${index + 1}. ${option.label}${option.detail ? `\n     ${option.detail}` : ""}`).join("\n")}`);
-      for (;;) {
-        const answer = await prompter.ask(`Numbers or "all"${question.hint ? `, ${question.hint}` : ""}`, options.length === 1 ? "1" : undefined);
-        // Entries with "=" (such as a mapping correction) pass through as typed; the rest are option numbers.
-        const items = answer.split(",").map(item => item.trim()).filter(Boolean);
-        const typed = question.hint ? items.filter(item => item.includes("=")) : [];
-        const numbers = items.filter(item => !typed.includes(item)).flatMap(item => item.split(/\s+/));
-        const picked = numbers.length === 1 && /^all$/i.test(numbers[0]!) ? options : numbers.map(item => options[Number(item) - 1]);
-        if ((picked.length || typed.length) && picked.every(Boolean)) return [...typed, ...picked.map(option => option!.value)];
-      }
-    }
-    case "text": return prompter.ask(question.prompt, typeof question.default === "string" ? question.default : undefined);
-  }
 }

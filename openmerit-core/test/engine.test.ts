@@ -7,7 +7,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { approve, basedOn, binarySearch, CRITERIA_PASS_RATE, criteriaSummary, EVAL_FLOOR, meetsCriteria, MIN_SAVING, challengers, checkAgent, evaluateTask, stableSample, mergeEvidence, MemoryLedger, proposeEdit, strongest, taskResult, type EvidencePart, type CatalogueModel, resolveGuardrails, type AgentRun, type Ledger, type MeasureCall, type Rung } from "../src/engine/index.ts";
-import { State } from "../src/state/db.ts";
 
 test("the search keeps a ladder's own order, and unplaced options are always challengers", async () => {
   // Vendor tiers: no ECI, and an order that is neither alphabetical nor by price.
@@ -125,18 +124,6 @@ async function ledgerContract(ledger: Ledger) {
 
 test("MemoryLedger: reserve, settle and release are idempotent by key", () => ledgerContract(new MemoryLedger({ customer: 1 })));
 
-test("State's ledger: the same contract on the CLI's SQLite usage table", async () => {
-  const home = mkdtempSync(join(tmpdir(), "openmerit-ledger-"));
-  const state = new State({ OPENMERIT_HOME: home });
-  try {
-    state.createRun({ id: "run", repo: { id: "repo", root: home, gitRoot: null, revision: null, dirty: false }, packageVersion: "0", catalogueVersion: "0", harness: "fake", budgetUsd: 1, state: {} });
-    const ledger = state.ledger({ runId: "run", unitId: "unit" });
-    await ledgerContract(ledger);
-    // Released reservations leave no row; refused ones were never written.
-    assert.equal(state.spend("run").requests, 3);
-    await assert.rejects(ledger.reserve({ key: "x", usd: 0.1, funding: "openmerit" }));
-  } finally { state.close(); }
-});
 
 test("MemoryLedger caps and reports each funding apart", async () => {
   const ledger = new MemoryLedger({ openmerit: 1 });

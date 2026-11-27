@@ -9,8 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
-import { askQuestion, terminalPrompter } from "../src/cli/prompt.ts";
-import { GRADE_HINT, type Question, readGrade } from "../src/scout/workflow.ts";
+import { terminalPrompter } from "../src/cli/prompt.ts";
 import { claudeBinary } from "../src/harness/claude-bridge.ts";
 import { checkForUpdate, newer, offerUpdate, packageVersion } from "../src/update.ts";
 
@@ -32,25 +31,25 @@ test("a secret typed at a terminal prompt is not echoed", async () => {
   assert.ok(!shown.includes("sk-typed-secret"), shown);
 });
 
-test("a grade typed at the terminal keeps its note", async () => {
-  const input = Object.assign(new PassThrough(), { isTTY: true, setRawMode: () => input });
-  const output = Object.assign(new PassThrough(), { isTTY: true, columns: 80 });
-  output.resume();
-  const prompter = terminalPrompter(input, output);
-  const question: Question = { id: "grade_t_r1_1", kind: "choice", prompt: "t, answer 1 of 2: does it look right?", options: [{ value: "good", label: "Looks good" }, { value: "bad", label: "Doesn't look right" }], hint: GRADE_HINT };
-  const typed = async (line: string) => { const answer = askQuestion(prompter, question, () => {}); input.write(`${line}\r`); return answer; };
-  assert.deepEqual(readGrade(await typed("2: the finding names code ALL, which is not a code")), { verdict: "bad", note: "the finding names code ALL, which is not a code" });
-  assert.deepEqual(readGrade(await typed("1")), { verdict: "good" });
-  assert.deepEqual(readGrade(await typed("bad")), { verdict: "bad" });
-  prompter.close();
-});
-
 test("--help after a command prints the usage instead of failing", () => {
   const home = mkdtempSync(join(tmpdir(), "openmerit-help-"));
-  for (const args of [["setup", "--help"], ["scout", "-h"]]) {
+  for (const args of [["setup", "--help"], ["connect", "-h"]]) {
     const out = execFileSync(process.execPath, [cli, ...args], { encoding: "utf8", env: { ...process.env, OPENMERIT_HOME: home, OPENMERIT_NO_UPDATE_CHECK: "1" } });
     assert.match(out, /Setup options/);
   }
+});
+
+test("setup registers openmerit mcp with the claude on PATH, leaves an existing entry alone, and says how to get a server", () => {
+  const bin = mkdtempSync(join(tmpdir(), "openmerit-bin-"));
+  const calls = join(bin, "calls");
+  // A fake claude: `mcp get openmerit` fails until `mcp add` ran.
+  writeFileSync(join(bin, "claude"), `#!/bin/sh\necho "$*" >> ${calls}\nif [ "$1 $2" = "mcp get" ]; then [ -f ${bin}/added ]; exit $?; fi\nif [ "$1 $2" = "mcp add" ]; then touch ${bin}/added; fi\nexit 0\n`, { mode: 0o755 });
+  const setup = () => execFileSync(process.execPath, [cli, "setup", "--yes"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, PATH: `${bin}:/usr/bin:/bin`, OPENMERIT_CODEX_BIN: join(bin, "no-codex"), OPENMERIT_HOME: mkdtempSync(join(tmpdir(), "openmerit-home-")), OPENMERIT_NO_UPDATE_CHECK: "1", OPENMERIT_TELEMETRY: "0" } });
+  setup();
+  setup();
+  const lines = execFileSync("cat", [calls], { encoding: "utf8" }).trim().split("\n").filter(line => line.startsWith("mcp"));
+  assert.deepEqual(lines.filter(line => line.startsWith("mcp add")).length, 1, "the second setup left the entry alone");
+  assert.match(lines.find(line => line.startsWith("mcp add"))!, /^mcp add --scope user openmerit -- .+ mcp$/);
 });
 
 const offline = (async () => { throw new TypeError("fetch failed"); }) as unknown as typeof fetch;

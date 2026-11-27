@@ -1,8 +1,0 @@
-{
-  "name": "support-app",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "eval:classify": "node evals/classify.eval.ts"
-  }
-}

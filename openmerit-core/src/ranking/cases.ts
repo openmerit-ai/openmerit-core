@@ -3,7 +3,7 @@
 // expects. Written cases that leave a placeholder empty, give a label the bundle does not have or
 // repeat another case are dropped. The optional label check asks the user to confirm the written
 // cases' expected answers, in the Question shape `openmerit_scout` uses.
-import type { Answer, Question } from "../scout/workflow.ts";
+import type { Answer, Question } from "../job/workflow.ts";
 import type { ModelClient } from "./clients.ts";
 import type { Ledger } from "../engine/index.ts";
 import { placeholders } from "./runner.ts";

@@ -10,7 +10,7 @@
 // - calibrated: other benchmarks with at least 12 anchor models and |r| ≥ 0.6, mapped to ECI by linear
 //   regression (logit for 0–1 scores), inverse-variance mean across benchmarks.
 import { readFile, writeFile } from "node:fs/promises";
-import { nameKey } from "../src/scout/candidates.ts";
+import { nameKey } from "../src/catalogue/candidates.ts";
 import { parseCSV, parseEciScores, type EciRow } from "../src/engine/eci.ts";
 
 const ECI_BENCHMARKS_URL = "https://epoch.ai/data/eci_benchmarks.csv";
