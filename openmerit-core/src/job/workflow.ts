@@ -1049,7 +1049,7 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
           const accepted = { version: evalVersion, barSet: loop.barSet ?? null, grades: keptGrades };
           await ctx.step(`accepted${suffix}`, async s => {
             const set = accepted.barSet;
-            s.state.notices.push(`You accepted the eval as version ${accepted.version}.${set ? ` In round ${set.round} you graded the current model's answer${set.cases.length === 1 ? "" : "s"} to ${set.cases.join(", ")} as not looking right, so models are measured against the eval's checks instead of against the current model's score, and the cheapest that meets them is recommended even when it costs more.` : ""}`);
+            s.state.notices.push(`You accepted the eval as version ${accepted.version}.${set ? ` In round ${set.round} you graded the current model's answer${set.cases.length === 1 ? "" : "s"} to ${set.cases.join(", ")} as wrong, so models are measured against the eval's checks instead of against the current model's score, and the cheapest that meets them is recommended even when it costs more.` : ""}`);
             // The grades stay with this version: later runs grade the same answers again, and say when the eval disagrees with you.
             await host.account(s, s.state.input.accountId).saveEvalGrades({ taskId, version: accepted.version, grades: accepted.grades });
           });

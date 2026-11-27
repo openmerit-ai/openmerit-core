@@ -39,7 +39,7 @@ export interface Sample {
 /** A case's answer as a run kept it, before sampling: what `createMeasure`'s `onCase` gives a host. */
 export interface CaseAnswer extends Omit<Sample, "id" | "role" | "model" | "input"> { input: unknown }
 
-/** What a person said about one sample: the answer looks good, or it does not, and why. */
+/** What a person said about one sample: the answer is right, or it is wrong, and why. */
 export interface SampleGrade { sampleId: string; verdict: "good" | "bad"; note?: string }
 
 /** A run's artifact: the sampled answers and grades, redacted. The Pi transcripts are not kept. */
@@ -53,7 +53,7 @@ export interface LoopState {
   /** The version a person accepted and the host saves, or 0 while none is. */
   savedVersion: number;
   bar: "current" | "criteria";
-  /** The cases whose current-model answer a person graded Doesn't look right, which made the criteria the bar, and the round they did. */
+  /** The cases whose current-model answer a person graded Wrong answer, which made the criteria the bar, and the round they did. */
   barSet?: { round: number; cases: string[] };
   /** `trial`: a grade-first loop's trial run is next; `searching`: a search is, before grading. */
   status: "trial" | "searching" | "grading" | "regenerating" | "accepted";
@@ -106,7 +106,7 @@ export function completeHarness(complete: Complete): Harness {
   };
 }
 
-/** Where a person and the eval disagree: an answer the eval passed that does not look right, or one it failed that does. */
+/** Where a person and the eval disagree: an answer the eval passed that the person graded wrong, or one it failed that they graded right. */
 export const disagrees = (sample: Pick<Sample, "pass">, grade: Pick<SampleGrade, "verdict">) => sample.pass !== (grade.verdict === "good");
 
 /**
@@ -133,7 +133,7 @@ export function advanceLoop(state: LoopState, event: LoopEvent): LoopState {
       const unknown = event.grades.filter(grade => !samples.some(sample => sample.id === grade.sampleId));
       if (unknown.length) throw new Error(`Not a sample of this round: ${unknown.map(grade => grade.sampleId).join(", ")}.`);
       const graded = samples.map(sample => grades.get(sample.id)!);
-      // A current model whose own answer does not look right is no longer the bar.
+      // A current model whose own answer the person graded wrong is no longer the bar.
       const wrong = samples.filter(sample => sample.role === "current" && grades.get(sample.id)!.verdict === "bad").map(sample => sample.caseId);
       const bar = state.bar === "criteria" || wrong.length ? "criteria" : "current";
       const barSet = state.barSet ?? (wrong.length ? { round: state.round, cases: wrong } : undefined);
@@ -229,7 +229,7 @@ export function feedbackOf(artifact: RunArtifact, grades: readonly SampleGrade[]
   const lines = artifact.samples.flatMap(sample => {
     const grade = byId.get(sample.id);
     if (!grade || !disagrees(sample, grade)) return [];
-    const said = grade.verdict === "bad" ? "does not look right, although the eval passed it" : "looks good, although the eval failed it";
+    const said = grade.verdict === "bad" ? "is wrong, the person said, although the eval passed it" : "is right, the person said, although the eval failed it";
     return [`- Case ${sample.caseId} (${sample.kind}), ${sample.model}'s answer ${said}${sample.reason ? ` (the eval said: ${sample.reason})` : ""}.${grade.note?.trim() ? ` The person's note: ${redact(grade.note.trim())}` : ""}\n  Input: ${sample.input.slice(0, 600)}\n  Answer: ${sample.output.slice(0, 600)}`];
   });
   const agreed = artifact.samples.filter(sample => byId.get(sample.id) && !disagrees(sample, byId.get(sample.id)!)).length;

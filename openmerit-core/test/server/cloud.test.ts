@@ -639,6 +639,7 @@ test("a person grades a run's answers: a disagreement writes the eval again, agr
     // Two trial rounds, then the spot-check of the pick, which counts toward the 3 rounds.
     assert.deepEqual([report.grading.rounds, report.grading.accepted, report.grading.bar, report.evalVersion], [3, true, "criteria", 1]);
     assert.match(report.grading.summary ?? "", /^Your current model meets your checks(, though it fails \d+ of its \d+ case runs)?[;,]/);
+    assert.match(done.text, /You accepted the eval as version 1\. In round 1 you graded the current model's answer to \S+ as wrong, so models are measured against the eval's checks/);
     const evaluation = (await agent.api<{ accepted: { version: number; source: string; by: string | null; bar: string; spec: { criteria?: string[] } } }>(`/api/tasks/${task!.id}/eval`)).body.accepted;
     assert.deepEqual([evaluation.version, evaluation.source, evaluation.by, evaluation.bar], [1, "grading", "user_g", "criteria"]);
     assert.deepEqual(evaluation.spec.criteria, ["The queue is the one the ticket's main problem belongs to."]);
