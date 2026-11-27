@@ -33,7 +33,7 @@ COPY openmerit-core/src/ranking openmerit-core/src/ranking
 COPY openmerit-core/src/eval/proxy.ts openmerit-core/src/eval/loop.ts openmerit-core/src/eval/generated.ts openmerit-core/src/eval/runner.ts openmerit-core/src/eval/
 COPY openmerit-core/src/catalogue openmerit-core/src/catalogue
 COPY openmerit-core/src/connectors/agent-bundle.ts openmerit-core/src/connectors/eval-command.ts openmerit-core/src/connectors/
-COPY openmerit-core/src/scout/scan.ts openmerit-core/src/scout/
+COPY openmerit-core/src/scout/scan.ts openmerit-core/src/scout/candidates.ts openmerit-core/src/scout/
 # The review module: the tool-result helpers generated evals use, and the harness's read-only tools.
 COPY openmerit-core/src/review openmerit-core/src/review
 COPY openmerit-core/src/job openmerit-core/src/job
@@ -41,7 +41,7 @@ COPY openmerit-core/src/harness openmerit-core/src/harness
 COPY openmerit-core/src/state/config.ts openmerit-core/src/state/paths.ts openmerit-core/src/state/
 # openmerit-core's sources import their packages (ajv) from the nearest node_modules above them.
 RUN ln -s cloud/node_modules node_modules
-COPY openmerit-core/data/catalogue.json openmerit-core/data/
+COPY openmerit-core/data/catalogue.json openmerit-core/data/eci-estimates.csv openmerit-core/data/
 COPY cloud/src cloud/src
 # PI_OFFLINE: a missing rg or fd fails the review's search instead of Pi downloading one at run time.
 # PI_CODING_AGENT_DIR must be set before the app starts: Pi fixes its bin directory when it loads.
