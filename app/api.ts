@@ -24,6 +24,11 @@ export interface Me {
   plan: Plan;
 }
 
+// A project in the organization (GET /api/projects): it holds tasks, runs, guardrails and model endpoints.
+// The default project holds what the organization had before projects.
+export interface Project { id: string; name: string; createdAt: string; tasks: number; endpoints: number }
+export const DEFAULT_PROJECT = "default";
+
 // The member's own ChatGPT subscription (GET /api/me/subscriptions), for every organization they belong to.
 // writer is who writes the cases of the runs they start. A sign-in under way has the code to enter; no
 // token is ever sent to the page.
@@ -232,7 +237,8 @@ const isReverificationHint = (data: unknown): data is ReverificationHint =>
   typeof data === "object" && data !== null && (data as Partial<ReverificationHint>).clerk_error?.reason === "reverification-error";
 
 // token is null on a self-hosted server, whose pages sign in with a browser session cookie instead of a bearer token.
-export function createApi(origin: string, token: (() => Promise<string | null>) | null, fetcher: typeof fetch = fetch, reverify?: Reverify): Api {
+// project names the project the calls work in (the X-OpenMerit-Project header); without one, the cloud app uses the default project.
+export function createApi(origin: string, token: (() => Promise<string | null>) | null, fetcher: typeof fetch = fetch, reverify?: Reverify, project: () => string | null = () => null): Api {
   async function call<T>(method: string, path: string, body?: unknown, retried = false): Promise<T> {
     const bearer = token ? await token() : null;
     if (token && !bearer) throw new ApiError(401, "Sign in to continue.", "sign_in_required");
@@ -240,7 +246,7 @@ export function createApi(origin: string, token: (() => Promise<string | null>) 
     try {
       response = await fetcher(new URL(path, origin), {
         method,
-        headers: { ...(bearer ? { authorization: `Bearer ${bearer}` } : {}), accept: "application/json", ...(body === undefined ? {} : { "content-type": "application/json" }) },
+        headers: { ...(bearer ? { authorization: `Bearer ${bearer}` } : {}), accept: "application/json", ...(project() ? { "x-openmerit-project": project()! } : {}), ...(body === undefined ? {} : { "content-type": "application/json" }) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         signal: AbortSignal.timeout(20_000),
       });

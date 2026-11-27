@@ -40,6 +40,10 @@ The account is the token's Clerk organization (`org_id`). Clerk's OAuth access t
 
 The app imports `openmerit/engine` (through `openmerit-core/src/server/engine.ts`) and `openmerit/ranking` from openmerit-core's source, which the image copies.
 
+## Projects
+
+An organization's projects split its tasks, runs, guardrails and model endpoints; the plan, members, spend caps and coding agents stay the organization's. Every account has the `default` project, which holds what it had before projects and can be renamed but not deleted. `GET /api/projects` lists them with their task and endpoint counts; an admin creates (`POST` with `{name}`, unique ignoring case, at most 50), renames (`PUT /api/projects/:id`) and deletes them (`DELETE /api/projects/:id`, refused while the project has tasks; it deletes the project's endpoint keys and guardrails). Every other `/api` request works in the project its `X-OpenMerit-Project` header names, else the default; a task, run or confirmation found by its ID stays in its own project. `openmerit_recommend` and `openmerit_eval_command` take `project`, a name or ID; without one, a new task goes in the project whose tasks already use its environment, else the default. A task's ID hashes its project with its environment and name, and the default project's tasks keep the IDs they had before projects. Accounts stored before projects came back keep everything, in the default project.
+
 ## Evals
 
 The cloud is the source of truth for each task's eval: its spec (description, input, steps, criteria and guardrails, the part of the bundle the judge checks) and its cases. An eval is reviewed until it is right for its task, then accepted, and stays as accepted until the task itself changes. The account actor keeps one row per task in `evals`: the accepted eval and any draft under review. The code is in `openmerit-core/src/server/actors/account.ts` (`evalGate`, `acceptFirstEval`, `acceptEval`), `startJob` in `openmerit-core/src/server/start.ts` and the job's cases step.

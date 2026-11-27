@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ApiError, createApi, type Endpoint, type Subscriptions, type GuardrailsAt, type JobView, type Me, type Report, type Run, type Spend, type Task } from "../api.ts";
+import { ApiError, createApi, type Endpoint, type Project, type Subscriptions, type GuardrailsAt, type JobView, type Me, type Report, type Run, type Spend, type Task } from "../api.ts";
 import { createFakeApi } from "../dev/fake-api.ts";
 import type { Account } from "../view.ts";
 import { connectionsView, retried } from "../views/connections.ts";
+import { projectView } from "../views/project.ts";
 import { accountView } from "../views/account.ts";
 import { choices, guardrailsView, parse } from "../views/guardrails.ts";
 import { planView } from "../views/plan.ts";
@@ -210,7 +211,7 @@ test("a result shows the decision the coding agent sent back, or that it waits f
   assert.deepEqual(tinted(tasksView.render({ tasks: freshTasks }, page(me))), ["Ticket router"]);
   const runRows = runsView.render({ runs: await load<Run[]>("/api/runs"), tasks: freshTasks, jobs: [] }, page(me)).__html;
   assert.deepEqual([...runRows.matchAll(/<tr class="switch"><td><a href="\/r\/(\w+)\/">/g)].map((row) => row[1]).sort(), ["b2v5h3", "k7m2q9", "m5d8q2"]);
-  const settings = connectionsView.render(await get<Endpoint[]>("/api/endpoints"), page(me)).__html;
+  const settings = projectView.render({ project: claims, endpoints: await get<Endpoint[]>("/api/endpoints") }, page(me)).__html;
   assert.doesNotMatch(settings, /Viktor|Langfuse|id="apps"/);
   assert.match(settings, /id="endpoints"/);
 });
@@ -233,26 +234,48 @@ test("a run whose current model could not run reads as failed, offers Run again 
   assert.match(measured, /assess-enrollment: no switch/);
 });
 
-test("Coding agents and endpoints: admins add and remove endpoints and disconnect agents; there are no repositories or projects", async () => {
+const claims: Project = { id: "default", name: "Claims", createdAt: "2026-10-01T09:00:00Z", tasks: 4, endpoints: 2 };
+
+test("Project settings hold the project's endpoints; only admins change them, and Coding agents no longer list endpoints", async () => {
   const me = await account();
   const endpoints = await get<Endpoint[]>("/api/endpoints");
-  const shown = connectionsView.render(endpoints, page(me)).__html;
-  assert.match(shown, /data-action="disconnect"/);
+  const shown = projectView.render({ project: claims, endpoints }, page(me)).__html;
+  assert.match(shown, /data-action="rename"/);
   assert.match(shown, /id="endpoints"[^]*Key ending 4f2a · you pay[^]*data-action="add"/);
-  assert.doesNotMatch(shown, /id="(repos|github)"|data-action="(addRepo|addGithubRepo|connectGithub)"|[Pp]roject/);
-  const member = connectionsView.render(endpoints, page(await account("member"))).__html;
-  assert.doesNotMatch(member, /data-action="(add|remove|disconnect)"/);
+  assert.doesNotMatch(shown, /deleteProject/, "the default project is never deleted");
+  const member = projectView.render({ project: claims, endpoints }, page(await account("member"))).__html;
+  assert.doesNotMatch(member, /data-action="(add|remove|rename|deleteProject)"/);
   assert.match(text({ __html: member }), /Only an admin of Sahra Health can add or remove endpoints/);
-  // The client names no project, and the fake has no project, repository, GitHub or draft routes.
-  const sent: Headers[] = [];
+  const agents = connectionsView.render(null, page(me)).__html;
+  assert.match(agents, /data-action="disconnect"/);
+  assert.doesNotMatch(agents, /id="endpoints"|data-action="add"/);
+  assert.doesNotMatch(connectionsView.render(null, page(await account("member"))).__html, /data-action="disconnect"/);
+});
+
+test("each call names the open project, a project's endpoints are its own, and only an empty project other than the default is deleted", async () => {
+  const projects = createFakeApi();
+  const sent: (string | null)[] = [];
+  let open: string | null = "prj_enrollment";
   const api = createApi("https://openmerit.ai", async () => "preview-populated", async (input, init) => {
     const request = new Request(input as URL, init);
-    sent.push(request.headers);
-    return fake(request);
-  });
-  assert.ok((await api.get<Endpoint[]>("/api/endpoints")).length > 0);
-  assert.equal(sent[0]!.get("x-openmerit-project"), null);
-  for (const path of ["/api/projects", "/api/repos", "/api/github", "/api/eval-drafts"]) await assert.rejects(api.get(path), (failure) => failure instanceof ApiError && failure.status === 404, path);
+    sent.push(request.headers.get("x-openmerit-project"));
+    return projects(request);
+  }, undefined, () => open);
+  assert.deepEqual(await api.get("/api/endpoints"), [], "the Enrollment project has no endpoints of its own");
+  assert.equal(sent.at(-1), "prj_enrollment");
+  open = null;
+  assert.ok((await api.get<Endpoint[]>("/api/endpoints")).length > 0, "the default project keeps the organization's");
+  assert.equal(sent.at(-1), null);
+  const listed = await api.get<Project[]>("/api/projects");
+  assert.deepEqual(listed.map((item) => [item.id, item.name]), [["default", "Claims"], ["prj_enrollment", "Enrollment"]]);
+  await assert.rejects(api.send("DELETE", "/api/projects/default"), (failure) => failure instanceof ApiError && failure.status === 409);
+  open = "prj_missing";
+  await assert.rejects(api.get("/api/tasks"), (failure) => failure instanceof ApiError && failure.status === 404);
+
+  const me = await account();
+  const enrollment = listed[1]!;
+  assert.match(projectView.render({ project: enrollment, endpoints: [] }, page(me)).__html, /data-action="deleteProject">Delete project/);
+  assert.match(projectView.render({ project: { ...enrollment, tasks: 2 }, endpoints: [] }, page(me)).__html, /data-action="deleteProject" disabled/);
 });
 
 test("Account settings walk through the ChatGPT sign-in and offer it as the case writer only once connected", async () => {

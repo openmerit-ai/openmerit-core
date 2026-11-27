@@ -39,6 +39,7 @@ export const TOOLS = [
     inputSchema: { type: "object", additionalProperties: false, properties: {
       bundle: BUNDLE_SCHEMA, environment: { type: "string", description: "The repository or workspace, such as owner/repo. Default: default" },
       agent: { type: "string", description: "The agent this task belongs to, when the code groups calls into agents" },
+      project: { type: "string", description: "The OpenMerit project a new task goes in, by name or ID, when the user named one. Default: the project whose tasks already use this environment, else the default project" },
       job_id: { type: "string", description: "Instead of a bundle: a past job whose task runs again on its saved bundle, environment and agent" },
       task_id: { type: "string", description: "Instead of a bundle: a task to run on its saved bundle and eval, such as one approved in the app that has not run yet" },
       budget_usd: { type: "number", description: "With job_id: the task's new budget per job in US dollars, set before the run starts" },
@@ -68,7 +69,7 @@ export const TOOLS = [
     name: "openmerit_eval_command", title: "OpenMerit: measure with the repository's eval",
     description: "On a self-hosted OpenMerit server, makes a task's own eval command, from the user's repository, what measures each model, instead of cases OpenMerit writes. The command follows the eval contract: it reads the model from $OPENMERIT_MODEL, sends its model calls to $OPENAI_BASE_URL with $OPENAI_API_KEY, runs only the $OPENMERIT_ITEMS items when set, and writes {\"items\":[{\"id\",\"pass\"}]} to $OPENMERIT_RESULT. Name the task by task_id, or, for a task that has not run, send its bundle and environment as openmerit_recommend takes them. It runs a command on the user's machine, so the user confirms it on a page this tool links to; then call openmerit_recommend with the task_id. clear true stops using it. The hosted server refuses it for now.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
-      task_id: string, bundle: BUNDLE_SCHEMA, environment: { type: "string", description: "With bundle: the repository or workspace, as openmerit_recommend takes it" }, agent: string,
+      task_id: string, bundle: BUNDLE_SCHEMA, environment: { type: "string", description: "With bundle: the repository or workspace, as openmerit_recommend takes it" }, agent: string, project: { type: "string", description: "With bundle: the project, as openmerit_recommend takes it" },
       command: { type: "string", description: "The shell command that runs the eval, such as 'node evals/classify.mjs'" },
       root: { type: "string", description: "The repository's absolute path on the machine the server runs on" },
       cwd: { type: "string", description: "The directory to run it in, relative to root. Default: root" },

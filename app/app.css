@@ -74,9 +74,29 @@ button { font: inherit; color: inherit; cursor: pointer; background: none; borde
 .profile-menu a[aria-current] { background: var(--active); font-weight: 500; }
 .profile-menu hr { border: 0; border-top: 1px solid var(--line); margin: 5px -5px; }
 
+/* The project switcher: the project every sidebar page shows, with a menu of the organization's projects. */
+.project-switch-wrap { position: relative; margin-bottom: 8px; }
+.project-switch { display: flex; align-items: center; gap: 9px; width: 100%; padding: 5px 8px; border-radius: 6px; text-align: left; border: 1px solid var(--line); background: var(--surface); }
+.project-switch:hover, .project-switch[aria-expanded="true"] { background: var(--hover); }
+.project-switch .label { flex: 1; min-width: 0; font-weight: 500; }
+.project-switch .project-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-switch .sub { display: block; font-size: 11px; font-weight: 400; color: var(--quiet); line-height: 1.2; }
+.project-switch > .icon { width: 14px; height: 14px; color: var(--quiet); }
+.project-mark { width: 22px; height: 22px; flex: none; border-radius: 5px; display: grid; place-items: center; background: var(--ink); color: var(--paper); font-size: 11px; font-weight: 600; }
+.project-menu { position: absolute; inset: calc(100% + 4px) 0 auto; z-index: 40; padding: 5px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 30px var(--shadow); max-height: 60vh; overflow: auto; }
+.project-menu [role=menuitem] { display: flex; align-items: center; gap: 9px; width: 100%; padding: 6px 8px; border-radius: 6px; color: var(--ink); text-decoration: none; text-align: left; }
+.project-menu [role=menuitem]:hover, .project-menu [role=menuitem]:focus-visible { background: var(--hover); outline: none; }
+.project-menu [role=menuitem][aria-current] { font-weight: 500; }
+.project-menu [role=menuitem] .project-mark { width: 18px; height: 18px; font-size: 10px; }
+.project-menu [role=menuitem] .sub { margin-left: auto; font-size: 12px; color: var(--quiet); }
+.project-menu [role=menuitem] .icon { color: var(--quiet); }
+.project-menu hr { border: 0; border-top: 1px solid var(--line); margin: 5px -5px; }
+.project-menu .check { margin-left: auto; color: var(--green); }
+
 /* Expand on hover: an icon rail that opens over the page. */
 [data-sidebar="hover"] .sidebar, [data-sidebar="hover"] .sidebar-panel { width: var(--rail); }
-[data-sidebar="hover"]:not(.profile-menu-open) .sidebar:not(:hover):not(:has(:focus-visible)) :is(.label, .sidebar-toggle, .profile > .icon) { opacity: 0; pointer-events: none; }
+[data-sidebar="hover"]:not(.profile-menu-open) .sidebar:not(:hover):not(:has(:focus-visible)) :is(.label, .sidebar-toggle, .profile > .icon, .project-switch > .icon) { opacity: 0; pointer-events: none; }
+[data-sidebar="hover"]:not(.profile-menu-open) .sidebar:not(:hover):not(:has(:focus-visible)) .project-switch { border-color: transparent; background: none; }
 [data-sidebar="hover"] .sidebar:hover .sidebar-panel, [data-sidebar="hover"] .sidebar:has(:focus-visible) .sidebar-panel, [data-sidebar="hover"].profile-menu-open .sidebar-panel { width: var(--open); box-shadow: 8px 0 30px var(--shadow); transition-delay: .08s; }
 
 .content { flex: 1; min-width: 0; }
@@ -248,7 +268,7 @@ table.guardrails input, table.guardrails select { min-width: 140px; padding: 5px
 /* A phone: the sidebar is always the rail that opens over the page, whatever its setting, and the page keeps the rest. */
 @media (max-width: 700px) {
   .sidebar, .sidebar-panel { width: var(--rail); }
-  :root:not(.profile-menu-open) .sidebar:not(:hover):not(:has(:focus-visible)) :is(.label, .sidebar-toggle, .profile > .icon) { opacity: 0; pointer-events: none; }
+  :root:not(.profile-menu-open) .sidebar:not(:hover):not(:has(:focus-visible)) :is(.label, .sidebar-toggle, .profile > .icon, .project-switch > .icon) { opacity: 0; pointer-events: none; }
   .sidebar:hover .sidebar-panel, .sidebar:has(:focus-visible) .sidebar-panel, .profile-menu-open .sidebar-panel { width: var(--open); box-shadow: 8px 0 30px var(--shadow); }
   main { padding: 16px 16px 40px; }
   .title { font-size: 24px; overflow-wrap: anywhere; }

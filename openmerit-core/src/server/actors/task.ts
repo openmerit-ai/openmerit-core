@@ -8,12 +8,13 @@ import type { Case, TaskBundle } from "../../ranking/index.ts";
 import type { JobResult } from "../../job/report.ts";
 import { services } from "../services.ts";
 import type { Registry } from "../registry.ts";
-import { startJob } from "../start.ts";
+import { DEFAULT_PROJECT, startJob } from "../start.ts";
 
 export interface TaskState {
   accountId: string;
   taskId: string;
   /** The project the task belongs to; absent on tasks created before projects, which are in the default project. */
+  projectId?: string;
   environment: string;
   name: string;
   agent: string | null;
@@ -36,7 +37,7 @@ const WATCH = "watch";
 const save = (c: { saveState: (opts: { immediate: boolean }) => Promise<void> }) => c.saveState({ immediate: true });
 
 export const task = actor({
-  createState: (_c, input: { accountId: string; taskId: string; environment: string; name: string }): TaskState => ({
+  createState: (_c, input: { accountId: string; taskId: string; projectId: string; environment: string; name: string }): TaskState => ({
     ...input, agent: null, bundle: null, labels: {}, written: null, jobs: [], lastResult: null, armed: false, catalogueVersion: null, notices: [],
   }),
   actions: {
@@ -57,7 +58,7 @@ export const task = actor({
         await save(c);
       }
       await c.client<Registry>().account.getOrCreate([c.state.accountId]).upsertTask({
-        id: c.state.taskId, environment: c.state.environment, agent: input.agent, name: c.state.name, currentModel: input.bundle.current.model,
+        id: c.state.taskId, projectId: c.state.projectId ?? DEFAULT_PROJECT, environment: c.state.environment, agent: input.agent, name: c.state.name, currentModel: input.bundle.current.model,
         pick: null, status: "running", lastRunAt: now, lastJobId: input.jobId, ...(input.kind === "run" ? { lastRecommendAt: now } : {}),
       });
     },
@@ -80,7 +81,7 @@ export const task = actor({
       await save(c);
       // Saving per month needs the task's call volume, which no source reports yet.
       await c.client<Registry>().account.getOrCreate([c.state.accountId]).upsertTask({
-        id: c.state.taskId, environment: c.state.environment, agent: c.state.agent, name: c.state.name, currentModel: c.state.bundle?.current.model ?? "",
+        id: c.state.taskId, projectId: c.state.projectId ?? DEFAULT_PROJECT, environment: c.state.environment, agent: c.state.agent, name: c.state.name, currentModel: c.state.bundle?.current.model ?? "",
         pick: pick?.model ?? null, status: input.result?.status ?? input.status,
       });
     },
@@ -99,7 +100,7 @@ export const task = actor({
       };
       await save(c);
       await c.client<Registry>().account.getOrCreate([c.state.accountId]).upsertTask({
-        id: c.state.taskId, environment: c.state.environment, agent: c.state.agent, name: c.state.name, currentModel: input.model,
+        id: c.state.taskId, projectId: c.state.projectId ?? DEFAULT_PROJECT, environment: c.state.environment, agent: c.state.agent, name: c.state.name, currentModel: input.model,
         pick: null, status: "switched",
       });
     },
@@ -113,7 +114,7 @@ export const task = actor({
         await save(c);
       }
       await c.client<Registry>().account.getOrCreate([c.state.accountId]).upsertTask({
-        id: c.state.taskId, environment: c.state.environment, agent: c.state.agent, name: c.state.name, currentModel: c.state.bundle?.current.model ?? "",
+        id: c.state.taskId, projectId: c.state.projectId ?? DEFAULT_PROJECT, environment: c.state.environment, agent: c.state.agent, name: c.state.name, currentModel: c.state.bundle?.current.model ?? "",
         pick: null, status: c.state.lastResult?.status ?? "new", retired: true,
       });
     },
@@ -133,7 +134,7 @@ export const task = actor({
       const previous = c.state.catalogueVersion;
       c.state.catalogueVersion = version;
       await save(c);
-      const started = await startJob(client, { accountId: c.state.accountId, environment: c.state.environment, agent: c.state.agent, bundle: c.state.bundle, kind: "watch", trigger: "watch", userId: null });
+      const started = await startJob(client, { accountId: c.state.accountId, projectId: c.state.projectId ?? DEFAULT_PROJECT, environment: c.state.environment, agent: c.state.agent, bundle: c.state.bundle, kind: "watch", trigger: "watch", userId: null });
       if (!started.ok) {
         c.state.catalogueVersion = previous;
         c.state.notices = [`${new Date().toISOString()}: watch job not started: ${started.error}`, ...c.state.notices].slice(0, 20);

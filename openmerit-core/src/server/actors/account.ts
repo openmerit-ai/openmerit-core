@@ -1,4 +1,4 @@
-// The account actor, one per Clerk organization: its plan from Stripe, members, endpoints with
+// The account actor, one per Clerk organization: its plan from Stripe, members, projects, endpoints with
 // encrypted keys, guardrails at each level, the spend ledger, and the index of tasks, jobs and
 // reports. SQLite holds all of it, so the ledger's checks and writes run in one transaction.
 import { randomBytes } from "node:crypto";
@@ -15,9 +15,18 @@ import { services } from "../services.ts";
 
 type Row = Record<string, unknown>;
 
-// The eval and budget names the task job (openmerit-core/src/job/workflow.ts) shares with this actor.
-export { JOB_BUDGET, type EvalBar, type EvalSource, type EvalSpec } from "../../job/workflow.ts";
-import { JOB_BUDGET, type EvalBar, type EvalGrade, type EvalSource, type EvalSpec } from "../../job/workflow.ts";
+// The project, eval and budget names the task job (openmerit-core/src/job/workflow.ts) shares with this actor.
+export { DEFAULT_PROJECT, JOB_BUDGET, type EvalBar, type EvalSource, type EvalSpec } from "../../job/workflow.ts";
+import { DEFAULT_PROJECT, JOB_BUDGET, type EvalBar, type EvalGrade, type EvalSource, type EvalSpec } from "../../job/workflow.ts";
+
+/**
+ * An account's projects group its tasks, runs, guardrails and model endpoints; the plan, members and spend stay the
+ * account's. Every account has the default project, which holds what it had before projects and can be renamed but not deleted.
+ */
+export const DEFAULT_PROJECT_NAME = "Default project";
+export interface Project { id: string; name: string; createdAt: string; tasks: number; endpoints: number }
+/** The tables a project scopes, which accounts stored before projects get a project_id column on, set to the default project. */
+const PROJECT_TABLES = ["endpoints", "jobs", "tasks", "deletions", "confirmations"];
 
 /** Bumped when the schema changes in a way old accounts cannot keep: their tables are dropped. */
 const SCHEMA_VERSION = 2;
@@ -28,16 +37,17 @@ const SCHEMA = [
     period_start INTEGER, period_end INTEGER, included_evals INTEGER NOT NULL DEFAULT 0, overage TEXT NOT NULL DEFAULT 'refuse', event_created INTEGER NOT NULL DEFAULT 0)`,
   `CREATE TABLE IF NOT EXISTS stripe_events (id TEXT PRIMARY KEY, received_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS members (user_id TEXT PRIMARY KEY, role TEXT NOT NULL, last_session_at INTEGER)`,
-  `CREATE TABLE IF NOT EXISTS endpoints (id TEXT PRIMARY KEY, kind TEXT NOT NULL, base_url TEXT NOT NULL, allowed_models TEXT NOT NULL,
+  `CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS endpoints (id TEXT PRIMARY KEY, project_id TEXT NOT NULL DEFAULT 'default', kind TEXT NOT NULL, base_url TEXT NOT NULL, allowed_models TEXT NOT NULL,
     sealed_key TEXT NOT NULL, key_last4 TEXT NOT NULL, created_at INTEGER NOT NULL, verified_at INTEGER)`,
-  `CREATE TABLE IF NOT EXISTS guardrails (level TEXT NOT NULL, scope TEXT NOT NULL, settings TEXT NOT NULL, PRIMARY KEY (level, scope))`,
-  `CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL, started_at INTEGER NOT NULL,
+  `CREATE TABLE IF NOT EXISTS guardrails (project_id TEXT NOT NULL DEFAULT 'default', level TEXT NOT NULL, scope TEXT NOT NULL, settings TEXT NOT NULL, PRIMARY KEY (project_id, level, scope))`,
+  `CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, project_id TEXT NOT NULL DEFAULT 'default', task_id TEXT NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL, started_at INTEGER NOT NULL,
     finished_at INTEGER, budget_usd REAL, cap_openmerit_usd REAL, cap_customer_usd REAL, counted INTEGER NOT NULL DEFAULT 0, metered INTEGER NOT NULL DEFAULT 0, asked_by TEXT, deleted_at INTEGER, eval_version INTEGER)`,
   `CREATE TABLE IF NOT EXISTS ledger (key TEXT PRIMARY KEY, job_id TEXT NOT NULL, funding TEXT NOT NULL, model TEXT, endpoint TEXT, status TEXT NOT NULL,
     reserved_usd REAL NOT NULL, actual_usd REAL, estimated_usd REAL, failed INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)`,
-  `CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, environment TEXT NOT NULL, agent TEXT, name TEXT NOT NULL, current_model TEXT NOT NULL,
+  `CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, project_id TEXT NOT NULL DEFAULT 'default', environment TEXT NOT NULL, agent TEXT, name TEXT NOT NULL, current_model TEXT NOT NULL,
     pick TEXT, status TEXT NOT NULL, last_run_at INTEGER, last_job_id TEXT, monthly_saving_usd REAL, retired INTEGER NOT NULL DEFAULT 0, last_recommend_at INTEGER)`,
-  `CREATE TABLE IF NOT EXISTS deletions (task_id TEXT NOT NULL, name TEXT NOT NULL, environment TEXT NOT NULL, user_id TEXT NOT NULL, jobs INTEGER NOT NULL, deleted_at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS deletions (project_id TEXT NOT NULL DEFAULT 'default', task_id TEXT NOT NULL, name TEXT NOT NULL, environment TEXT NOT NULL, user_id TEXT NOT NULL, jobs INTEGER NOT NULL, deleted_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS decisions (job_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, decision TEXT NOT NULL, change TEXT NOT NULL,
     decided_by TEXT NOT NULL, decided_by_name TEXT, decided_by_email TEXT, decided_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS reports (job_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, created_at INTEGER NOT NULL, json TEXT NOT NULL, markdown TEXT NOT NULL, share_token TEXT UNIQUE)`,
@@ -52,7 +62,7 @@ const SCHEMA = [
     draft_reason TEXT, draft_changed TEXT, draft_spec TEXT, draft_cases TEXT, draft_bundle TEXT, draft_by TEXT, draft_at INTEGER)`,
   // Critical requests a coding agent made, waiting for a person to confirm them (api.ts). body is the request's JSON, sealed with the
   // key-encryption key when the server has one, since an endpoint's key can be in it; it is cleared once the request ran.
-  `CREATE TABLE IF NOT EXISTS confirmations (id TEXT PRIMARY KEY, nonce TEXT NOT NULL, method TEXT NOT NULL, path TEXT NOT NULL, body TEXT NOT NULL,
+  `CREATE TABLE IF NOT EXISTS confirmations (id TEXT PRIMARY KEY, nonce TEXT NOT NULL, project_id TEXT NOT NULL DEFAULT 'default', method TEXT NOT NULL, path TEXT NOT NULL, body TEXT NOT NULL,
     checks TEXT NOT NULL, title TEXT NOT NULL, items TEXT NOT NULL, requested_by TEXT NOT NULL, requested_via TEXT, status TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
     decided_by TEXT, decided_at INTEGER, result TEXT)`,
   // The answers a person graded when they accepted a task's eval, as version holds it: each answer's case, model, text and tool
@@ -86,12 +96,12 @@ export interface EndpointView { id: string; kind: EndpointKind; baseUrl: string;
  */
 export type WatchState = "watching" | "idle" | "frozen" | "retired" | "review";
 /** `watching` is `state === "watching"`, for clients that predate `state`. `idleSince` is set only while idle. */
-export interface TaskRow { id: string; environment: string; agent: string | null; name: string; currentModel: string; pick: string | null; status: string; state: WatchState; idleSince: string | null; watching: boolean; lastRunAt: string | null; lastJobId: string | null; monthlySavingUsd: number | null }
+export interface TaskRow { id: string; projectId: string; environment: string; agent: string | null; name: string; currentModel: string; pick: string | null; status: string; state: WatchState; idleSince: string | null; watching: boolean; lastRunAt: string | null; lastJobId: string | null; monthlySavingUsd: number | null }
 /** What a finished job's report found, so a list of runs can say it without loading each report. */
 export interface RunResult { status: string; task: string | null; model: string | null; from: string | null; savingPerCallUsd: number | null }
 /** askedBy is the MCP client's name (clientInfo.name) for a run a coding agent started; null for a watch run or an unnamed client. */
 
-export interface JobRow { id: string; taskId: string; kind: string; status: string; startedAt: string; finishedAt: string | null; askedBy: string | null; evalVersion: number | null; result: RunResult | null }
+export interface JobRow { id: string; projectId: string; taskId: string; kind: string; status: string; startedAt: string; finishedAt: string | null; askedBy: string | null; evalVersion: number | null; result: RunResult | null }
 
 /** What about a task its eval was accepted for; a bundle that differs in one reopens the eval. */
 export type TaskPart = "prompt" | "tools" | "output";
@@ -124,7 +134,7 @@ export type Started = { ok: true } | { ok: false; error: string };
  */
 export type ConfirmationStatus = "pending" | "confirming" | "done" | "failed" | "declined" | "expired";
 export interface ConfirmationView {
-  id: string; method: string; path: string; checks: "person" | "reverify"; title: string; items: string[];
+  id: string; projectId: string; method: string; path: string; checks: "person" | "reverify"; title: string; items: string[];
   requestedBy: string; requestedVia: string | null; status: ConfirmationStatus; createdAt: string; expiresAt: string; decidedBy: string | null; decidedAt: string | null;
   result: { status: number; body: unknown } | null;
 }
@@ -133,7 +143,7 @@ export const CONFIRM_HOURS = 24;
 
 const iso = (ms: unknown) => (typeof ms === "number" ? new Date(ms).toISOString() : null);
 const confirmationRow = (row: Row): ConfirmationView => ({
-  id: String(row.id), method: String(row.method), path: String(row.path), checks: row.checks === "reverify" ? "reverify" : "person",
+  id: String(row.id), projectId: String(row.project_id), method: String(row.method), path: String(row.path), checks: row.checks === "reverify" ? "reverify" : "person",
   title: String(row.title), items: JSON.parse(String(row.items)) as string[], requestedBy: String(row.requested_by), requestedVia: (row.requested_via as string | null) ?? null,
   status: row.status === "pending" && Number(row.expires_at) <= Date.now() ? "expired" : String(row.status) as ConfirmationStatus,
   createdAt: iso(row.created_at)!, expiresAt: iso(row.expires_at)!, decidedBy: (row.decided_by as string | null) ?? null, decidedAt: iso(row.decided_at),
@@ -155,7 +165,7 @@ export function watchState(input: { retired: boolean; review: boolean; watch: bo
 const taskRow = (row: Row, watch: boolean | undefined): TaskRow => {
   const { state, idleSince } = watchState({ retired: row.retired === 1, review: Boolean(row.eval_review), watch, lastRecommendAt: (row.last_recommend_at as number | null) ?? null, now: Date.now(), idleAfterMs: services().config.idleAfterMs });
   return {
-    id: String(row.id), environment: String(row.environment), agent: (row.agent as string | null) ?? null, name: String(row.name), currentModel: String(row.current_model),
+    id: String(row.id), projectId: String(row.project_id), environment: String(row.environment), agent: (row.agent as string | null) ?? null, name: String(row.name), currentModel: String(row.current_model),
     pick: (row.pick as string | null) ?? null, status: String(row.status), state, idleSince, watching: state === "watching", lastRunAt: iso(row.last_run_at), lastJobId: (row.last_job_id as string | null) ?? null,
     monthlySavingUsd: (row.monthly_saving_usd as number | null) ?? null,
   };
@@ -168,7 +178,7 @@ function runResult(json: unknown): RunResult | null {
   return { status: report.status, task: text(report.task), model: text(report.pick?.model), from: text(report.baseline?.model), savingPerCallUsd: typeof report.pick?.savingPerCallUsd === "number" ? report.pick.savingPerCallUsd : null };
 }
 const jobRow = (row: Row): JobRow => ({
-  id: String(row.id), taskId: String(row.task_id), kind: String(row.kind), status: String(row.status), startedAt: iso(row.started_at)!, finishedAt: iso(row.finished_at),
+  id: String(row.id), projectId: String(row.project_id), taskId: String(row.task_id), kind: String(row.kind), status: String(row.status), startedAt: iso(row.started_at)!, finishedAt: iso(row.finished_at),
   askedBy: (row.asked_by as string | null) ?? null, evalVersion: (row.eval_version as number | null) ?? null, result: runResult(row.report_json),
 });
 
@@ -182,6 +192,20 @@ export const account = actor({
       await database.execute(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     }
     for (const statement of SCHEMA) await database.execute(statement);
+    // Accounts stored before projects came back: everything they hold moves into the default project, and nothing is dropped.
+    for (const table of PROJECT_TABLES) {
+      const columns = await database.execute(`PRAGMA table_info(${table})`);
+      if (!columns.some(column => column.name === "project_id")) await database.execute(`ALTER TABLE ${table} ADD COLUMN project_id TEXT NOT NULL DEFAULT '${DEFAULT_PROJECT}'`);
+    }
+    // A guardrail's scope (an environment name or a task ID) is unique within its project only.
+    const guardrailColumns = await database.execute(`PRAGMA table_info(guardrails)`);
+    if (!guardrailColumns.some(column => column.name === "project_id")) {
+      await database.execute(`CREATE TABLE guardrails_by_project (project_id TEXT NOT NULL DEFAULT '${DEFAULT_PROJECT}', level TEXT NOT NULL, scope TEXT NOT NULL, settings TEXT NOT NULL, PRIMARY KEY (project_id, level, scope))`);
+      await database.execute(`INSERT INTO guardrails_by_project (level, scope, settings) SELECT level, scope, settings FROM guardrails`);
+      await database.execute(`DROP TABLE guardrails`);
+      await database.execute(`ALTER TABLE guardrails_by_project RENAME TO guardrails`);
+    }
+    await database.execute(`INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?) ON CONFLICT (id) DO NOTHING`, DEFAULT_PROJECT, DEFAULT_PROJECT_NAME, Date.now());
   } }),
   actions: {
     /** Records the calling member and the account's name. A null role, from a token that names none, keeps the recorded one. */
@@ -193,6 +217,50 @@ export const account = actor({
     info: async (c): Promise<{ id: string; name: string | null; plan: Plan | null; mcpRevokedBefore: number | null }> => {
       const [row] = await c.db.execute(`SELECT name, mcp_revoked_before FROM account WHERE id = 1`);
       return { id: c.key[0]!, name: (row?.name as string | null) ?? null, plan: await plan(c.db), mcpRevokedBefore: (row?.mcp_revoked_before as number | null) ?? null };
+    },
+
+    // Projects. Names are unique in the account, ignoring case.
+    projects: async (c): Promise<Project[]> => projectViews(c.db),
+    project: async (c, id: string): Promise<Project | null> => (await projectViews(c.db, id))[0] ?? null,
+
+    createProject: async (c, input: { name: string }): Promise<{ ok: true; project: Project } | { ok: false; error: string }> => {
+      const problem = projectNameProblem(input.name) ?? await nameTaken(c.db, input.name.trim(), null);
+      if (problem) return { ok: false, error: problem };
+      const [count] = await c.db.execute(`SELECT count(*) AS n FROM projects`);
+      if (Number(count?.n) >= MAX_PROJECTS) return { ok: false, error: `This account has ${MAX_PROJECTS} projects, its limit. Delete one to add another.` };
+      const id = `prj_${randomBytes(6).toString("hex")}`;
+      await c.db.execute(`INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?)`, id, input.name.trim(), Date.now());
+      return { ok: true, project: (await projectViews(c.db, id))[0]! };
+    },
+
+    renameProject: async (c, input: { id: string; name: string }): Promise<{ ok: true; project: Project } | { ok: false; status: 400 | 404; error: string }> => {
+      if (!(await projectViews(c.db, input.id)).length) return { ok: false, status: 404, error: "No such project in this account." };
+      const problem = projectNameProblem(input.name) ?? await nameTaken(c.db, input.name.trim(), input.id);
+      if (problem) return { ok: false, status: 400, error: problem };
+      await c.db.execute(`UPDATE projects SET name = ? WHERE id = ?`, input.name.trim(), input.id);
+      return { ok: true, project: (await projectViews(c.db, input.id))[0]! };
+    },
+
+    /** Deletes a project with its endpoints and guardrails. A project that still has tasks is refused: delete them first. */
+    deleteProject: async (c, id: string): Promise<{ ok: true } | { ok: false; status: 404 | 409; error: string }> => c.db.transaction(async tx => {
+      if (id === DEFAULT_PROJECT) return { ok: false, status: 409, error: "The default project cannot be deleted. Rename it instead." };
+      const [found] = await tx.execute(`SELECT id FROM projects WHERE id = ?`, id);
+      if (!found) return { ok: false, status: 404, error: "No such project in this account." };
+      const [tasks] = await tx.execute(`SELECT count(*) AS n FROM tasks WHERE project_id = ?`, id);
+      if (Number(tasks?.n)) return { ok: false, status: 409, error: `This project has ${Number(tasks?.n)} task${Number(tasks?.n) === 1 ? "" : "s"}. Delete them first.` };
+      await tx.execute(`DELETE FROM endpoints WHERE project_id = ?`, id);
+      await tx.execute(`DELETE FROM guardrails WHERE project_id = ?`, id);
+      await tx.execute(`DELETE FROM projects WHERE id = ?`, id);
+      return { ok: true as const };
+    }, { name: "delete_project" }),
+
+    /**
+     * The project a coding agent's call that names none works in: the project whose tasks already use the environment,
+     * when exactly one does, else the default project.
+     */
+    projectForEnvironment: async (c, environment: string): Promise<string> => {
+      const rows = await c.db.execute(`SELECT DISTINCT project_id FROM tasks WHERE environment = ?`, environment);
+      return rows.length === 1 ? String(rows[0]!.project_id) : DEFAULT_PROJECT;
     },
 
     /** Applies a Stripe webhook. Each event applies once; an older subscription event never overwrites a newer one. */
@@ -215,7 +283,7 @@ export const account = actor({
     }, { name: "apply_stripe" }),
 
     /** Checks the plan and the account's job limits, then records the job. */
-    startJob: async (c, input: { jobId: string; taskId: string; kind: "run" | "watch"; askedBy?: string | null }): Promise<Started> => c.db.transaction(async (tx): Promise<Started> => {
+    startJob: async (c, input: { jobId: string; projectId: string; taskId: string; kind: "run" | "watch"; askedBy?: string | null }): Promise<Started> => c.db.transaction(async (tx): Promise<Started> => {
       const { limits, appUrl } = services().config;
       const current = await plan(tx);
       const unpaid = planRefusal(current);
@@ -226,7 +294,7 @@ export const account = actor({
       if (Number(hour?.n) >= limits.jobsPerHour) return { ok: false, error: `This account started ${limits.jobsPerHour} jobs in the last hour, its limit. Try again later.` };
       const [running] = await tx.execute(`SELECT count(*) AS n FROM jobs WHERE status IN ('queued', 'running')`);
       if (Number(running?.n) >= limits.concurrentJobs) return { ok: false, error: `This account has ${limits.concurrentJobs} jobs running, its limit. Try again when one finishes.` };
-      await tx.execute(`INSERT INTO jobs (id, task_id, kind, status, started_at, asked_by) VALUES (?, ?, ?, 'queued', ?, ?)`, input.jobId, input.taskId, input.kind, now, input.askedBy ?? null);
+      await tx.execute(`INSERT INTO jobs (id, project_id, task_id, kind, status, started_at, asked_by) VALUES (?, ?, ?, ?, 'queued', ?, ?)`, input.jobId, input.projectId, input.taskId, input.kind, now, input.askedBy ?? null);
       return { ok: true };
     }, { name: "start_job" }).then(async started => { await meterOverage(c.db); return started; }),
 
@@ -274,11 +342,11 @@ export const account = actor({
     unfinishedJobs: async (c): Promise<{ id: string; taskId: string; startedAt: number }[]> =>
       (await c.db.execute(`SELECT id, task_id, started_at FROM jobs WHERE status IN ('queued', 'running') AND deleted_at IS NULL`)).map(row => ({ id: String(row.id), taskId: String(row.task_id), startedAt: Number(row.started_at) })),
 
-    /** The account's jobs, newest first, or one task's. */
-    jobs: async (c, input: { taskId?: string; limit?: number } = {}): Promise<JobRow[]> => {
+    /** The account's jobs, newest first: one task's, one project's, or every project's. */
+    jobs: async (c, input: { projectId?: string; taskId?: string; limit?: number } = {}): Promise<JobRow[]> => {
       const rows = await c.db.execute(`SELECT jobs.*, reports.json AS report_json FROM jobs LEFT JOIN reports ON reports.job_id = jobs.id
-        WHERE jobs.deleted_at IS NULL AND (? IS NULL OR jobs.task_id = ?) ORDER BY jobs.started_at DESC LIMIT ?`,
-      input.taskId ?? null, input.taskId ?? null, input.limit ?? 50);
+        WHERE jobs.deleted_at IS NULL AND (? IS NULL OR jobs.task_id = ?) AND (? IS NULL OR jobs.project_id = ?) ORDER BY jobs.started_at DESC LIMIT ?`,
+      input.taskId ?? null, input.taskId ?? null, input.projectId ?? null, input.projectId ?? null, input.limit ?? 50);
       return rows.map(jobRow);
     },
 
@@ -341,8 +409,8 @@ export const account = actor({
         usd: row.status === "settled" ? settledUsd(Number(row.reserved_usd), { actualUsd: (row.actual_usd as number | null) ?? null, estimatedUsd: (row.estimated_usd as number | null) ?? null }) : row.status === "reserved" ? Number(row.reserved_usd) : 0,
       })),
 
-    // Endpoints. Keys arrive only through /api/endpoints and are stored encrypted with the app's key.
-    addEndpoint: async (c, input: { kind: EndpointKind; baseUrl: string; apiKey: string; allowedModels: string[] | "all" }): Promise<{ ok: true; endpoint: EndpointView } | { ok: false; error: string }> => {
+    // Endpoints, per project. Keys arrive only through /api/endpoints and are stored encrypted with the app's key.
+    addEndpoint: async (c, input: { projectId: string; kind: EndpointKind; baseUrl: string; apiKey: string; allowedModels: string[] | "all" }): Promise<{ ok: true; endpoint: EndpointView } | { ok: false; error: string }> => {
       const { keyEncryptionKey, allowPrivateEndpoints } = services().config;
       if (!keyEncryptionKey) return { ok: false, error: "Customer endpoints are not available yet: the app has no key-encryption key." };
       if (!["openrouter", "openai-compatible", "anthropic"].includes(input.kind)) return { ok: false, error: "kind must be openrouter, openai-compatible or anthropic" };
@@ -352,42 +420,44 @@ export const account = actor({
       const models = input.allowedModels === "all" ? "all" : Array.isArray(input.allowedModels) ? input.allowedModels.filter(item => typeof item === "string" && item.trim()).map(item => item.trim()) : null;
       if (!models || (models !== "all" && !models.length)) return { ok: false, error: "allowedModels must be \"all\" or a list of model IDs" };
       if (models === "all" && input.kind !== "openrouter") return { ok: false, error: "List the models this endpoint may run: only an OpenRouter endpoint can allow all" };
+      if (!(await projectViews(c.db, input.projectId)).length) return { ok: false, error: "No such project in this account." };
       const id = `ep_${randomBytes(6).toString("hex")}`;
       const key = input.apiKey.trim();
-      await c.db.execute(`INSERT INTO endpoints (id, kind, base_url, allowed_models, sealed_key, key_last4, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        id, input.kind, input.baseUrl.replace(/\/$/, ""), JSON.stringify(models), encryptKey(keyEncryptionKey, c.key[0]!, key), key.slice(-4), Date.now());
-      return { ok: true, endpoint: (await endpointViews(c.db)).find(item => item.id === id)! };
+      await c.db.execute(`INSERT INTO endpoints (id, project_id, kind, base_url, allowed_models, sealed_key, key_last4, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        id, input.projectId, input.kind, input.baseUrl.replace(/\/$/, ""), JSON.stringify(models), encryptKey(keyEncryptionKey, c.key[0]!, key), key.slice(-4), Date.now());
+      return { ok: true, endpoint: (await endpointViews(c.db, input.projectId)).find(item => item.id === id)! };
     },
 
-    endpoints: async (c): Promise<EndpointView[]> => endpointViews(c.db),
+    endpoints: async (c, projectId: string = DEFAULT_PROJECT): Promise<EndpointView[]> => endpointViews(c.db, projectId),
 
-    removeEndpoint: async (c, id: string): Promise<boolean> => (await c.db.execute(`DELETE FROM endpoints WHERE id = ? RETURNING id`, id)).length > 0,
+    removeEndpoint: async (c, input: { projectId: string; id: string }): Promise<boolean> =>
+      (await c.db.execute(`DELETE FROM endpoints WHERE id = ? AND project_id = ? RETURNING id`, input.id, input.projectId)).length > 0,
 
-    /** The endpoints a job may call, without keys: OpenRouter on OpenMerit's key first, then the customer's. */
-    endpointsForJob: async (c): Promise<EndpointInfo[]> => (await jobEndpoints(c.db, c.key[0]!, false)).map(({ apiKey: _key, ...info }) => info),
+    /** The endpoints a job in the project may call, without keys: OpenRouter on OpenMerit's key first, then the project's. */
+    endpointsForJob: async (c, projectId: string = DEFAULT_PROJECT): Promise<EndpointInfo[]> => (await jobEndpoints(c.db, c.key[0]!, projectId, false)).map(({ apiKey: _key, ...info }) => info),
 
     /** The same endpoints with their keys, for the job's model client. Returned only to the job, held in its memory, never stored. */
-    endpointSecrets: async (c): Promise<EndpointConfig[]> => jobEndpoints(c.db, c.key[0]!, true),
+    endpointSecrets: async (c, projectId: string = DEFAULT_PROJECT): Promise<EndpointConfig[]> => jobEndpoints(c.db, c.key[0]!, projectId, true),
 
-    // Guardrails, per level: environment (its name) and task (its ID).
-    setGuardrails: async (c, input: { level: Level; scope: string; settings: Guardrails }): Promise<{ rejected: { key: string; reason: string }[] }> => {
+    // Guardrails, per project and level: environment (its name) and task (its ID).
+    setGuardrails: async (c, input: { projectId: string; level: Level; scope: string; settings: Guardrails }): Promise<{ rejected: { key: string; reason: string }[] }> => {
       const rejected = Object.keys(input.settings).filter(key => !Object.hasOwn(GUARDRAIL_KINDS, key)).map(key => ({ key, reason: "not a guardrail" }));
       const kept = Object.fromEntries(Object.entries(input.settings).filter(([key, value]) => Object.hasOwn(GUARDRAIL_KINDS, key) && value !== null && value !== undefined));
-      await c.db.execute(`INSERT INTO guardrails (level, scope, settings) VALUES (?, ?, ?) ON CONFLICT (level, scope) DO UPDATE SET settings = excluded.settings`, input.level, input.scope, JSON.stringify(kept));
+      await c.db.execute(`INSERT INTO guardrails (project_id, level, scope, settings) VALUES (?, ?, ?, ?) ON CONFLICT (project_id, level, scope) DO UPDATE SET settings = excluded.settings`, input.projectId, input.level, input.scope, JSON.stringify(kept));
       return { rejected };
     },
 
-    guardrails: async (c, input: { level: Level; scope: string }): Promise<GuardrailSetting[]> => {
-      const settings = await levelSettings(c.db, input.level, input.scope);
+    guardrails: async (c, input: { projectId: string; level: Level; scope: string }): Promise<GuardrailSetting[]> => {
+      const settings = await levelSettings(c.db, input.projectId, input.level, input.scope);
       return Object.entries(settings).map(([key, value]) => ({ key, value, kind: GUARDRAIL_KINDS[key as GuardrailKey] }));
     },
 
     /** A task's effective guardrails, which level set each, and the settings refused. */
-    resolveGuardrails: async (c, input: { environment: string; agent?: string | null; taskId?: string }): Promise<ResolvedGuardrails> => {
+    resolveGuardrails: async (c, input: { projectId?: string; environment: string; agent?: string | null; taskId?: string }): Promise<ResolvedGuardrails> => {
       const levels: Partial<Record<Level, Guardrails>> = {};
       for (const level of LEVELS) {
         if (level === "task" && !input.taskId) continue;
-        levels[level] = await levelSettings(c.db, level, scopeKey(level, input));
+        levels[level] = await levelSettings(c.db, input.projectId ?? DEFAULT_PROJECT, level, scopeKey(level, input));
       }
       return resolveGuardrails(levels);
     },
@@ -395,19 +465,20 @@ export const account = actor({
     // The task index, which the task actors keep current.
     // A recommend call (lastRecommendAt) brings a retired task back; retired is set only by openmerit_retire.
     // Status `switched` (the user approved the pick, now the current model) clears the pick.
-    upsertTask: async (c, row: Pick<TaskRow, "id" | "environment" | "agent" | "name" | "currentModel" | "pick" | "status"> & { lastRunAt?: number; lastJobId?: string; lastRecommendAt?: number; retired?: boolean; monthlySavingUsd?: number | null }): Promise<void> => {
+    upsertTask: async (c, row: Pick<TaskRow, "id" | "projectId" | "environment" | "agent" | "name" | "currentModel" | "pick" | "status"> & { lastRunAt?: number; lastJobId?: string; lastRecommendAt?: number; retired?: boolean; monthlySavingUsd?: number | null }): Promise<void> => {
       const retired = row.retired === undefined ? (row.lastRecommendAt === undefined ? null : 0) : row.retired ? 1 : 0;
-      await c.db.execute(`INSERT INTO tasks (id, environment, agent, name, current_model, pick, status, last_run_at, last_job_id, monthly_saving_usd, retired, last_recommend_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0), ?) ON CONFLICT (id) DO UPDATE SET agent = excluded.agent, current_model = excluded.current_model,
+      await c.db.execute(`INSERT INTO tasks (id, project_id, environment, agent, name, current_model, pick, status, last_run_at, last_job_id, monthly_saving_usd, retired, last_recommend_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0), ?) ON CONFLICT (id) DO UPDATE SET agent = excluded.agent, current_model = excluded.current_model,
         pick = CASE WHEN excluded.status = 'switched' THEN NULL ELSE COALESCE(excluded.pick, tasks.pick) END, status = excluded.status, last_run_at = COALESCE(excluded.last_run_at, tasks.last_run_at),
         last_job_id = COALESCE(excluded.last_job_id, tasks.last_job_id), monthly_saving_usd = COALESCE(excluded.monthly_saving_usd, tasks.monthly_saving_usd),
         retired = COALESCE(?, tasks.retired), last_recommend_at = COALESCE(excluded.last_recommend_at, tasks.last_recommend_at)`,
-      row.id, row.environment, row.agent, row.name, row.currentModel, row.pick, row.status, row.lastRunAt ?? null, row.lastJobId ?? null, row.monthlySavingUsd ?? null,
+      row.id, row.projectId, row.environment, row.agent, row.name, row.currentModel, row.pick, row.status, row.lastRunAt ?? null, row.lastJobId ?? null, row.monthlySavingUsd ?? null,
       retired, row.lastRecommendAt ?? null, retired);
     },
 
-    tasks: async (c): Promise<TaskRow[]> => {
-      const rows = await c.db.execute(`SELECT t.*, ${REVIEWING} AS eval_review FROM tasks t ORDER BY COALESCE(last_run_at, 0) DESC`);
+    /** One project's tasks, or every project's. */
+    tasks: async (c, projectId?: string): Promise<TaskRow[]> => {
+      const rows = await c.db.execute(`SELECT t.*, ${REVIEWING} AS eval_review FROM tasks t WHERE ? IS NULL OR t.project_id = ? ORDER BY COALESCE(last_run_at, 0) DESC`, projectId ?? null, projectId ?? null);
       const watch = await watchGuardrails(c.db);
       return rows.map(row => taskRow(row, watch(row)));
     },
@@ -424,26 +495,26 @@ export const account = actor({
      * Records who deleted which task, without its content.
      */
     deleteTask: async (c, input: { taskId: string; userId: string }): Promise<{ jobs: number }> => c.db.transaction(async tx => {
-      const [task] = await tx.execute(`SELECT name, environment FROM tasks WHERE id = ?`, input.taskId);
+      const [task] = await tx.execute(`SELECT project_id, name, environment FROM tasks WHERE id = ?`, input.taskId);
       if (!task) return { jobs: 0 };
       const [jobs] = await tx.execute(`SELECT count(*) AS n FROM jobs WHERE task_id = ? AND deleted_at IS NULL`, input.taskId);
       const now = Date.now();
       await tx.execute(`UPDATE jobs SET deleted_at = ?, asked_by = NULL WHERE task_id = ? AND deleted_at IS NULL`, now, input.taskId);
       await tx.execute(`DELETE FROM reports WHERE task_id = ?`, input.taskId);
       await tx.execute(`DELETE FROM decisions WHERE task_id = ?`, input.taskId);
-      await tx.execute(`DELETE FROM guardrails WHERE level = 'task' AND scope = ?`, input.taskId);
+      await tx.execute(`DELETE FROM guardrails WHERE project_id = ? AND level = 'task' AND scope = ?`, String(task.project_id), input.taskId);
       await tx.execute(`DELETE FROM tasks WHERE id = ?`, input.taskId);
       // Its eval and eval command go with it.
       await tx.execute(`DELETE FROM evals WHERE task_id = ?`, input.taskId);
       await tx.execute(`DELETE FROM eval_grades WHERE task_id = ?`, input.taskId);
       await tx.execute(`DELETE FROM eval_commands WHERE task_id = ?`, input.taskId);
-      await tx.execute(`INSERT INTO deletions (task_id, name, environment, user_id, jobs, deleted_at) VALUES (?, ?, ?, ?, ?, ?)`, input.taskId, String(task.name), String(task.environment), input.userId, Number(jobs?.n ?? 0), now);
+      await tx.execute(`INSERT INTO deletions (project_id, task_id, name, environment, user_id, jobs, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, String(task.project_id), input.taskId, String(task.name), String(task.environment), input.userId, Number(jobs?.n ?? 0), now);
       return { jobs: Number(jobs?.n ?? 0) };
     }, { name: "delete_task" }),
 
-    /** Tasks deleted from this account: who, when, and the task's ID and name. */
-    deletions: async (c): Promise<{ taskId: string; name: string; environment: string; userId: string; jobs: number; deletedAt: string }[]> =>
-      (await c.db.execute(`SELECT * FROM deletions ORDER BY deleted_at DESC`)).map(row => ({ taskId: String(row.task_id), name: String(row.name), environment: String(row.environment), userId: String(row.user_id), jobs: Number(row.jobs), deletedAt: iso(row.deleted_at)! })),
+    /** Tasks deleted from one project, or the whole account: who, when, and the task's ID and name. */
+    deletions: async (c, projectId?: string): Promise<{ taskId: string; name: string; environment: string; userId: string; jobs: number; deletedAt: string }[]> =>
+      (await c.db.execute(`SELECT * FROM deletions WHERE ? IS NULL OR project_id = ? ORDER BY deleted_at DESC`, projectId ?? null, projectId ?? null)).map(row => ({ taskId: String(row.task_id), name: String(row.name), environment: String(row.environment), userId: String(row.user_id), jobs: Number(row.jobs), deletedAt: iso(row.deleted_at)! })),
 
     // Reports.
     saveReport: async (c, input: { jobId: string; taskId: string; json: unknown; markdown: string }): Promise<void> => {
@@ -493,16 +564,16 @@ export const account = actor({
       else await c.db.execute(`INSERT INTO eval_commands (task_id, spec, confirmed_by, confirmed_at) VALUES (?, ?, ?, ?) ON CONFLICT (task_id) DO UPDATE SET spec = excluded.spec, confirmed_by = excluded.confirmed_by, confirmed_at = excluded.confirmed_at`, input.taskId, JSON.stringify(input.spec), input.by, Date.now());
     },
     /** Creates a task's row before its first run, so a person can confirm its eval command first. */
-    createTask: async (c, input: { taskId: string; environment: string; agent: string | null; name: string; currentModel: string }): Promise<void> => {
-      await c.db.execute(`INSERT INTO tasks (id, environment, agent, name, current_model, pick, status, retired) VALUES (?, ?, ?, ?, ?, NULL, 'new', 0) ON CONFLICT (id) DO NOTHING`, input.taskId, input.environment, input.agent, input.name, input.currentModel);
+    createTask: async (c, input: { taskId: string; projectId: string; environment: string; agent: string | null; name: string; currentModel: string }): Promise<void> => {
+      await c.db.execute(`INSERT INTO tasks (id, project_id, environment, agent, name, current_model, pick, status, retired) VALUES (?, ?, ?, ?, ?, ?, NULL, 'new', 0) ON CONFLICT (id) DO NOTHING`, input.taskId, input.projectId, input.environment, input.agent, input.name, input.currentModel);
     },
 
     /** Saves a coding agent's critical request until a person confirms or declines it. */
-    requestConfirmation: async (c, input: { method: string; path: string; body: string; checks: "person" | "reverify"; title: string; items: string[]; requestedBy: string; requestedVia: string | null }): Promise<ConfirmationView> => {
+    requestConfirmation: async (c, input: { projectId: string; method: string; path: string; body: string; checks: "person" | "reverify"; title: string; items: string[]; requestedBy: string; requestedVia: string | null }): Promise<ConfirmationView> => {
       const id = randomBytes(18).toString("base64url"), now = Date.now(), key = services().config.keyEncryptionKey;
       const body = key && input.body ? `sealed:${encryptKey(key, c.key[0]!, input.body)}` : input.body;
-      await c.db.execute(`INSERT INTO confirmations (id, nonce, method, path, body, checks, title, items, requested_by, requested_via, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-        id, randomBytes(18).toString("base64url"), input.method, input.path, body, input.checks, input.title, JSON.stringify(input.items), input.requestedBy, input.requestedVia, now, now + CONFIRM_HOURS * 3600_000);
+      await c.db.execute(`INSERT INTO confirmations (id, nonce, project_id, method, path, body, checks, title, items, requested_by, requested_via, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+        id, randomBytes(18).toString("base64url"), input.projectId, input.method, input.path, body, input.checks, input.title, JSON.stringify(input.items), input.requestedBy, input.requestedVia, now, now + CONFIRM_HOURS * 3600_000);
       const [row] = await c.db.execute(`SELECT * FROM confirmations WHERE id = ?`, id);
       return confirmationRow(row!);
     },
@@ -681,8 +752,8 @@ export const account = actor({
     export: async (c): Promise<Record<string, unknown>> => {
       const all = async (table: string) => c.db.execute(`SELECT * FROM ${table}`);
       return {
-        account: c.key[0], exportedAt: new Date().toISOString(), plan: await plan(c.db), members: await all("members"),
-        endpoints: (await all("endpoints")).map(row => ({ id: row.id, kind: row.kind, baseUrl: row.base_url, allowedModels: JSON.parse(String(row.allowed_models)) as unknown, keyLast4: row.key_last4 })),
+        account: c.key[0], exportedAt: new Date().toISOString(), plan: await plan(c.db), members: await all("members"), projects: await projectViews(c.db),
+        endpoints: (await all("endpoints")).map(row => ({ id: row.id, projectId: row.project_id, kind: row.kind, baseUrl: row.base_url, allowedModels: JSON.parse(String(row.allowed_models)) as unknown, keyLast4: row.key_last4 })),
         guardrails: (await all("guardrails")).map(row => ({ ...row, settings: JSON.parse(String(row.settings)) as unknown })), tasks: await (async () => { const watch = await watchGuardrails(c.db); return (await c.db.execute(`SELECT t.*, ${REVIEWING} AS eval_review FROM tasks t`)).map(row => taskRow(row, watch(row))); })(),
         decisions: (await all("decisions")).map(decisionRow),
         evals: await Promise.all((await all("evals")).map(async row => evalView(c.db, String(row.task_id)))),
@@ -762,32 +833,49 @@ async function meterOverage(database: Database): Promise<void> {
   }
 }
 
-async function levelSettings(database: Database, level: Level, scope: string): Promise<Guardrails> {
-  const [row] = await database.execute(`SELECT settings FROM guardrails WHERE level = ? AND scope = ?`, level, scope);
+async function levelSettings(database: Database, projectId: string, level: Level, scope: string): Promise<Guardrails> {
+  const [row] = await database.execute(`SELECT settings FROM guardrails WHERE project_id = ? AND level = ? AND scope = ?`, projectId, level, scope);
   return row ? JSON.parse(String(row.settings)) as Guardrails : {};
 }
 
 /** Each task's effective `watch` guardrail, from one read of every level's settings. */
 async function watchGuardrails(database: Database): Promise<(row: Row) => boolean | undefined> {
-  const settings = new Map((await database.execute(`SELECT level, scope, settings FROM guardrails`)).map(item => [`${String(item.level)}\0${String(item.scope)}`, JSON.parse(String(item.settings)) as Guardrails]));
+  const settings = new Map((await database.execute(`SELECT project_id, level, scope, settings FROM guardrails`)).map(item => [`${String(item.project_id)}\0${String(item.level)}\0${String(item.scope)}`, JSON.parse(String(item.settings)) as Guardrails]));
   return row => {
     const input = { environment: String(row.environment), taskId: String(row.id) };
     const levels: Partial<Record<Level, Guardrails>> = {};
-    for (const level of LEVELS) levels[level] = settings.get(`${level}\0${scopeKey(level, input)}`) ?? {};
+    for (const level of LEVELS) levels[level] = settings.get(`${String(row.project_id)}\0${level}\0${scopeKey(level, input)}`) ?? {};
     return resolveGuardrails(levels).effective.watch;
   };
 }
 
-async function endpointViews(database: Database): Promise<EndpointView[]> {
-  const rows = await database.execute(`SELECT id, kind, base_url, allowed_models, key_last4, verified_at FROM endpoints ORDER BY created_at`);
+const MAX_PROJECTS = 50;
+const projectNameProblem = (name: unknown): string | null =>
+  typeof name !== "string" || !name.trim() ? "Name the project." : name.trim().length > 64 ? "A project's name is at most 64 characters." : null;
+async function nameTaken(database: Database, name: string, except: string | null): Promise<string | null> {
+  const [row] = await database.execute(`SELECT id FROM projects WHERE lower(name) = lower(?) AND id IS NOT ?`, name, except);
+  return row ? `This account already has a project named ${name}.` : null;
+}
+
+/** The account's projects, default first, then by creation, with what each holds. */
+async function projectViews(database: Database, id?: string): Promise<Project[]> {
+  const rows = await database.execute(`SELECT p.id, p.name, p.created_at,
+      (SELECT count(*) FROM tasks t WHERE t.project_id = p.id) AS tasks,
+      (SELECT count(*) FROM endpoints e WHERE e.project_id = p.id) AS endpoints
+    FROM projects p ${id ? "WHERE p.id = ?" : ""} ORDER BY p.id = '${DEFAULT_PROJECT}' DESC, p.created_at`, ...(id ? [id] : []));
+  return rows.map(row => ({ id: String(row.id), name: String(row.name), createdAt: iso(row.created_at)!, tasks: Number(row.tasks), endpoints: Number(row.endpoints) }));
+}
+
+async function endpointViews(database: Database, projectId: string): Promise<EndpointView[]> {
+  const rows = await database.execute(`SELECT id, kind, base_url, allowed_models, key_last4, verified_at FROM endpoints WHERE project_id = ? ORDER BY created_at`, projectId);
   return rows.map(row => ({ id: String(row.id), kind: row.kind as EndpointKind, baseUrl: String(row.base_url), allowedModels: JSON.parse(String(row.allowed_models)) as string[] | "all", keyLast4: String(row.key_last4), verifiedAt: iso(row.verified_at), builtIn: false }));
 }
 
-async function jobEndpoints(database: Database, accountId: string, withKeys: boolean): Promise<(EndpointConfig & EndpointInfo)[]> {
+async function jobEndpoints(database: Database, accountId: string, projectId: string, withKeys: boolean): Promise<(EndpointConfig & EndpointInfo)[]> {
   const { openrouter, keyEncryptionKey } = services().config;
   const out: (EndpointConfig & EndpointInfo)[] = [];
   if (openrouter.apiKey) out.push({ id: OPENROUTER, kind: "openrouter", baseUrl: openrouter.baseUrl, allowedModels: "all", funding: "openmerit", apiKey: withKeys ? openrouter.apiKey : "" });
-  const rows = await database.execute(`SELECT id, kind, base_url, allowed_models, sealed_key FROM endpoints ORDER BY created_at`);
+  const rows = await database.execute(`SELECT id, kind, base_url, allowed_models, sealed_key FROM endpoints WHERE project_id = ? ORDER BY created_at`, projectId);
   for (const row of rows) {
     // An endpoint whose key no longer decrypts, such as after a key rotation, is left out rather than failing the job.
     let apiKey = "";
