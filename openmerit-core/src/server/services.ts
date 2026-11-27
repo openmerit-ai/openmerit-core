@@ -19,6 +19,8 @@ export interface Services {
    * cases yet; the job calls this through the engine's `checkAgent` rule.
    */
   agentEval: (input: { accountId: string; environment: string; agent: string }) => ((assignment: ReadonlyMap<string, { model: string; endpoint: string }>) => Promise<AgentRun>) | null;
+  /** A user's GitHub token from their GitHub sign-in (Auth.githubToken); null without one or without sign-in. */
+  githubToken: (userId: string) => Promise<string | null>;
 }
 
 let current: Services | null = null;

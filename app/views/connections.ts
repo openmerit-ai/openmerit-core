@@ -110,7 +110,11 @@ export async function removeEndpoint(target: HTMLElement, endpoints: Endpoint[],
 }
 
 export const connectionsView: View<null> = {
-  load: async () => null,
+  // The OpenMerit GitHub App's Setup URL is this page, from when GitHub lived here: its return goes on to Account settings.
+  async load({ params, go }) {
+    if (params.get("installation_id")) go(`/account/?${params.toString()}`);
+    return null;
+  },
   title: () => "Coding agents",
   render(_data, { me }) {
     const admin = me.role === "admin";
@@ -123,7 +127,7 @@ export const connectionsView: View<null> = {
         <div style="margin-top: 8px">${install()}</div>
         <div class="row" style="margin-top: 10px"><span>Disconnect every coding agent<span class="sub">Signs out every coding agent session for ${me.account.name}. Each one's next call opens sign-in again. Tasks and runs are kept.</span></span>${admin ? html`<button class="btn danger" type="button" data-action="disconnect">Disconnect</button>` : html`<span class="sub">Admins only</span>`}</div>
       </div>
-      <p class="note">A coding agent's task goes in the project it names, else the project whose tasks already use its repository, else the default project. Model endpoints are set per project in <a href="/project/">Project settings</a>. To write your tasks' test cases on your own ChatGPT plan, sign in on <a href="/account/">Account settings</a>.</p>
+      <p class="note">A coding agent's task goes in the project it names, else the project that has its repository in Project settings or whose tasks already use it, else the default project. Model endpoints are set per project in <a href="/project/">Project settings</a>. To write your tasks' test cases on your own ChatGPT plan, or to connect GitHub, go to <a href="/account/">Account settings</a>.</p>
     </section>`;
   },
   actions: {

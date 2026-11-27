@@ -7,6 +7,8 @@ import { db } from "rivetkit/db";
 import type { PlanUpdate } from "../billing.ts";
 import { GUARDRAIL_KINDS, LEVELS, resolveGuardrails, settledUsd, type Funding, type GuardrailKey, type Guardrails, type Level, type ReserveResult, type ResolvedGuardrails, type Settlement } from "../engine.ts";
 import { decryptKey, encryptKey, endpointUrlProblem } from "../keys.ts";
+import { checkRepo, parseRepoUrl, reviewRepository, tokenProblem, type RepoReview } from "../github.ts";
+import type { Catalogue } from "../engine.ts";
 import { OPENROUTER, type EndpointInfo } from "../../job/pool.ts";
 import type { Case, EndpointConfig, EndpointKind, TaskBundle } from "../../ranking/index.ts";
 import type { EvalCommandSpec } from "../../job/workflow.ts";
@@ -24,7 +26,22 @@ import { DEFAULT_PROJECT, JOB_BUDGET, type EvalBar, type EvalGrade, type EvalSou
  * account's. Every account has the default project, which holds what it had before projects and can be renamed but not deleted.
  */
 export const DEFAULT_PROJECT_NAME = "Default project";
-export interface Project { id: string; name: string; createdAt: string; tasks: number; endpoints: number }
+export interface Project { id: string; name: string; createdAt: string; tasks: number; endpoints: number; repos: string[] }
+/**
+ * A GitHub repository the project added. tokenLast4 is null unless it was added with a fine-grained token.
+ * review.result is the last review that finished, kept while a new one runs or after it fails.
+ */
+export interface RepoView {
+  id: string; projectId: string; fullName: string; url: string; private: boolean; defaultBranch: string; tokenLast4: string | null; addedAt: string; checkedAt: string;
+  /** How OpenMerit reads it: by its public URL, with a fine-grained token, or through the GitHub sign-in of the member who added it (`githubUser`, a Clerk user ID). */
+  access: "public" | "token" | "github"; githubUser: string | null;
+  review: { status: "queued" | "reviewing" | "done" | "failed"; requestedAt: string; finishedAt: string | null; error: string | null; result: RepoReview | null };
+}
+/**
+ * A task a repository review found, waiting for a person: approving it creates the task, not run yet, with the
+ * reviewed spec and its examples; its first run writes the cases and grades them with the person, as any first run does.
+ */
+export interface EvalDraft { id: string; projectId: string; repoId: string | null; environment: string; name: string; bundle: TaskBundle; cases: Case[]; status: "pending" | "approved" | "dismissed"; createdAt: string; taskId: string | null }
 /** The tables a project scopes, which accounts stored before projects get a project_id column on, set to the default project. */
 const PROJECT_TABLES = ["endpoints", "jobs", "tasks", "deletions", "confirmations"];
 
@@ -70,6 +87,14 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS eval_grades (task_id TEXT PRIMARY KEY, version INTEGER NOT NULL, grades TEXT NOT NULL)`,
   // A task's own eval command, which a self-hosted server runs to measure it, as a person confirmed it (api.ts).
   `CREATE TABLE IF NOT EXISTS eval_commands (task_id TEXT PRIMARY KEY, spec TEXT NOT NULL, confirmed_by TEXT NOT NULL, confirmed_at INTEGER NOT NULL)`,
+  // GitHub repositories a project reads: each belongs to one project. sealed_token is a fine-grained token, encrypted; github_user the member whose GitHub sign-in reads it.
+  `CREATE TABLE IF NOT EXISTS repos (id TEXT PRIMARY KEY, project_id TEXT NOT NULL DEFAULT 'default', full_name TEXT NOT NULL UNIQUE COLLATE NOCASE, private INTEGER NOT NULL, default_branch TEXT NOT NULL,
+    sealed_token TEXT, token_last4 TEXT, github_user TEXT, added_at INTEGER NOT NULL, checked_at INTEGER NOT NULL,
+    review_status TEXT NOT NULL, review_requested_at INTEGER NOT NULL, review_finished_at INTEGER, review_error TEXT, review TEXT)`,
+  `CREATE TABLE IF NOT EXISTS repo_reviews (repo_id TEXT NOT NULL, requested_at INTEGER NOT NULL)`,
+  // Tasks a repository review found, until a person approves (creating the task) or dismisses each.
+  `CREATE TABLE IF NOT EXISTS eval_drafts (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, repo_id TEXT, environment TEXT NOT NULL, name TEXT NOT NULL, bundle TEXT NOT NULL,
+    cases TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL, decided_by TEXT, decided_at INTEGER, task_id TEXT)`,
 ];
 
 /** What a ledger row counts: settled at its cost, reserved at its reservation, released not at all. */
@@ -241,24 +266,25 @@ export const account = actor({
       return { ok: true, project: (await projectViews(c.db, input.id))[0]! };
     },
 
-    /** Deletes a project with its endpoints and guardrails. A project that still has tasks is refused: delete them first. */
+    /** Deletes a project with its endpoints, repositories, drafts and guardrails. A project that still has tasks is refused: delete them first. */
     deleteProject: async (c, id: string): Promise<{ ok: true } | { ok: false; status: 404 | 409; error: string }> => c.db.transaction(async tx => {
       if (id === DEFAULT_PROJECT) return { ok: false, status: 409, error: "The default project cannot be deleted. Rename it instead." };
       const [found] = await tx.execute(`SELECT id FROM projects WHERE id = ?`, id);
       if (!found) return { ok: false, status: 404, error: "No such project in this account." };
       const [tasks] = await tx.execute(`SELECT count(*) AS n FROM tasks WHERE project_id = ?`, id);
       if (Number(tasks?.n)) return { ok: false, status: 409, error: `This project has ${Number(tasks?.n)} task${Number(tasks?.n) === 1 ? "" : "s"}. Delete them first.` };
-      await tx.execute(`DELETE FROM endpoints WHERE project_id = ?`, id);
-      await tx.execute(`DELETE FROM guardrails WHERE project_id = ?`, id);
+      for (const table of ["endpoints", "repos", "eval_drafts", "guardrails"]) await tx.execute(`DELETE FROM ${table} WHERE project_id = ?`, id);
       await tx.execute(`DELETE FROM projects WHERE id = ?`, id);
       return { ok: true as const };
     }, { name: "delete_project" }),
 
     /**
-     * The project a coding agent's call that names none works in: the project whose tasks already use the environment,
-     * when exactly one does, else the default project.
+     * The project a coding agent's call that names none works in: the project whose GitHub repository the environment
+     * names (owner/repo, ignoring case), else the project whose tasks already use it when exactly one does, else the default.
      */
     projectForEnvironment: async (c, environment: string): Promise<string> => {
+      const [repo] = await c.db.execute(`SELECT project_id FROM repos WHERE full_name = ?`, environment);
+      if (repo) return String(repo.project_id);
       const rows = await c.db.execute(`SELECT DISTINCT project_id FROM tasks WHERE environment = ?`, environment);
       return rows.length === 1 ? String(rows[0]!.project_id) : DEFAULT_PROJECT;
     },
@@ -433,6 +459,95 @@ export const account = actor({
     removeEndpoint: async (c, input: { projectId: string; id: string }): Promise<boolean> =>
       (await c.db.execute(`DELETE FROM endpoints WHERE id = ? AND project_id = ? RETURNING id`, input.id, input.projectId)).length > 0,
 
+    // GitHub repositories. A token arrives only through /api/repos and is stored encrypted, as endpoint keys are.
+    /** Checks that OpenMerit can read the repository, saves it in the project and starts its review. Adding one again replaces its token. */
+    addRepo: async (c, input: { projectId: string; url: string; token?: string | null; githubUser?: string | null }): Promise<{ ok: true; repo: RepoView } | { ok: false; error: string }> => {
+      const { config, fetch } = services();
+      // Reviews are part of a paid plan: without one, nothing reaches GitHub, is cloned or is spent.
+      const unpaid = planRefusal(await plan(c.db));
+      if (unpaid) return { ok: false, error: unpaid };
+      const ref = parseRepoUrl(typeof input.url === "string" ? input.url : "");
+      if (!ref) return { ok: false, error: "Paste the repository's GitHub URL, such as https://github.com/acme/app." };
+      const pasted = typeof input.token === "string" && input.token.trim() ? input.token.trim() : null;
+      // Through a member's GitHub sign-in, OpenMerit reads it with that member's GitHub token, which Clerk renews; it stores no token.
+      const githubUser = !pasted && input.githubUser ? input.githubUser : null;
+      const signIn = githubUser ? await services().githubToken(githubUser).catch(() => null) : null;
+      if (githubUser && !signIn) return { ok: false, error: "Your OpenMerit sign-in has no GitHub account. Connect GitHub on Account settings, or add the repository with a fine-grained token." };
+      const token = pasted ?? signIn;
+      if (pasted) {
+        const problem = tokenProblem(pasted);
+        if (problem) return { ok: false, error: problem };
+        if (!config.keyEncryptionKey) return { ok: false, error: "Private repositories are not available yet: the app has no key-encryption key." };
+      }
+      if (!(await projectViews(c.db, input.projectId)).length) return { ok: false, error: "No such project in this account." };
+      // A repository belongs to one project, so a coding agent's call from it finds its project.
+      const [known] = await c.db.execute(`SELECT repos.id, repos.project_id, projects.name FROM repos LEFT JOIN projects ON projects.id = repos.project_id WHERE full_name = ?`, `${ref.owner}/${ref.name}`);
+      if (known && known.project_id !== input.projectId) return { ok: false, error: `${ref.owner}/${ref.name} is already in the project ${String(known.name ?? known.project_id)}. Remove it there first.` };
+      const [count] = await c.db.execute(`SELECT count(*) AS n FROM repos`);
+      if (!known && Number(count?.n) >= config.limits.repos) return { ok: false, error: `This account has ${config.limits.repos} repositories, its limit. Remove one to add another.` };
+      const busy = await reviewsRefusal(c.db);
+      if (busy) return { ok: false, error: busy };
+      const checked = await checkRepo(ref, token, config.github, fetch);
+      if (!checked.ok) return { ok: false, error: githubUser ? checked.error.replace(/^This token cannot see (\S+)\. Check that its Repository access includes it\.$/, "The OpenMerit GitHub App cannot see $1 for you. Install it on the repository's account or organization and select the repository.") : checked.error };
+      const { repo } = checked;
+      const now = Date.now();
+      const id = known ? String(known.id) : `repo_${randomBytes(6).toString("hex")}`;
+      await c.db.execute(`INSERT INTO repos (id, project_id, full_name, private, default_branch, sealed_token, token_last4, github_user, added_at, checked_at, review_status, review_requested_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?)
+        ON CONFLICT (id) DO UPDATE SET full_name = excluded.full_name, private = excluded.private, default_branch = excluded.default_branch, sealed_token = excluded.sealed_token,
+        token_last4 = excluded.token_last4, github_user = excluded.github_user, checked_at = excluded.checked_at`,
+      id, input.projectId, repo.fullName, repo.private ? 1 : 0, repo.defaultBranch, pasted ? encryptKey(config.keyEncryptionKey!, c.key[0]!, pasted) : null, pasted ? pasted.slice(-4) : null, githubUser, now, now, now);
+      await startReview(c, id, () => c.client<Registry>().catalogue.getOrCreate(["global"]).get());
+      return { ok: true, repo: (await repoViews(c.db, { id }))[0]! };
+    },
+
+    repos: async (c, projectId: string): Promise<RepoView[]> => repoViews(c.db, { projectId }),
+
+    /** Reviews the repository again, unless a review is already queued or running. */
+    reviewRepo: async (c, input: { projectId: string; id: string }): Promise<{ ok: true; repo: RepoView } | { ok: false; status: 402 | 404 | 409; error: string }> => {
+      const [view] = await repoViews(c.db, input);
+      if (!view) return { ok: false, status: 404, error: "No such repository in this project." };
+      if (view.review.status === "queued" || view.review.status === "reviewing") return { ok: true, repo: view };
+      const unpaid = planRefusal(await plan(c.db));
+      if (unpaid) return { ok: false, status: 402, error: unpaid };
+      const busy = await reviewsRefusal(c.db);
+      if (busy) return { ok: false, status: 409, error: busy };
+      await startReview(c, input.id, () => c.client<Registry>().catalogue.getOrCreate(["global"]).get());
+      return { ok: true, repo: (await repoViews(c.db, { id: input.id }))[0]! };
+    },
+
+    /** Deletes the repository, its token, its review and its pending drafts. A review still running finishes without saving. */
+    removeRepo: async (c, input: { projectId: string; id: string }): Promise<boolean> => {
+      const removed = (await c.db.execute(`DELETE FROM repos WHERE id = ? AND project_id = ? RETURNING id`, input.id, input.projectId)).length > 0;
+      if (removed) await c.db.execute(`DELETE FROM eval_drafts WHERE repo_id = ? AND status = 'pending'`, input.id);
+      return removed;
+    },
+
+    // Drafts: tasks a repository review found, for a person to approve or dismiss.
+    evalDrafts: async (c, input: { projectId?: string; status?: EvalDraft["status"] } = {}): Promise<EvalDraft[]> =>
+      (await c.db.execute(`SELECT * FROM eval_drafts WHERE (? IS NULL OR project_id = ?) AND (? IS NULL OR status = ?) ORDER BY created_at`, input.projectId ?? null, input.projectId ?? null, input.status ?? null, input.status ?? null)).map(draftRow),
+
+    /**
+     * Approves a pending draft: the task joins the draft's project, not run yet, with the reviewed bundle, which the caller
+     * gives the task actor. It has no accepted eval: its first run writes the cases from the bundle's examples and spec, and
+     * the person grades them before any search, which accepts version 1.
+     */
+    approveDraft: async (c, input: { id: string; taskId: string; userId: string; bundle: TaskBundle }): Promise<{ ok: true } | { ok: false; status: 404 | 409; error: string }> => c.db.transaction(async tx => {
+      const [row] = await tx.execute(`SELECT * FROM eval_drafts WHERE id = ?`, input.id);
+      if (!row) return { ok: false, status: 404, error: "No such draft in this project." };
+      if (row.status !== "pending") return { ok: false, status: 409, error: `This draft was already ${String(row.status)}.` };
+      const [task] = await tx.execute(`SELECT id FROM tasks WHERE id = ?`, input.taskId);
+      if (task) return { ok: false, status: 409, error: "This project already has a task by that name. Dismiss the draft, or revise the task's eval." };
+      const now = Date.now();
+      await tx.execute(`INSERT INTO tasks (id, project_id, environment, agent, name, current_model, pick, status, retired) VALUES (?, ?, ?, NULL, ?, ?, NULL, 'new', 0)`,
+        input.taskId, String(row.project_id), String(row.environment), input.bundle.task, input.bundle.current.model);
+      await tx.execute(`UPDATE eval_drafts SET status = 'approved', decided_by = ?, decided_at = ?, task_id = ? WHERE id = ?`, input.userId, now, input.taskId, input.id);
+      return { ok: true };
+    }, { name: "approve_draft" }),
+
+    /** Dismisses a pending draft and forgets its content; the same task is not offered again. */
+    dismissDraft: async (c, input: { projectId: string; id: string; userId: string }): Promise<boolean> =>
+      (await c.db.execute(`UPDATE eval_drafts SET status = 'dismissed', decided_by = ?, decided_at = ?, bundle = '{}', cases = '[]' WHERE id = ? AND project_id = ? AND status = 'pending' RETURNING id`, input.userId, Date.now(), input.id, input.projectId)).length > 0,
+
     /** The endpoints a job in the project may call, without keys: OpenRouter on OpenMerit's key first, then the project's. */
     endpointsForJob: async (c, projectId: string = DEFAULT_PROJECT): Promise<EndpointInfo[]> => (await jobEndpoints(c.db, c.key[0]!, projectId, false)).map(({ apiKey: _key, ...info }) => info),
 
@@ -508,6 +623,7 @@ export const account = actor({
       await tx.execute(`DELETE FROM evals WHERE task_id = ?`, input.taskId);
       await tx.execute(`DELETE FROM eval_grades WHERE task_id = ?`, input.taskId);
       await tx.execute(`DELETE FROM eval_commands WHERE task_id = ?`, input.taskId);
+      await tx.execute(`UPDATE eval_drafts SET bundle = '{}', cases = '[]' WHERE task_id = ?`, input.taskId);
       await tx.execute(`INSERT INTO deletions (project_id, task_id, name, environment, user_id, jobs, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, String(task.project_id), input.taskId, String(task.name), String(task.environment), input.userId, Number(jobs?.n ?? 0), now);
       return { jobs: Number(jobs?.n ?? 0) };
     }, { name: "delete_task" }),
@@ -748,14 +864,14 @@ export const account = actor({
       await c.db.execute(`UPDATE jobs SET eval_version = ? WHERE id = ?`, input.version, input.jobId);
     },
 
-    /** Everything the account holds, except keys. */
+    /** Everything the account holds, except keys and repository tokens. */
     export: async (c): Promise<Record<string, unknown>> => {
       const all = async (table: string) => c.db.execute(`SELECT * FROM ${table}`);
       return {
         account: c.key[0], exportedAt: new Date().toISOString(), plan: await plan(c.db), members: await all("members"), projects: await projectViews(c.db),
         endpoints: (await all("endpoints")).map(row => ({ id: row.id, projectId: row.project_id, kind: row.kind, baseUrl: row.base_url, allowedModels: JSON.parse(String(row.allowed_models)) as unknown, keyLast4: row.key_last4 })),
         guardrails: (await all("guardrails")).map(row => ({ ...row, settings: JSON.parse(String(row.settings)) as unknown })), tasks: await (async () => { const watch = await watchGuardrails(c.db); return (await c.db.execute(`SELECT t.*, ${REVIEWING} AS eval_review FROM tasks t`)).map(row => taskRow(row, watch(row))); })(),
-        decisions: (await all("decisions")).map(decisionRow),
+        decisions: (await all("decisions")).map(decisionRow), repos: await repoViews(c.db), evalDrafts: (await all("eval_drafts")).map(draftRow),
         evals: await Promise.all((await all("evals")).map(async row => evalView(c.db, String(row.task_id)))),
         jobs: (await c.db.execute(`SELECT * FROM jobs WHERE deleted_at IS NULL`)).map(jobRow), deletions: await all("deletions"), ledger: await all("ledger"), reports: (await all("reports")).map(row => ({ jobId: row.job_id, taskId: row.task_id, report: JSON.parse(String(row.json)) as unknown })),
       };
@@ -861,14 +977,135 @@ async function nameTaken(database: Database, name: string, except: string | null
 async function projectViews(database: Database, id?: string): Promise<Project[]> {
   const rows = await database.execute(`SELECT p.id, p.name, p.created_at,
       (SELECT count(*) FROM tasks t WHERE t.project_id = p.id) AS tasks,
-      (SELECT count(*) FROM endpoints e WHERE e.project_id = p.id) AS endpoints
+      (SELECT count(*) FROM endpoints e WHERE e.project_id = p.id) AS endpoints,
+      (SELECT json_group_array(full_name) FROM (SELECT full_name FROM repos r WHERE r.project_id = p.id ORDER BY added_at)) AS repos
     FROM projects p ${id ? "WHERE p.id = ?" : ""} ORDER BY p.id = '${DEFAULT_PROJECT}' DESC, p.created_at`, ...(id ? [id] : []));
-  return rows.map(row => ({ id: String(row.id), name: String(row.name), createdAt: iso(row.created_at)!, tasks: Number(row.tasks), endpoints: Number(row.endpoints) }));
+  return rows.map(row => ({ id: String(row.id), name: String(row.name), createdAt: iso(row.created_at)!, tasks: Number(row.tasks), endpoints: Number(row.endpoints), repos: JSON.parse(String(row.repos)) as string[] }));
 }
 
 async function endpointViews(database: Database, projectId: string): Promise<EndpointView[]> {
   const rows = await database.execute(`SELECT id, kind, base_url, allowed_models, key_last4, verified_at FROM endpoints WHERE project_id = ? ORDER BY created_at`, projectId);
   return rows.map(row => ({ id: String(row.id), kind: row.kind as EndpointKind, baseUrl: String(row.base_url), allowedModels: JSON.parse(String(row.allowed_models)) as string[] | "all", keyLast4: String(row.key_last4), verifiedAt: iso(row.verified_at), builtIn: false }));
+}
+
+/** Why the account cannot start another review this hour, or null. */
+async function reviewsRefusal(database: Database): Promise<string | null> {
+  const { reviewsPerHour } = services().config.limits;
+  const [row] = await database.execute(`SELECT count(*) AS n FROM repo_reviews WHERE requested_at > ?`, Date.now() - 3_600_000);
+  return Number(row?.n) >= reviewsPerHour ? `This account started ${reviewsPerHour} repository reviews in the last hour, its limit. Try again later.` : null;
+}
+
+/** A review queued or running for longer than this stopped with its node, such as in a deploy, and can start again. */
+const reviewStaleMs = () => services().config.github.cloneTimeoutMs + (services().config.limits.reviewMinutes + 5) * 60_000;
+
+/** Ledger keys, and job IDs, of repository reviews: `review/<repo id>/<requested at>`. A review is OpenMerit-paid spend, not one of the plan's evaluations. */
+const REVIEW_LEDGER = "review/";
+
+/** Reserves a review's budget as OpenMerit-paid spend, or says which monthly cap refuses it. */
+async function reserveReview(database: Transactional, key: string, model: string, usd: number): Promise<string | null> {
+  return database.transaction(async tx => {
+    const cap = services().config.limits.monthlyCapUsd;
+    const [row] = await tx.execute(`SELECT COALESCE(sum(${COUNTED}), 0) AS usd FROM ledger WHERE funding = 'openmerit' AND created_at >= ?`, await periodStart(tx));
+    const used = Number(row?.usd ?? 0);
+    if (used + usd > cap + 1e-9) return `The review needs up to $${usd.toFixed(2)}, and this account has used or reserved $${used.toFixed(4)} of its $${cap.toFixed(2)} monthly OpenMerit-paid cap. Try again next period.`;
+    await tx.execute(`INSERT INTO ledger (key, job_id, funding, model, status, reserved_usd, created_at) VALUES (?, ?, 'openmerit', ?, 'reserved', ?, ?)`, key, key, model, usd, Date.now());
+    return null;
+  }, { name: "review_reserve" });
+}
+
+/**
+ * Queues a review and runs it after the action returns: the clone and review take longer than an action may.
+ * The request time tells this review's result from a later one's: a review whose repository was added again or
+ * removed meanwhile saves nothing. Each task spec it writes becomes a draft for a person to approve.
+ */
+async function startReview(c: { db: Transactional; key: readonly string[]; keepAwake: <T>(promise: Promise<T>) => Promise<T> }, id: string, catalogue: () => Promise<Catalogue>): Promise<void> {
+  const requestedAt = Date.now();
+  await c.db.execute(`UPDATE repos SET review_status = 'queued', review_requested_at = ? WHERE id = ?`, requestedAt, id);
+  await c.db.execute(`DELETE FROM repo_reviews WHERE requested_at < ?`, requestedAt - 3_600_000);
+  await c.db.execute(`INSERT INTO repo_reviews (repo_id, requested_at) VALUES (?, ?)`, id, requestedAt);
+  const current = `id = ? AND review_requested_at = ?`;
+  const run = async () => {
+    const [row] = await c.db.execute(`SELECT full_name, default_branch, sealed_token, github_user FROM repos WHERE ${current}`, id, requestedAt);
+    if (!row) return;
+    await c.db.execute(`UPDATE repos SET review_status = 'reviewing' WHERE ${current}`, id, requestedAt);
+    const { config } = services();
+    const { limits, models, openrouter } = config;
+    // The review's model calls are reserved against the monthly OpenMerit-paid cap before the clone, and settled at what they cost.
+    const key = `${REVIEW_LEDGER}${id}/${requestedAt}`;
+    const reviewer = openrouter.apiKey ? { model: models.reviewer, apiKey: openrouter.apiKey, baseUrl: openrouter.baseUrl, budgetUsd: limits.reviewBudgetUsd, timeoutMs: limits.reviewMinutes * 60_000 } : null;
+    let reserved = false;
+    try {
+      let token: string | null = null;
+      if (row.sealed_token) {
+        try { token = decryptKey(config.keyEncryptionKey!, c.key[0]!, String(row.sealed_token)); } catch { throw new Error("OpenMerit can no longer read this repository's token. Add the repository again with its token."); }
+      } else if (row.github_user) {
+        // The adding member's GitHub token, fresh from Clerk: it lasts 8 hours and Clerk renews it.
+        token = await services().githubToken(String(row.github_user)).catch(() => null);
+        if (!token) throw new Error("The member who added this repository through GitHub sign-in no longer has GitHub connected on OpenMerit. Add it again with your GitHub sign-in, or with a fine-grained token.");
+      }
+      if (reviewer) {
+        const refused = await reserveReview(c.db, key, reviewer.model, reviewer.budgetUsd);
+        if (refused) throw new Error(refused);
+        reserved = true;
+      }
+      const review = await reviewRepository({ fullName: String(row.full_name), branch: String(row.default_branch), token, config: config.github, catalogue: await catalogue(), reviewer });
+      if (reserved) await c.db.execute(`UPDATE ledger SET status = 'settled', actual_usd = ? WHERE key = ? AND status = 'reserved'`, review.costUsd, key);
+      const saved = await c.db.execute(`UPDATE repos SET review_status = 'done', review_finished_at = ?, review_error = NULL, review = ? WHERE ${current} RETURNING project_id`, Date.now(), JSON.stringify(review), id, requestedAt);
+      // Each task spec becomes a draft; its examples are the cases a person sees before approving it.
+      const drafts = review.tasks.map(bundle => ({ bundle, cases: casesOf(bundle) }));
+      if (saved[0] && drafts.length) await addDrafts(c.db, { projectId: String(saved[0].project_id), repoId: id, environment: String(row.full_name), drafts });
+    } catch (error) {
+      // Only the clone or the scan throws, before any model call: nothing was spent.
+      if (reserved) await c.db.execute(`UPDATE ledger SET status = 'released' WHERE key = ? AND status = 'reserved'`, key);
+      await c.db.execute(`UPDATE repos SET review_status = 'failed', review_finished_at = ?, review_error = ? WHERE ${current}`, Date.now(), error instanceof Error ? error.message : "The review failed.", id, requestedAt);
+    }
+  };
+  void c.keepAwake(run()).catch(() => undefined);
+}
+
+/** A spec's examples as the draft's cases. */
+const casesOf = (bundle: TaskBundle): Case[] => (bundle.examples ?? []).map((example, index): Case => ({ id: `example-${index + 1}`, input: example.input, ...(example.expected === undefined ? {} : { expected: example.expected }), origin: "example", ...(example.toolResults ? { toolResults: example.toolResults } : {}) }));
+
+async function repoViews(database: Database, input: { id?: string; projectId?: string } = {}): Promise<RepoView[]> {
+  const rows = await database.execute(`SELECT * FROM repos WHERE (? IS NULL OR id = ?) AND (? IS NULL OR project_id = ?) ORDER BY added_at`, input.id ?? null, input.id ?? null, input.projectId ?? null, input.projectId ?? null);
+  const stale = Date.now() - reviewStaleMs();
+  return rows.map(row => {
+    const active = row.review_status === "queued" || row.review_status === "reviewing";
+    const stopped = active && Number(row.review_requested_at) < stale;
+    return {
+      id: String(row.id), projectId: String(row.project_id), fullName: String(row.full_name), url: `https://github.com/${String(row.full_name)}`, private: row.private === 1, defaultBranch: String(row.default_branch),
+      tokenLast4: (row.token_last4 as string | null) ?? null, addedAt: iso(row.added_at)!, checkedAt: iso(row.checked_at)!,
+      access: row.sealed_token ? "token" : row.github_user ? "github" : "public", githubUser: (row.github_user as string | null) ?? null,
+      review: {
+        status: stopped ? "failed" : row.review_status as RepoView["review"]["status"], requestedAt: iso(row.review_requested_at)!, finishedAt: iso(row.review_finished_at),
+        error: stopped ? "The review stopped before it finished. Review the repository again." : (row.review_error as string | null) ?? null,
+        result: typeof row.review === "string" ? JSON.parse(row.review) as RepoReview : null,
+      },
+    };
+  });
+}
+
+function draftRow(row: Row): EvalDraft {
+  return {
+    id: String(row.id), projectId: String(row.project_id), repoId: (row.repo_id as string | null) ?? null, environment: String(row.environment), name: String(row.name),
+    bundle: JSON.parse(String(row.bundle)) as TaskBundle, cases: JSON.parse(String(row.cases)) as Case[], status: row.status as EvalDraft["status"], createdAt: iso(row.created_at)!, taskId: (row.task_id as string | null) ?? null,
+  };
+}
+
+/** Adds a review's drafts. A new review replaces the pending draft of the same task; a task the project has, or a draft someone decided, is not offered again. */
+async function addDrafts(database: Database, input: { projectId: string; repoId: string | null; environment: string; drafts: { bundle: TaskBundle; cases: Case[] }[] }): Promise<number> {
+  const now = Date.now();
+  let added = 0;
+  for (const draft of input.drafts) {
+    const [decided] = await database.execute(`SELECT 1 FROM eval_drafts WHERE project_id = ? AND environment = ? AND lower(name) = lower(?) AND status <> 'pending'
+      UNION SELECT 1 FROM tasks WHERE project_id = ? AND environment = ? AND lower(name) = lower(?)`, input.projectId, input.environment, draft.bundle.task, input.projectId, input.environment, draft.bundle.task);
+    if (decided) continue;
+    added++;
+    await database.execute(`DELETE FROM eval_drafts WHERE project_id = ? AND environment = ? AND lower(name) = lower(?) AND status = 'pending'`, input.projectId, input.environment, draft.bundle.task);
+    await database.execute(`INSERT INTO eval_drafts (id, project_id, repo_id, environment, name, bundle, cases, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+      `draft_${randomBytes(6).toString("hex")}`, input.projectId, input.repoId, input.environment, draft.bundle.task, JSON.stringify(draft.bundle), JSON.stringify(draft.cases), now);
+  }
+  return added;
 }
 
 async function jobEndpoints(database: Database, accountId: string, projectId: string, withKeys: boolean): Promise<(EndpointConfig & EndpointInfo)[]> {
