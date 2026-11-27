@@ -38,6 +38,8 @@ export interface Clerk {
 export const clerkGlobals = globalThis as unknown as { Clerk?: Clerk; __internal_ClerkUICtor?: unknown };
 
 export interface AppConfig { publishableKey: string; frontendApi: string; apiOrigin: string }
+/** A self-hosted OpenMerit server's /config.json: no Clerk, and the server's own address answers /api/*. */
+export interface LocalConfig { mode: "self-hosted" }
 
 export const unavailable = "Sign-in could not load. Check your connection and reload this page to try again.";
 

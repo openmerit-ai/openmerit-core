@@ -7,7 +7,7 @@ import { statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { specOf, type EvalCommandSpec } from "../job/workflow.ts";
 import type { AppDeps } from "./app.ts";
-import { LOCAL_USER, type AuthResult, type Identity } from "./auth.ts";
+import type { AuthResult, Identity } from "./auth.ts";
 import { confirmUrl } from "./config.ts";
 import { LEVELS, type Guardrails, type Level } from "./engine.ts";
 import { explain, type JobResult } from "../job/report.ts";
@@ -111,11 +111,6 @@ export const HOSTED_EVAL_COMMAND = "Measuring with your own eval command runs on
 
 /** Guardrails that spend money: setting one is a critical action. */
 const MONEY_GUARDRAILS = ["budgetUsd", "spendCapUsd", "customerSpendCapUsd"];
-const escapeHtml = (text: string) => text.replace(/[&<>"']/g, char => `&#${char.charCodeAt(0)};`);
-const page = (status: number, title: string, body: string) => new Response(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>${escapeHtml(title)} · OpenMerit</title>
-<style>body{font:16px/1.5 system-ui,sans-serif;max-width:560px;margin:8vh auto;padding:0 16px;color-scheme:light dark}h1{font-size:22px}.sub{opacity:.7;font-size:14px}ul{padding-left:20px}form{display:flex;gap:12px;margin-top:24px}button{font:inherit;padding:10px 18px;border-radius:8px;border:1px solid #8888;cursor:pointer}button[value=confirm]{background:#111;color:#fff}</style></head>
-<body>${body}</body></html>`, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-frame-options": "DENY", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'" } });
-
 /** What the coding agent or a self-hosted client gets back for a critical request held for a person. */
 export function heldReply(config: AppDeps["config"], view: ConfirmationView) {
   const url = confirmUrl(config, view.id);
@@ -127,7 +122,7 @@ export function heldReply(config: AppDeps["config"], view: ConfirmationView) {
 
 export function apiRoutes(deps: AppDeps) {
   const { client, config } = deps;
-  /** Re-verification is Clerk's: a self-hosted server confirms on its own page instead. */
+  /** Re-verification is Clerk's: on a self-hosted server, the browser session the sign-in link opened is enough. */
   const recent = (who: Identity) => config.mode === "hosted" ? reverify(who) : null;
 
   const authenticate = async (request: Request, agentsToo = false): Promise<AuthResult> => {
@@ -198,7 +193,8 @@ export function apiRoutes(deps: AppDeps) {
       return json(200, view);
     }
     if ((match = /^\/api\/confirmations\/([\w-]+)$/.exec(path)) && method === "POST") {
-      if (config.mode !== "hosted") return error(403, `Confirm it on the confirmation page, ${confirmUrl(config, match[1]!)}, not with this server's token.`);
+      // A person confirms, signed in to the web app: never a coding agent's or a script's token.
+      if (!who.person) return error(403, `A person confirms this, signed in to the web app at ${confirmUrl(config, match[1]!)}, not with a token.`);
       const input = await body(request);
       if (typeof input?.confirm !== "boolean") return error(400, "Send {confirm: true} to confirm or {confirm: false} to decline.");
       const found = await account.confirmation(match[1]!);
@@ -208,9 +204,9 @@ export function apiRoutes(deps: AppDeps) {
       return decided.ok ? json(200, decided.view) : error(409, decided.error);
     }
 
-    /** Holds a critical request for a person, or null to run it: it was confirmed, or a person sent it from the hosted app. */
+    /** Holds a critical request for a person, or null to run it: it was confirmed, or a person sent it from the web app. */
     const hold = async (title: string, items: string[], input: Json | null, checks: "person" | "reverify" = "person"): Promise<Response | null> => {
-      if (confirmed || config.mode === "hosted") return null;
+      if (confirmed || who.person) return null;
       const view = await account.requestConfirmation({ method, path, body: input ? JSON.stringify(input) : "", checks, title, items, requestedBy: who.userId, requestedVia: null });
       return json(202, heldReply(config, view));
     };
@@ -500,34 +496,8 @@ export function apiRoutes(deps: AppDeps) {
     return { ok: true, view: await account.finishConfirmation({ id, result: { status, body: answer } }) };
   }
 
-  /** A self-hosted server's confirm page: no web app or sign-in, so the page itself, on this machine, is where the person confirms. */
-  async function confirmPage(request: Request, url: URL, id: string): Promise<Response> {
-    const who: Identity = { userId: LOCAL_USER, accountId: LOCAL_USER, accountName: "Local", role: "admin", issuedAt: null, firstFactorAgeMinutes: null };
-    const account = client.account.getOrCreate([LOCAL_USER]);
-    let found = await account.confirmation(id);
-    if (!found) return page(404, "Not found", "<h1>No such confirmation</h1>");
-    let problem = "";
-    if (request.method === "POST") {
-      const form = new URLSearchParams(await request.text());
-      const origin = request.headers.get("origin");
-      if (origin && origin !== new URL(config.publicUrl).origin) return page(403, "Refused", "<h1>Refused</h1><p>Confirm from this server's own page.</p>");
-      if (form.get("nonce") !== found.nonce) return page(403, "Refused", "<h1>Refused</h1><p>Reload the page and try again.</p>");
-      const decided = await decideConfirmation(who, id, form.get("decision") === "confirm", url.origin);
-      if (!decided.ok) problem = decided.error;
-      found = (await account.confirmation(id))!;
-    }
-    const outcome = found.result ? (found.result.status < 400 ? "Done." : `It failed: ${typeof found.result.body === "object" && found.result.body && "error" in found.result.body ? String(found.result.body.error) : `status ${found.result.status}`}`) : "";
-    const state = found.status === "pending" ? "" : found.status === "declined" ? "You declined this." : found.status === "expired" ? "This expired. Ask the coding agent to make the request again." : outcome;
-    return page(200, found.title, `<p class="sub">OpenMerit · a coding agent${found.requestedVia ? ` (${escapeHtml(found.requestedVia)})` : ""} asks you to confirm</p>
-<h1>${escapeHtml(found.title)}</h1><ul>${found.items.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
-${problem ? `<p role="alert">${escapeHtml(problem)}</p>` : ""}${state ? `<p><b>${escapeHtml(state)}</b> You can close this page and tell your coding agent.</p>` : `<p class="sub">Expires ${escapeHtml(found.expiresAt.slice(0, 16).replace("T", " "))} UTC.</p>
-<form method="post"><input type="hidden" name="nonce" value="${escapeHtml(found.nonce)}"><button name="decision" value="confirm">Confirm</button><button name="decision" value="decline">Decline</button></form>`}`);
-  }
-
   return async (request: Request, url: URL): Promise<Response | null> => {
     const path = url.pathname;
-    const confirm = /^\/confirm\/([\w-]+)\/?$/.exec(path);
-    if (confirm && config.mode !== "hosted" && (request.method === "GET" || request.method === "POST")) return confirmPage(request, url, confirm[1]!);
     const report = /^\/api\/r\/([\w-]+)\.md$/.exec(path);
     const share = /^\/api\/share\/([\w-]+\.[\w-]+)\.md$/.exec(path);
     if (!path.startsWith("/api/") && !report) return null;
@@ -543,6 +513,8 @@ ${problem ? `<p role="alert">${escapeHtml(problem)}</p>` : ""}${state ? `<p><b>$
     }
     const auth = await authenticate(request, report !== null);
     if (!auth.ok) return withCors(error(auth.status, auth.error));
+    // A self-hosted browser session rides on a cookie: a change must come from the server's own pages.
+    if (config.mode !== "hosted" && auth.identity.person && request.method !== "GET" && request.headers.get("origin") !== url.origin) return error(403, "Send this from this server's own pages.");
     if (report && request.method === "GET") {
       const found = await client.account.getOrCreate([auth.identity.accountId]).report({ jobId: report[1]! });
       return found ? markdown(found.markdown) : new Response("No such report in this account.\n", { status: 404 });

@@ -92,7 +92,12 @@ jobs:
         with:
           node-version: 22.19.0
           cache: npm
-          cache-dependency-path: openmerit-core/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            openmerit-core/package-lock.json
+      # The build bundles the web app (app/), with the website's packages, into dist/web for the self-hosted server.
+      - run: npm ci --ignore-scripts
+        working-directory: .
       - run: npm ci
       - run: npm run check
       - run: npm run build
@@ -125,7 +130,11 @@ jobs:
         with:
           node-version: 22.19.0
           cache: npm
-          cache-dependency-path: openmerit-core/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            openmerit-core/package-lock.json
+      - run: npm ci --ignore-scripts
+        working-directory: .
       # Fails instead of testing the wrong binaries if the runner did not give the expected platform.
       - run: node -e 'const p = `${process.platform}-${process.arch}`; if (p !== process.argv[1]) throw new Error(`expected ${process.argv[1]}, got ${p}`)' '${{ matrix.platform }}'
       - run: npm ci

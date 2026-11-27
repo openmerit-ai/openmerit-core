@@ -34,7 +34,7 @@ const call = (token: string) => auth.api(new Request("https://openmerit.test/api
 
 test("ClerkAuth maps a valid session token to its user, organization and role, and refuses an expired one or another azp", async () => {
   const valid = await call(sessionToken({}));
-  assert.deepEqual(valid.ok && { ...valid.identity, issuedAt: null }, { userId: "user_1", accountId: "org_1", accountName: "acme", role: "admin", issuedAt: null, firstFactorAgeMinutes: 3 });
+  assert.deepEqual(valid.ok && { ...valid.identity, issuedAt: null }, { userId: "user_1", accountId: "org_1", accountName: "acme", role: "admin", issuedAt: null, firstFactorAgeMinutes: 3, person: true });
   const member = await call(sessionToken({ o: { id: "org_2", rol: "member" } }));
   assert.deepEqual(member.ok && [member.identity.accountId, member.identity.role], ["org_2", "member"]);
 

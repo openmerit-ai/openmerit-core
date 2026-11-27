@@ -4,7 +4,7 @@
 // so they can SIGKILL it. TEST_STRIPE_API_BASE swaps the fake billing for the real Stripe client
 // pointed at a local fake Stripe. It prints `ready <url>` once it answers.
 import { startApp } from "../../src/server/app.ts";
-import { TestAuth } from "../../src/server/auth.ts";
+import { LocalAuth, TestAuth } from "../../src/server/auth.ts";
 import { FakeBilling, StripeBilling } from "../../src/server/billing.ts";
 import { loadConfig } from "../../src/server/config.ts";
 import { bundledCatalogue } from "../../src/server/services.ts";
@@ -14,7 +14,8 @@ process.env.RIVETKIT_STORAGE_PATH = env.TEST_STORAGE!;
 process.env.RIVET__AUTH__ADMIN_TOKEN = "test-token";
 const { url } = await startApp({
   config: loadConfig(env),
-  auth: new TestAuth(),
+  // Self-hosted, the real sign-in: the server's token (LOCAL_TOKEN in helpers.ts) and the web app's sign-in link.
+  auth: env.OPENMERIT_MODE === "self-hosted" ? new LocalAuth(env.TEST_LOCAL_TOKEN!, "the test token") : new TestAuth(),
   billing: env.TEST_STRIPE_API_BASE
     ? new StripeBilling({ secretKey: "sk_test", webhookSecret: "whsec_test", priceId: "price_test", meterEvent: "openmerit_evaluation", apiBase: env.TEST_STRIPE_API_BASE })
     : new FakeBilling("whsec_test"),

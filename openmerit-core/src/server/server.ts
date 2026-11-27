@@ -25,9 +25,10 @@ if (local) {
   // The local engine's admin token is the server's token, so nothing without it reaches the engine either.
   process.env.RIVET__AUTH__ADMIN_TOKEN = local.token;
 }
+const localAuth = local ? new LocalAuth(local.token, local.file) : null;
 const { registry } = await startApp({
   config,
-  auth: local ? new LocalAuth(local.token, local.file) : config.clerk ? new ClerkAuth(config.clerk) : null,
+  auth: localAuth ?? (config.clerk ? new ClerkAuth(config.clerk) : null),
   billing: config.stripe ? new StripeBilling(config.stripe) : null,
   ...(local ? { local: { port: Number(process.env.OPENMERIT_ENGINE_PORT ?? config.port + 1), token: local.token } } : {}),
   // Hosted, the catalogue refreshes daily from OpenRouter's and Epoch's public data; a self-hosted server keeps the bundled one.
@@ -35,6 +36,8 @@ const { registry } = await startApp({
 });
 const missing = [!selfHosted && !config.clerk && "Clerk", !selfHosted && !config.stripe && "Stripe", !config.keyEncryptionKey && "the key-encryption key", !config.openrouter.apiKey && "OpenRouter"].filter(Boolean);
 console.log(`OpenMerit ${config.mode} on ${config.host ?? ""}:${config.port} for ${config.publicUrl}${local ? `; token in ${local.file}` : ""}${missing.length ? `; not configured: ${missing.join(", ")}` : ""}`);
+// The web app's sign-in: a one-time link for the person who started the server.
+if (localAuth) console.log(`Sign in to the web app: ${config.publicUrl}/signin?code=${localAuth.link()} (works once, for ten minutes; \`openmerit server link\` makes another)`);
 
 // Metrics, collected with the logs. Kept on localhost, as Rivet's actor-node guide does.
 createServer(async (_req, res) => {

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **`openmerit server start` runs the OpenMerit server on your machine, with its web app.** It starts the same server openmerit.ai runs in the background on 127.0.0.1:7330 and prints a one-time sign-in link for the web app it serves; `openmerit server link`, `status` and `stop` do the rest. Coding agents connect over MCP with the server's token; what they ask for that needs a person, such as a higher budget, waits for you to confirm it in the web app, which the token cannot do. Scout and `openmerit mcp` still use the daemon for now.
 - The `openmerit` package ships the OpenMerit server, the one openmerit.ai runs, in `dist/server`, and depends on `@clerk/backend` for its hosted sign-in. Nothing starts it yet: `openmerit server start` comes next. In the repository the server moved from `cloud/src` to `openmerit-core/src/server`, with its tests; `cloud/` keeps the hosted deploy.
 - In the cloud app, the confirm page and the MCP session name the organization by its name, such as OpenMerit QA, instead of its slug, and the confirm page lists each grade as "Looks good" or "Doesn't look right" with the person's note, instead of `bad:note`. On a phone, the web app's sidebar folds to its icon rail, so a run's page is readable at 390 pixels; it filled more than half the screen.
 - **The hosted model catalogue refreshes daily** from OpenRouter and Epoch, instead of only when the app is deployed, so new models and price changes reach searches and wake watched tasks the next day.

@@ -2,7 +2,7 @@
 // server standing in for OpenRouter and customer endpoints (and the case writer), and signed Stripe events. No real
 // credential reaches the child and no paid model is called.
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -129,7 +129,7 @@ export async function startApp(options: { models: FakeModels; env?: Record<strin
   const port = options.enginePort ?? await enginePort();
   // Only what the app needs: no credential from the orb reaches it.
   const env: Record<string, string> = {
-    PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", TEST_STORAGE: storage, TEST_ENGINE_PORT: String(port), PORT: "0", RIVET_LOG_LEVEL: "error",
+    PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", TEST_STORAGE: storage, TEST_LOCAL_TOKEN: LOCAL_TOKEN, TEST_ENGINE_PORT: String(port), PORT: "0", RIVET_LOG_LEVEL: "error",
     OPENROUTER_API_KEY: "or-test-key", OPENROUTER_BASE_URL: options.models.url, OPENMERIT_ALLOW_PRIVATE_ENDPOINTS: "1",
     OPENMERIT_KEY_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"), OPENMERIT_PUBLIC_URL: "https://openmerit.test", OPENMERIT_APP_URL: "https://app.openmerit.test",
     ...options.env,
@@ -156,8 +156,10 @@ export async function crash(app: App): Promise<void> {
   await stopEngine(app);
 }
 
+/** Stops the app and its engine for good and deletes its storage, about 130 MB of engine data each. */
 export async function stop(app: App): Promise<void> {
   if (app.child.exitCode === null && app.child.signalCode === null) await crash(app);
+  rmSync(app.storage, { recursive: true, force: true });
 }
 
 async function stopEngine(app: App): Promise<void> {
@@ -166,6 +168,24 @@ async function stopEngine(app: App): Promise<void> {
     process.kill(pid, "SIGKILL");
   } catch { /* already gone */ }
   for (let waited = 0; waited < 20_000 && !(await free(app.enginePort)); waited += 250) await new Promise(resolve => setTimeout(resolve, 250));
+}
+
+/** A self-hosted test server's token: the coding agent's and scripts' sign-in, never a person's. */
+export const LOCAL_TOKEN = "omt_test-local-token";
+
+/** The person on a self-hosted server: signed in to its web app through a sign-in link, with the session cookie and the server's own origin. */
+export async function signedInPerson(app: App) {
+  const link = await (await fetch(`${app.url}/api/session/link`, { method: "POST", headers: { authorization: `Bearer ${LOCAL_TOKEN}` } })).json() as { url: string };
+  const opened = await fetch(new URL(new URL(link.url).pathname + new URL(link.url).search, app.url), { redirect: "manual" });
+  const cookie = opened.headers.get("set-cookie")?.split(";")[0];
+  if (opened.status !== 303 || !cookie) throw new Error(`the sign-in link did not open a session: ${opened.status}`);
+  return {
+    cookie, link: link.url,
+    api: async <T = unknown>(path: string, init: RequestInit = {}): Promise<{ status: number; body: T }> => {
+      const response = await fetch(`${app.url}${path}`, { ...init, headers: { cookie, origin: app.url, "content-type": "application/json", ...(init.headers as Record<string, string> | undefined) } });
+      return { status: response.status, body: await response.json() as T };
+    },
+  };
 }
 
 export function caller(app: App, token: string | null) {

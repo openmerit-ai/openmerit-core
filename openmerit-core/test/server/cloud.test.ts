@@ -16,7 +16,7 @@ import { watchState } from "../../src/server/actors/account.ts";
 import { evaluateTask } from "../../src/server/engine.ts";
 import { buildPool } from "../../src/job/pool.ts";
 import type { TaskBundle } from "../../src/ranking/index.ts";
-import { bundle, caller, costOf, crash, fakeCapture, fakeModels, startApp, stop, subscribe, untilDone, waitFor, WEAK_BELOW, WRITTEN, TICKETS, catalogue, type App, type FakeModels } from "./helpers.ts";
+import { bundle, caller, costOf, LOCAL_TOKEN, signedInPerson, crash, fakeCapture, fakeModels, startApp, stop, subscribe, untilDone, waitFor, WEAK_BELOW, WRITTEN, TICKETS, catalogue, type App, type FakeModels } from "./helpers.ts";
 
 const CLERK = { CLERK_SECRET_KEY: "sk_test_fake", CLERK_PUBLISHABLE_KEY: `pk_test_${Buffer.from("clerk.openmerit.test$").toString("base64")}` };
 type Data = Record<string, unknown>;
@@ -876,24 +876,26 @@ test("a self-hosted server starts a job without a plan, and its Stripe settings 
   const models = await fakeModels();
   const app = await startApp({ models, env: { ...CLERK, OPENMERIT_MODE: "self-hosted", STRIPE_SECRET_KEY: "sk_test", STRIPE_WEBHOOK_SECRET: "whsec_test", STRIPE_PRICE_ID: "price_test" } });
   try {
-    const agent = caller(app, "test:local:local:admin");
+    const agent = caller(app, LOCAL_TOKEN);
     assert.equal((await agent.api<{ mode: string }>("/api/me")).body.mode, "self-hosted");
-    // The server's one token is also the coding agent's: a critical /api request waits for the server's own confirm page.
+    // The server's token is the coding agent's: a critical /api request waits for the person, in the web app.
     const held = await agent.api<{ status: string; confirmation: { id: string; url: string } }>("/api/guardrails", { method: "PUT", body: JSON.stringify({ level: "environment", id: "acme/support", settings: { budgetUsd: 3 } }) });
     assert.deepEqual([held.status, held.body.status], [202, "needs_confirmation"]);
     const { id } = held.body.confirmation;
-    assert.equal(held.body.confirmation.url, `https://openmerit.test/confirm/${id}`);
+    assert.equal(held.body.confirmation.url, `https://app.openmerit.test/confirm/?id=${id}`, "the web app's confirm page, which the server serves");
     assert.equal((await agent.api(`/api/confirmations/${id}`, { method: "POST", body: JSON.stringify({ confirm: true }) })).status, 403, "the token cannot confirm");
     const budget = async () => (await agent.api<{ settings: { key: string; value: unknown }[] }>("/api/guardrails?level=environment&id=acme/support")).body.settings;
     assert.deepEqual(await budget(), []);
-    const shown = await (await fetch(`${app.url}/confirm/${id}`)).text();
-    assert.match(shown, /Change spending limits for acme\/support[^]*Budget per job: \$3/);
-    const nonce = /name="nonce" value="([\w-]+)"/.exec(shown)![1]!;
-    const post = (form: Record<string, string>, origin?: string) => fetch(`${app.url}/confirm/${id}`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", ...(origin ? { origin } : {}) }, body: new URLSearchParams(form).toString() });
-    assert.equal((await post({ nonce: "wrong", decision: "confirm" })).status, 403);
-    assert.equal((await post({ nonce, decision: "confirm" }, "https://elsewhere.test")).status, 403, "another site cannot post the form");
-    assert.match(await (await post({ nonce, decision: "confirm" })).text(), /<b>Done\.<\/b>/);
+    // The person signs in with a one-time link, which a second use refuses.
+    const person = await signedInPerson(app);
+    assert.equal((await fetch(new URL(new URL(person.link).pathname + new URL(person.link).search, app.url), { redirect: "manual" })).status, 401, "a sign-in link works once");
+    assert.match((await person.api<{ title: string; items: string[] }>(`/api/confirmations/${id}`)).body.items.join(), /Budget per job: \$3/);
+    const foreign = await fetch(`${app.url}/api/confirmations/${id}`, { method: "POST", headers: { cookie: person.cookie, origin: "https://elsewhere.test", "content-type": "application/json" }, body: JSON.stringify({ confirm: true }) });
+    assert.equal(foreign.status, 403, "another site cannot confirm with the person's cookie");
+    assert.equal((await person.api<{ status: string }>(`/api/confirmations/${id}`, { method: "POST", body: JSON.stringify({ confirm: true }) })).body.status, "done");
     assert.deepEqual(await budget(), [{ key: "budgetUsd", value: 3, kind: "default" }]);
+    // The person's own change in the web app is not held.
+    assert.equal((await person.api("/api/guardrails", { method: "PUT", body: JSON.stringify({ level: "environment", id: "acme/support", settings: { budgetUsd: 4 } }) })).status, 200);
     const started = await agent.tool("openmerit_recommend", { bundle: bundle(), environment: "acme/support" });
     assert.equal(started.isError, false, started.text);
     await waitFor(() => agent.tool("openmerit_result", { job_id: started.data.job_id }), value => value.data.status === "needs_input");
@@ -921,15 +923,15 @@ for (const item of tickets.filter(each => !only.length || only.includes(each.id)
 writeFileSync(process.env.OPENMERIT_RESULT, JSON.stringify({ items }));
 `);
   try {
-    const agent = caller(app, "test:local:local:admin");
+    const agent = caller(app, LOCAL_TOKEN);
     const held = await agent.tool("openmerit_eval_command", { bundle: bundle("own classifier", false), environment: "acme/own", command: "node eval.mjs", root: repo, threshold: 0.5 });
     assert.equal(held.data.status, "needs_confirmation", held.text);
     const taskId = held.data.task_id as string, { id } = held.data.confirmation as { id: string };
     assert.equal((await agent.api<{ evalCommand: unknown }>(`/api/tasks/${taskId}/eval-command`)).body.evalCommand, null, "nothing runs before the person confirms");
-    const page = await (await fetch(`${app.url}/confirm/${id}`)).text();
-    assert.match(page, /Measure own classifier by running a command on this machine[^]*Command: node eval\.mjs/);
-    const nonce = /name="nonce" value="([\w-]+)"/.exec(page)![1]!;
-    await fetch(`${app.url}/confirm/${id}`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ nonce, decision: "confirm" }).toString() });
+    const person = await signedInPerson(app);
+    const shown = (await person.api<{ title: string; items: string[] }>(`/api/confirmations/${id}`)).body;
+    assert.match(`${shown.title} ${shown.items.join(" ")}`, /Measure own classifier by running a command on this machine[^]*Command: node eval\.mjs/);
+    assert.equal((await person.api<{ status: string }>(`/api/confirmations/${id}`, { method: "POST", body: JSON.stringify({ confirm: true }) })).body.status, "done");
     assert.equal((await agent.api<{ evalCommand: { command: string } }>(`/api/tasks/${taskId}/eval-command`)).body.evalCommand.command, "node eval.mjs");
     assert.equal((await agent.tool("openmerit_eval_command", { task_id: taskId, command: "node eval.mjs", root: join(repo, "nope") })).isError, true, "a root that does not exist is refused");
 

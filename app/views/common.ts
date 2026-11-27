@@ -12,4 +12,9 @@ export function empty(title: string, body: string, action: Html = install()): Ht
   return html`<div class="card empty"><p class="empty-title">${title}</p><p class="sub">${body}</p>${action}</div>`;
 }
 
-export const install = (): Html => html`<div class="diff"><div>${installCommand}</div></div><p class="note">Run this once in a terminal. The coding agent's first OpenMerit call opens sign-in.</p>`;
+// On a self-hosted server, the coding agent connects to that server with its token instead (setLocalServer).
+let localServer: string | null = null;
+export const setLocalServer = (origin: string): void => { localServer = origin; };
+export const install = (): Html => localServer
+  ? html`<div class="diff"><div>claude mcp add --transport http openmerit ${localServer}/mcp --header "Authorization: Bearer $(cat ~/.openmerit/server/token)"</div></div><p class="note">Run this once in a terminal on this machine. The token in <code>~/.openmerit/server/token</code> signs the coding agent in to this server.</p>`
+  : html`<div class="diff"><div>${installCommand}</div></div><p class="note">Run this once in a terminal. The coding agent's first OpenMerit call opens sign-in.</p>`;

@@ -221,10 +221,21 @@ OpenMerit sends anonymous usage data to OpenMerit's PostHog project: one `cli_co
 
 Sending never changes a command's output or exit code. It gives up after about 1 s, so an offline machine waits at most that long when a command ends.
 
+## Server
+
+`openmerit server start` runs the OpenMerit server, the same server openmerit.ai runs, on this machine for one person, in the background. It is new and separate from Scout for now: `openmerit scout` and `openmerit mcp` still use the daemon above.
+
+- It listens on `127.0.0.1` only, on port 7330 (`--port` or `OPENMERIT_PORT`). Its local Rivet engine takes the next two ports and the port 11 above, and its metrics the port 3 above: 7330 uses 7330 to 7333 and 7341.
+- It keeps its tasks, runs, ledger, token and log in `~/.openmerit/server` (`OPENMERIT_DATA_DIR`). No account, plan or Clerk sign-in; the spend caps still apply.
+- It serves the web app at its own address. `start` prints a sign-in link for it, which works once, for ten minutes; `openmerit server link` prints a new one. The link opens a browser session of 30 days, which ends when the server restarts.
+- Coding agents and scripts sign in with the token in `~/.openmerit/server/token`, sent as `Authorization: Bearer <token>`. The web app's Runs page shows the `claude mcp add` command with it. A critical request sent with the token, such as a higher budget, grades or a decision on a switch, waits until you confirm it in the web app: the token cannot confirm.
+- `openmerit server status` shows whether it runs; `openmerit server stop` stops it. Its log is `~/.openmerit/server/server.log`.
+
 ## Uninstall
 
 ```sh
 openmerit daemon stop                       # stop the background daemon first
+openmerit server stop                       # and the server, if you started one
 claude mcp remove --scope user openmerit    # if setup registered the MCP server with Claude Code
 codex mcp remove openmerit                  # and with Codex
 npm uninstall -g openmerit

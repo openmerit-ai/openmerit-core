@@ -81,10 +81,12 @@ To run it by hand against a local engine: `TEST_STORAGE=$(mktemp -d) TEST_ENGINE
 
 ## Self-hosted mode
 
-`OPENMERIT_MODE=self-hosted npm run server` in `openmerit-core/` runs the same app for one person on their own machine, with no Clerk, Stripe, PostHog or Rivet Cloud:
+`openmerit server start` (see openmerit-core's README), or `OPENMERIT_MODE=self-hosted npm run server` in `openmerit-core/`, runs the same app for one person on their own machine, with no Clerk, Stripe, PostHog or Rivet Cloud:
 
 - It listens on `127.0.0.1` (`OPENMERIT_HOST` changes it) and starts a local Rivet engine on the next port (`OPENMERIT_ENGINE_PORT`), which keeps its state in the data directory, `~/.openmerit/server` (`OPENMERIT_DATA_DIR`, or `server` under `OPENMERIT_HOME`).
 - Sign-in is one token: the first start writes a random token to `<data directory>/token`, readable only by its owner. `/mcp` and `/api` take it as `Authorization: Bearer <token>`, and every request with it is the admin of the one account, `local`; the local engine's admin token is the same. A request without it gets a 401 that names the token file.
+- It serves the web app (`app/`, built into the package's `dist/web`, or `OPENMERIT_WEB_DIR`) at its own address, with `/config.json` answering `{mode: "self-hosted"}` so the pages skip Clerk. The person signs in with a one-time link: the server prints one at start, `POST /api/session/link` with the token makes another, and `GET /signin?code=` spends it (ten minutes, once) and sets the `om_session` cookie (HttpOnly, SameSite=Lax, 30 days, kept in memory, so a restart ends it). Requests with the cookie are the person (`Identity.person`); a change with it must carry the server's own `Origin`. `POST /api/session/signout` ends it.
+- Only a person confirms, in either mode: `POST /api/confirmations/:id` refuses a token. A critical `/api` request from a token is held for the person like an MCP tool's; the person's own requests in the web app are not. The confirm link is the web app's `/confirm/?id=`.
 - No plan is needed; the jobs-per-hour, concurrent-job, per-job and monthly spend caps still apply. Clerk, Stripe and PostHog settings are ignored, so the Stripe webhook answers 503 and the OAuth metadata names no authorization server.
 - `OPENMERIT_PUBLIC_URL` and `OPENMERIT_APP_URL` default to `http://localhost:<port>`. `GET /api/me` reports `mode`.
 
