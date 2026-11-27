@@ -112,6 +112,7 @@ test("a run in the grading loop asks for grades on its task's page, blind to the
   // Blind: neither the eval's verdict nor its reason is shown.
   assert.doesNotMatch(read, /OpenMerit's grade|OpenMerit: (passed|failed)|has no activity_id/);
   assert.match(read, /Send 2 grades/);
+  assert.doesNotMatch(read, /Latest:/, "the status says the run waits, not the last result");
   assert.doesNotMatch(shown, /data-action="run"/, "a run waiting for grades is not started again");
   // The fake applies grades as the cloud app does: once every answer has one, the run measures again.
   const graded = await fake(new Request("https://openmerit.ai/api/runs/g4r9d2/answers", { method: "POST", headers: { authorization: "Bearer preview-populated", "content-type": "application/json" }, body: JSON.stringify({ answers: Object.fromEntries(job.questions.map(question => [question.id, "bad: placeholder code"])) }) }));
