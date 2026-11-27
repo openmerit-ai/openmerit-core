@@ -52,7 +52,7 @@
 <h2 id="control">You stay in charge of the eval</h2>
 <ul>
 <li><strong>Approval:</strong> you see the eval before anything runs: case counts, criteria, guardrails and judge.</li>
-<li><strong>Grading:</strong> after the search, you grade a sample of answers. Where you and the eval disagree, the eval is wrong, and OpenMerit rewrites it from your grades.</li>
+<li><strong>Grading:</strong> before the search, you grade a sample of answers from your current model and a cheaper one. Where you and the eval disagree, the eval is wrong, and OpenMerit rewrites it from your grades. Only the eval you accept is used to search.</li>
 <li><strong>Saving:</strong> once you accept it, the eval is saved in your repository under <code>.openmerit/evals/&lt;task&gt;/</code>. Later runs reuse it, and you can edit or delete it like any other file.</li>
 </ul>
 

@@ -52,7 +52,7 @@ function measuring(job: JobView): Html {
 // note. The run writes the eval again where a person disagrees with it, and accepts it once they agree on every answer.
 function grading(job: JobView): Html {
   return html`<form class="grade-form" data-action="grade">
-    <p>Does each answer look right? OpenMerit graded them with the eval it wrote. Where you disagree, it writes the eval again from your grades and measures again; once you agree on every answer, you have accepted the eval.</p>
+    <p>Does each answer look right? These are answers of the model in use now and of a cheaper model, graded with the eval OpenMerit wrote, before it searches any other model. Where you disagree, it writes the eval again from your grades and runs them again; once you agree on every answer, you have accepted the eval, and the search runs on it.</p>
     ${job.questions.map((question, index) => {
       const lines = (question.detail ?? "").split("\n"), grade = [...lines].reverse().find((line) => line.startsWith("OpenMerit's grade: ")) ?? "";
       const passed = grade === "OpenMerit's grade: passed";

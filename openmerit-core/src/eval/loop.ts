@@ -1,8 +1,12 @@
-// The grading loop, one state machine for the CLI and the cloud app: after a search, OpenMerit shows
-// sampled answers with its own grade, and a person marks each answer Looks good or Doesn't look right,
-// with an optional note. Where a person and the eval disagree, the eval is wrong: it is written again
-// from their notes and the search runs again. Once they agree on every sample, the person has accepted
-// the eval, and it is saved as the task's Eval, versioned.
+// The grading loop, one state machine for the CLI and the cloud app: OpenMerit shows sampled answers
+// with its own grade, and a person marks each answer Looks good or Doesn't look right, with an optional
+// note. Where a person and the eval disagree, the eval is wrong: it is written again from their notes
+// and measured again. Once they agree on every sample, the person has accepted the eval, and it is
+// saved as the task's Eval, versioned.
+//
+// Grade-first (`gradeFirst`, the CLI): the answers come from a trial run, the current model's and one
+// cheaper model's, and the search runs only on the accepted eval. Otherwise (the cloud app, until it
+// moves to this order) the answers come from a search, and a regenerated eval is searched again.
 //
 // Marking the current model's own answer Doesn't look right makes the accepted Eval the bar instead of
 // the current model's score (`bar: "criteria"`): the search then runs once more against the criteria,
@@ -21,8 +25,8 @@ export interface Sample {
   caseId: string;
   kind: string;
   model: string;
-  /** `current`: the current model's answer; `candidate`: the pick's, or the best measured finalist's. */
-  role: "current" | "candidate";
+  /** `current`: the current model's answer; `trial`: the cheaper model a grade-first trial ran; `candidate`: the pick's, or the best measured finalist's. */
+  role: "current" | "trial" | "candidate";
   input: string;
   output: string;
   toolCalls: { name: string; arguments: string }[];
@@ -51,7 +55,10 @@ export interface LoopState {
   bar: "current" | "criteria";
   /** The cases whose current-model answer a person graded Doesn't look right, which made the criteria the bar, and the round they did. */
   barSet?: { round: number; cases: string[] };
-  status: "searching" | "grading" | "regenerating" | "accepted";
+  /** `trial`: a grade-first loop's trial run is next; `searching`: a search is, before grading. */
+  status: "trial" | "searching" | "grading" | "regenerating" | "accepted";
+  /** Grade before any search: the samples come from a trial run, and the search runs once the eval is accepted. */
+  gradeFirst?: boolean;
   artifact: RunArtifact | null;
   /** Each graded round, oldest first. */
   history: { round: number; evalVersion: number; bar: LoopState["bar"]; grades: SampleGrade[] }[];
@@ -59,15 +66,16 @@ export interface LoopState {
 
 export type LoopEvent =
   | { type: "searched"; artifact: Omit<RunArtifact, "round" | "evalVersion"> }
+  | { type: "tried"; artifact: Omit<RunArtifact, "round" | "evalVersion"> }
   | { type: "graded"; grades: readonly SampleGrade[] }
   | { type: "regenerated" };
 
 /** Answers shown per model: failed ones first, then passed ones, spread over kinds of case. */
 export const SAMPLES_PER_MODEL = 6;
 
-/** A loop measuring `evalVersion` (1 for a new eval, a saved Eval's own version to reuse it) against `bar`. */
-export function startLoop(evalVersion = 1, bar: LoopState["bar"] = "current"): LoopState {
-  return { round: 1, evalVersion, savedVersion: 0, bar, status: "searching", artifact: null, history: [] };
+/** A loop measuring `evalVersion` (1 for a new eval, a saved Eval's own version to reuse it) against `bar`; `gradeFirst` grades a trial run before any search. */
+export function startLoop(evalVersion = 1, bar: LoopState["bar"] = "current", gradeFirst = false): LoopState {
+  return { round: 1, evalVersion, savedVersion: 0, bar, status: gradeFirst ? "trial" : "searching", artifact: null, history: [], ...(gradeFirst ? { gradeFirst: true } : {}) };
 }
 
 /**
@@ -102,14 +110,19 @@ export function completeHarness(complete: Complete): Harness {
 export const disagrees = (sample: Pick<Sample, "pass">, grade: Pick<SampleGrade, "verdict">) => sample.pass !== (grade.verdict === "good");
 
 /**
- * The next state. `searched` shows its samples; `graded` needs one grade per sample, and accepts the
- * eval when a person agrees with it on every sample and the bar did not change, else asks for the eval
- * again (`regenerating`) or, when only the bar changed, searches again; `regenerated` searches again.
+ * The next state. `searched` (or a grade-first loop's `tried`) shows its samples; `graded` needs one
+ * grade per sample, and accepts the eval when a person agrees with it on every sample, else asks for
+ * the eval again (`regenerating`). After a search, a changed bar searches again before accepting; in a
+ * grade-first loop the search has not run yet, so the eval is accepted with the new bar. `regenerated`
+ * measures the new version: a trial run when grading first, else a search.
  */
 export function advanceLoop(state: LoopState, event: LoopEvent): LoopState {
   switch (event.type) {
     case "searched":
       if (state.status !== "searching") throw new Error(`The loop is ${state.status}, not searching.`);
+      return { ...state, status: "grading", artifact: { ...event.artifact, round: state.round, evalVersion: state.evalVersion } };
+    case "tried":
+      if (state.status !== "trial") throw new Error(`The loop is ${state.status}, not on its trial run.`);
       return { ...state, status: "grading", artifact: { ...event.artifact, round: state.round, evalVersion: state.evalVersion } };
     case "graded": {
       if (state.status !== "grading" || !state.artifact) throw new Error(`The loop is ${state.status}, not grading.`);
@@ -127,13 +140,13 @@ export function advanceLoop(state: LoopState, event: LoopEvent): LoopState {
       const history = [...state.history, { round: state.round, evalVersion: state.evalVersion, bar: state.bar, grades: graded }];
       const next = { ...state, bar, history, ...(barSet ? { barSet } : {}) } as const;
       if (samples.some(sample => disagrees(sample, grades.get(sample.id)!))) return { ...next, status: "regenerating" };
-      // Agreement on every sample accepts this eval; a new bar still needs the search run against it.
-      if (bar !== state.bar) return { ...next, status: "searching", round: state.round + 1, artifact: null, savedVersion: state.evalVersion };
+      // Agreement on every sample accepts this eval. After a search, a new bar still needs the search run against it; grading first, no search has run yet.
+      if (bar !== state.bar && !state.gradeFirst) return { ...next, status: "searching", round: state.round + 1, artifact: null, savedVersion: state.evalVersion };
       return { ...next, status: "accepted", savedVersion: state.evalVersion };
     }
     case "regenerated":
       if (state.status !== "regenerating") throw new Error(`The loop is ${state.status}, not regenerating.`);
-      return { ...state, status: "searching", round: state.round + 1, evalVersion: state.evalVersion + 1, artifact: null };
+      return { ...state, status: state.gradeFirst ? "trial" : "searching", round: state.round + 1, evalVersion: state.evalVersion + 1, artifact: null };
   }
 }
 
@@ -188,7 +201,7 @@ export function gradeQuestions(task: string, loop: LoopState): GradeQuestion[] {
     // The round is in the ID: one advance can grade a round, measure the next and ask again, with the same answers.
     id: `grade_${slug(task)}_r${loop.round}_${index + 1}`, kind: "choice", prompt: `${task}, answer ${index + 1} of ${samples.length}: does it look right?`,
     detail: [
-      `${sample.model} (${sample.role === "current" ? "your current model" : "a candidate"}), ${sample.kind} case ${sample.caseId}${loop.round > 1 ? `, round ${loop.round}` : ""}`,
+      `${sample.model} (${sample.role === "current" ? "your current model" : sample.role === "trial" ? "a cheaper model" : "a candidate"}), ${sample.kind} case ${sample.caseId}${loop.round > 1 ? `, round ${loop.round}` : ""}`,
       `Input:\n${sample.input}`,
       `Answer:\n${sample.output || "(no text)"}`,
       ...(sample.toolCalls.length ? [`Tool calls: ${sample.toolCalls.map(call => `${call.name}(${call.arguments})`).join("; ")}`] : []),
