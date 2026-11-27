@@ -511,7 +511,8 @@ export function apiRoutes(deps: AppDeps) {
       const found = parsed ? await client.account.get([parsed.accountId]).report({ shareToken: parsed.secret }).catch(() => null) : null;
       return found ? markdown(found.markdown) : new Response("No such report.\n", { status: 404 });
     }
-    const auth = await authenticate(request, report !== null);
+    // Agents and the CLI read reports and who they are (openmerit whoami) with the MCP access token they already hold.
+    const auth = await authenticate(request, report !== null || (path === "/api/me" && request.method === "GET"));
     if (!auth.ok) return withCors(error(auth.status, auth.error));
     // A self-hosted browser session rides on a cookie: a change must come from the server's own pages.
     if (config.mode !== "hosted" && auth.identity.person && request.method !== "GET" && request.headers.get("origin") !== url.origin) return error(403, "Send this from this server's own pages.");

@@ -88,7 +88,7 @@ To run it by hand against a local engine: `TEST_STORAGE=$(mktemp -d) TEST_ENGINE
 - It serves the web app (`app/`, built into the package's `dist/web`, or `OPENMERIT_WEB_DIR`) at its own address, with `/config.json` answering `{mode: "self-hosted"}` so the pages skip Clerk. The person signs in with a one-time link: the server prints one at start, `POST /api/session/link` with the token makes another, and `GET /signin?code=` spends it (ten minutes, once) and sets the `om_session` cookie (HttpOnly, SameSite=Lax, 30 days, kept in memory, so a restart ends it). Requests with the cookie are the person (`Identity.person`); a change with it must carry the server's own `Origin`. `POST /api/session/signout` ends it.
 - Only a person confirms, in either mode: `POST /api/confirmations/:id` refuses a token. A critical `/api` request from a token is held for the person like an MCP tool's; the person's own requests in the web app are not. The confirm link is the web app's `/confirm/?id=`.
 - No plan is needed; the jobs-per-hour, concurrent-job, per-job and monthly spend caps still apply. Clerk, Stripe and PostHog settings are ignored, so the Stripe webhook answers 503 and the OAuth metadata names no authorization server.
-- `OPENMERIT_PUBLIC_URL` and `OPENMERIT_APP_URL` default to `http://localhost:<port>`. `GET /api/me` reports `mode`.
+- `OPENMERIT_PUBLIC_URL` and `OPENMERIT_APP_URL` default to `http://localhost:<port>`. `GET /api/me` reports `mode`, and takes an MCP access token as well as a session, for `openmerit whoami`.
 
 Teams on a self-hosted server will sign in through OIDC; that is not built yet.
 
