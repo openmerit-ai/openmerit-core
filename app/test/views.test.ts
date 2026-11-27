@@ -335,8 +335,10 @@ test("a task's Eval tab shows the accepted eval read-only; a revision pauses run
   assert.match(text(drafter.html), /Your coding agent sent Reply drafter with its tools changed[^]*Runs and the watch wait until you accept it\./);
   assert.doesNotMatch(drafter.html.__html, /data-action="discardDraft"/);
   assert.equal((await send("/api/tasks/reply-drafter/eval/draft", "DELETE")).status, 409);
-  const queue = text(evalsView.render({ drafts: [], tasks: (await send<Task[]>("/api/tasks")).body.filter((task) => task.state === "review") }, page(me)));
-  assert.match(queue, /Tasks waiting for their eval Reply drafter/);
+  // It waits on Tasks, first, not among the new tasks a repository review found.
+  const listed = text(tasksView.render({ kind: "list", tasks: (await send<Task[]>("/api/tasks")).body }, page(me)));
+  assert.match(listed, /1 need review[^]*Needs Review [^]*Reply drafter sahra-health\/claims Review eval All Tasks/);
+  assert.doesNotMatch(text(evalsView.render({ drafts: [] }, page(me))), /Reply drafter/);
 
   // A retired task's eval is read-only, with no revise.
   const retired = tasksView.render({ kind: "task", detail: { ...router.detail, state: "retired" }, eval: accepted.body }, page(me, "task=ticket-router&tab=eval")).__html;
@@ -371,10 +373,12 @@ test("a project adds GitHub repositories by URL, token or the member's GitHub co
   assert.deepEqual(went, ["/account/?installation_id=41&setup_action=install"]);
   assert.equal((await send<Repo>("/api/repos", "POST", { url: "https://github.com/sahra-health/billing-worker", via: "github" })).status, 201);
 
-  // The review's drafts wait in Review evals; approving one adds the task, not run yet, with no accepted eval.
+  // The review's drafts wait in New tasks; approving one adds the task, not run yet, with no accepted eval.
   const drafts = (await send<EvalDraft[]>("/api/eval-drafts")).body;
-  const queue = text(evalsView.render({ drafts, tasks: [] }, page(me)));
-  assert.match(queue, /From repository reviews Claim summary writer Denial letter checker[^]*Approve and add task/);
+  const queue = text(evalsView.render({ drafts }, page(me)));
+  assert.match(queue, /New tasks[^]*Claim summary writer Denial letter checker[^]*States the claim's amount[^]*example-1[^]*grade the answers one by one[^]*Add task and grade its answers Dismiss/);
+  assert.doesNotMatch(evalsView.render({ drafts }, page(me)).__html, /<textarea|<select|type="checkbox"/, "the draft is read, not edited: the first run's grading reviews each case");
+  assert.doesNotMatch(queue, /Needs Review|waiting for their eval/);
   const approved = await send<{ taskId: string }>(`/api/eval-drafts/${drafts[0]!.id}/approve`, "POST", { spec: { criteria: ["States the amount"] }, cases: drafts[0]!.cases });
   assert.equal(approved.status, 201);
   const task = (await send<Task[]>("/api/tasks")).body.find((item) => item.id === approved.body.taskId)!;

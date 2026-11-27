@@ -279,15 +279,21 @@ async function newProject(): Promise<void> {
   dialog.showModal();
 }
 
-// The sidebar's Review evals item: shown with its count only while drafts or tasks whose eval waits for review wait.
+// The sidebar's counts: Tasks counts tasks whose eval waits for review, and New tasks, shown only while it
+// has any, counts the drafts a repository review found.
 async function fillReview(api: Api): Promise<void> {
-  const item = document.querySelector<HTMLElement>(".nav-action[href='/evals/']");
-  if (!item) return;
   const [tasks, drafts] = await Promise.all([api.get<Task[]>("/api/tasks").catch((): Task[] => []), api.get<EvalDraft[]>("/api/eval-drafts").catch((): EvalDraft[] => [])]);
-  const waiting = tasks.filter((task) => task.state === "review").length + drafts.length;
-  item.hidden = waiting === 0 && !item.hasAttribute("aria-current");
-  item.querySelector(".count")!.textContent = waiting ? String(waiting) : "";
-  item.title = waiting ? `Review evals: ${waiting} waiting` : "Review evals";
+  const changed = tasks.filter((task) => task.state === "review").length;
+  const count = (href: string, waiting: number, label: string, title: string) => {
+    const item = document.querySelector<HTMLElement>(`.nav-item[href='${href}']`);
+    if (!item) return;
+    item.querySelector(".count")!.textContent = waiting ? String(waiting) : "";
+    item.title = waiting ? `${label}: ${waiting} ${title}` : label;
+    return item;
+  };
+  count("/tasks/", changed, "Tasks", "need their eval reviewed");
+  const item = count("/evals/", drafts.length, "New tasks", "waiting");
+  if (item) item.hidden = drafts.length === 0 && !item.hasAttribute("aria-current");
 }
 
 async function render(ctx: Ctx): Promise<void> {

@@ -143,9 +143,16 @@ export const tasksView: View<Data> = {
     const active = all.filter((task) => stateOf(task) !== "retired");
     const tasks = [...active.filter((task) => !notRun(task)), ...active.filter(notRun)], retired = all.filter((task) => stateOf(task) === "retired");
     const watching = all.filter((task) => stateOf(task) === "watching" && !notRun(task)).length;
-    const top = header(me, "Tasks", "OpenMerit watches every task: it re-runs a task's tests when a new model could fit it or prices change, and tells you when a cheaper model matches the one you use.", [plural(tasks.length, "task"), `${watching} watched`]);
+    const changed = active.filter((task) => stateOf(task) === "review");
+    const top = header(me, "Tasks", "OpenMerit watches every task: it re-runs a task's tests when a new model could fit it or prices change, and tells you when a cheaper model matches the one you use.", [plural(tasks.length, "task"), `${watching} watched`, ...(changed.length ? [`${changed.length} need review`] : [])]);
     if (!all.length) return html`${top}<section aria-labelledby="tasks"><h2 id="tasks">All Tasks</h2>${empty("No tasks yet", "A task appears the first time a coding agent asks OpenMerit which model it should use, or when you approve a draft from a repository review.")}</section>`;
+    // A task whose eval reopened, because the coding agent sent it changed or someone revised the eval, waits here first.
     return html`${top}
+    ${changed.length ? html`<section aria-labelledby="review">
+      <h2 id="review">Needs Review</h2>
+      <p class="note" style="margin: -2px 0 8px">These tasks changed since their eval was accepted, or someone revised the eval. Check what the judge looks for and each case's expected answer, then accept it: runs and the watch wait until you do.</p>
+      <div class="card">${changed.map((task) => html`<div class="row"><span><a href="${taskLink(task, "eval")}">${task.name}</a><span class="sub">${task.environment}</span></span><a class="btn" href="${taskLink(task, "eval")}">Review eval</a></div>`)}</div>
+    </section>` : ""}
     <section aria-labelledby="tasks">
       <h2 id="tasks">All Tasks</h2>
       ${table(tasks)}
