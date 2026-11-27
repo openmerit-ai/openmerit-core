@@ -1,14 +1,16 @@
 // Builds app.openmerit.ai into dist/app: one page shell per view with the shared
 // sidebar layout, the pages' script (app/main.ts) and the sidebar script. The
 // shells show a loading state; app/main.ts signs in and fills them from the
-// cloud app's /api/*. app/worker.ts serves them.
+// cloud app's /api/*. app/worker.ts serves them, and a self-hosted OpenMerit server serves the copy
+// the openmerit package's build writes with `--out` (openmerit-core/dist/web).
 import { build } from "esbuild";
 import { cpSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const source = join(root, "app");
-const out = join(root, "dist", "app");
+const at = process.argv.indexOf("--out");
+const out = at > 0 && process.argv[at + 1] ? resolve(process.argv[at + 1]!) : join(root, "dist", "app");
 
 // The sidebar's pages are the organization's tasks, runs and guardrails. The
 // organization's other pages and the member's own settings open from the profile menu.

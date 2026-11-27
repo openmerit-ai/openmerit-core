@@ -152,6 +152,6 @@ export function loadConfig(env: Env = process.env): Config {
   };
 }
 
-/** Where a person confirms a coding agent's critical request: the web app when hosted, the server's own page when self-hosted. */
-export const confirmUrl = (config: Pick<Config, "mode" | "appUrl" | "publicUrl">, id: string): string =>
-  config.mode === "hosted" ? `${config.appUrl}/confirm/?id=${encodeURIComponent(id)}` : `${config.publicUrl}/confirm/${encodeURIComponent(id)}`;
+/** Where a person confirms a coding agent's critical request: the web app's confirm page, which a self-hosted server serves itself. */
+export const confirmUrl = (config: Pick<Config, "appUrl">, id: string): string =>
+  `${config.appUrl}/confirm/?id=${encodeURIComponent(id)}`;

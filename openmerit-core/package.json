@@ -55,7 +55,7 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json && tsc -p tsconfig.build-server.json && node scripts/rewrite-declaration-imports.ts && chmod +x dist/cli.js",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && tsc -p tsconfig.build-server.json && node scripts/rewrite-declaration-imports.ts && node ../scripts/build-app.ts --out dist/web && chmod +x dist/cli.js",
     "typecheck": "tsc -p tsconfig.json",
     "test": "OPENMERIT_TELEMETRY=0 node --test --test-concurrency=3 \"src/**/*.test.ts\" \"test/*.test.ts\"",
     "test:fast": "OPENMERIT_TELEMETRY=0 node --test \"src/**/*.test.ts\" \"test/!(daemon).test.ts\"",

@@ -1,14 +1,15 @@
 // The app.openmerit.ai pages: signs in with Clerk, then fills the page named by
-// #view[data-view] from the cloud app's /api/* with the session token.
+// #view[data-view] from the cloud app's /api/* with the session token. Served by a self-hosted
+// OpenMerit server, they sign in with the browser session its sign-in link opened instead.
 import { trackPageview } from "./analytics.ts";
 import { ApiError, createApi, type Api, type Me, type Task } from "./api.ts";
-import { loadClerk, needsOrganization, signedIn, unavailable, type AppConfig, type Clerk } from "./auth.ts";
+import { loadClerk, needsOrganization, signedIn, unavailable, type AppConfig, type Clerk, type LocalConfig } from "./auth.ts";
 import { html, setLogos, type Html } from "./html.ts";
 import { startLive, stopLive } from "./live.ts";
 import { mount, type Account, type ConfirmOptions, type Ctx, type Mounted } from "./view.ts";
 import { accountView } from "./views/account.ts";
 import { confirmView } from "./views/confirm.ts";
-import { install } from "./views/common.ts";
+import { install, setLocalServer } from "./views/common.ts";
 import { connectionsView } from "./views/connections.ts";
 import { dataView } from "./views/data.ts";
 import { evalsView } from "./views/evals.ts";
@@ -205,11 +206,11 @@ function showOrganization(switching = false): void {
 // /api/me names the account; Clerk, which the page already holds, names the person.
 function fillProfile(me: Account | null): void {
   const user = clerk?.user;
-  const name = me ? user?.fullName || user?.primaryEmailAddress?.emailAddress || "Signed in" : "Sign in";
+  const name = me ? user?.fullName || user?.primaryEmailAddress?.emailAddress || (local ? "You" : "Signed in") : "Sign in";
   const email = user?.primaryEmailAddress?.emailAddress ?? null;
   // The session token names the organization by its slug; Clerk, on the page, has the name its members chose.
   const organization = clerk?.organization?.name || me?.account.name;
-  const sub = me ? `${organization} · ${me.plan.status !== "none" && me.plan.status !== "canceled" ? `${me.plan.name ?? "OpenMerit"} plan` : "No plan"}` : "OpenMerit";
+  const sub = me ? `${organization} · ${local ? "Self-hosted" : me.plan.status !== "none" && me.plan.status !== "canceled" ? `${me.plan.name ?? "OpenMerit"} plan` : "No plan"}` : "OpenMerit";
   const avatar = me ? html`${initial(name)}<span class="org-badge">${initial(organization ?? "")}</span>` : html`?`;
   const profile = document.querySelector<HTMLElement>(".profile");
   if (profile) {
@@ -244,12 +245,47 @@ async function render(ctx: Ctx): Promise<void> {
   document.title = `${mounted.title ?? pageTitle} · OpenMerit`;
 }
 
+// A self-hosted server: one person, signed in by the browser session the server's sign-in link opened.
+let local = false;
+
+function showLocalSignedOut(): void {
+  fillProfile(null);
+  document.body.classList.add("standalone");
+  document.title = "Sign in · OpenMerit";
+  put(html`<div class="signin-page">
+    ${brand}
+    <h1 class="title">Sign in to this OpenMerit server</h1>
+    <p class="lede">Run <code>openmerit server link</code> on the machine it runs on and open the link it prints. The link works once, for ten minutes.</p>
+  </div>`);
+}
+
+async function bootLocal(): Promise<void> {
+  api ??= createApi(location.origin, null, fetch);
+  let me: Account;
+  try { const found = await api.get<Me>("/api/me"); me = { ...found, account: { ...found.account, name: found.account.name ?? "This server" } }; }
+  catch (failure) { return failure instanceof ApiError && failure.status === 401 ? showLocalSignedOut() : showError(failure); }
+  leaveStandalone();
+  fillProfile(me);
+  // One person and one account, with no plan: nothing to switch to or pay for.
+  document.querySelectorAll("[data-global=organizations], .profile-menu a[href='/plan/']").forEach((item) => item.remove());
+  const ctx: Ctx = {
+    api, me, params, id: runId, toast, confirm: confirmDialog, download,
+    go: (url) => location.assign(url),
+    refresh: async () => { await render(ctx); void fillReview(ctx.api); },
+  };
+  void fillReview(api);
+  try { await render(ctx); } catch (failure) { showError(failure); }
+}
+
 async function boot(): Promise<void> {
+  if (local) return bootLocal();
   try {
     if (!clerk) {
       const response = await fetch("/config.json", { signal: AbortSignal.timeout(15_000) });
       if (!response.ok) throw new Error("Sign-in is temporarily unavailable. Please try again later.");
-      const config = await response.json() as AppConfig;
+      const answer = await response.json() as AppConfig | LocalConfig;
+      if ("mode" in answer) { local = true; setLocalServer(location.origin); return bootLocal(); }
+      const config = answer;
       clerk = await loadClerk(config);
       api = createApi(config.apiOrigin, async () => (await clerk?.session?.getToken()) ?? null, fetch, reverify);
       // Boots again when the user signs in or out, or their session gains or loses an organization.
@@ -296,6 +332,10 @@ async function act(name: string, target: HTMLElement): Promise<void> {
 }
 
 async function global(name: string): Promise<void> {
+  if (local) {
+    if (name === "sign-out") { await fetch("/api/session/signout", { method: "POST" }); return location.reload(); }
+    return void boot();
+  }
   if (!clerk) return void boot();
   if (name === "retry") return void boot();
   if (name === "sign-in") return clerk.openSignIn({ forceRedirectUrl: location.href, signUpForceRedirectUrl: location.href });

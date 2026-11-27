@@ -231,15 +231,16 @@ interface ReverificationHint { clerk_error: { reason: "reverification-error"; me
 const isReverificationHint = (data: unknown): data is ReverificationHint =>
   typeof data === "object" && data !== null && (data as Partial<ReverificationHint>).clerk_error?.reason === "reverification-error";
 
-export function createApi(origin: string, token: () => Promise<string | null>, fetcher: typeof fetch = fetch, reverify?: Reverify): Api {
+// token is null on a self-hosted server, whose pages sign in with a browser session cookie instead of a bearer token.
+export function createApi(origin: string, token: (() => Promise<string | null>) | null, fetcher: typeof fetch = fetch, reverify?: Reverify): Api {
   async function call<T>(method: string, path: string, body?: unknown, retried = false): Promise<T> {
-    const bearer = await token();
-    if (!bearer) throw new ApiError(401, "Sign in to continue.", "sign_in_required");
+    const bearer = token ? await token() : null;
+    if (token && !bearer) throw new ApiError(401, "Sign in to continue.", "sign_in_required");
     let response: Response;
     try {
       response = await fetcher(new URL(path, origin), {
         method,
-        headers: { authorization: `Bearer ${bearer}`, accept: "application/json", ...(body === undefined ? {} : { "content-type": "application/json" }) },
+        headers: { ...(bearer ? { authorization: `Bearer ${bearer}` } : {}), accept: "application/json", ...(body === undefined ? {} : { "content-type": "application/json" }) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         signal: AbortSignal.timeout(20_000),
       });

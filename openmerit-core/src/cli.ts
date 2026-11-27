@@ -22,6 +22,12 @@ Usage:
   openmerit eval <dir>            Run an eval Scout wrote (.openmerit/evals/<task>) under the eval contract: one model
                                   (OPENMERIT_MODEL) on OPENAI_BASE_URL, the judge OPENMERIT_JUDGE_MODEL on the same
                                   endpoint unless OPENMERIT_JUDGE_BASE_URL and OPENMERIT_JUDGE_API_KEY say otherwise.
+  openmerit server start [--port <n>]
+                                  Start the self-hosted OpenMerit server (the one openmerit.ai runs) in the
+                                  background on 127.0.0.1 (default port 7330; its engine also takes the port + 1, + 2,
+                                  + 3 and + 11), and print a sign-in link for its web app.
+  openmerit server [status|stop|link]
+                                  Whether it runs, stop it, or a new one-time sign-in link for its web app.
   openmerit mcp                   The local MCP server (stdio), for Claude Code, Codex and other clients.
   openmerit daemon [status|stop]  The background process that runs Scout (started by scout and mcp when needed).
                                   Without an argument it runs in the foreground.
@@ -51,7 +57,7 @@ const isVersion = command === "--version" || command === "-v" || command === "ve
 // The command's name for telemetry, never its arguments. `mcp` reports each tool call instead, and the
 // daemon that scout and mcp start in the background is not a command someone ran.
 const tracked = isHelp ? "help" : isVersion ? "version" : command === "mcp" || (command === "daemon" && !rest[0]) ? null
-  : ["setup", "connect", "scout", "history", "daemon", "eval"].includes(command) ? command : "unknown";
+  : ["setup", "connect", "scout", "history", "daemon", "eval", "server"].includes(command) ? command : "unknown";
 let handedOver = false;
 
 async function update(json: boolean): Promise<number | null> {
@@ -233,6 +239,7 @@ async function main() {
   if (command === "mcp") return (await import("./mcp.ts")).serveMcp();
   if (command === "daemon") return daemon(rest);
   if (command === "eval") return generatedEval(rest);
+  if (command === "server") return (await import("./server-cli.ts")).serverCommand(rest, log);
   if (!["setup", "connect", "scout", "history"].includes(command)) throw new Error(`Unknown command "${command}". Run \`openmerit help\`.`);
   const took = await update(rest.includes("--json"));
   // The updated version ran the command and reported it.
