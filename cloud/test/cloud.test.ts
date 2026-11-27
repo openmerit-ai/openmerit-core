@@ -341,8 +341,14 @@ test("the coding agent sends back the user's decision on a result's change: an a
     const pending = (approved.data.confirmation as { id: string }).id;
     const shown = await agent().api<{ title: string; items: string[]; status: string }>(`/api/confirmations/${pending}`);
     assert.deepEqual([shown.body.title, shown.body.status, shown.body.items[0]], ["Approve the switch for ticket classifier", "pending", `openai/gpt-5.4 → ${pick} (openrouter)`]);
+    // A new session starts by naming the organization and what waits for the user.
+    const brief = async () => String((await agent().rpc("initialize", { protocolVersion: "2025-06-18" })).body.result?.instructions ?? "");
+    const before = await brief();
+    assert.match(before, /You act in the OpenMerit organization .*org_decide/);
+    assert.match(before, new RegExp(`Waiting for the user to confirm: Approve the switch for ticket classifier, at https://app\\.openmerit\\.test/confirm/\\?id=${pending}`));
     const confirmed = await confirm(approved);
     assert.deepEqual([confirmed.status, confirmed.body.status], [200, "done"], JSON.stringify(confirmed.body));
+    assert.doesNotMatch(await brief(), /Approve the switch for ticket classifier/, "a confirmed request no longer waits");
     assert.equal((await confirm(approved)).status, 409, "a confirmation runs once");
     assert.match((await agent().tool("openmerit_confirmation", { confirmation_id: confirmed.id })).text, /^The user confirmed Approve the switch for ticket classifier, and it is done\./);
     assert.match((await result(kept)).text, new RegExp(`Decision: openai/gpt-5\\.4 → ${pick.replaceAll(".", "\\.")} \\(openrouter\\), approved by User D on \\d{4}-\\d{2}-\\d{2}\\.`));

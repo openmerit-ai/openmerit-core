@@ -502,6 +502,9 @@ export const account = actor({
       const [row] = await c.db.execute(`SELECT * FROM confirmations WHERE id = ?`, id);
       return confirmationRow(row!);
     },
+    /** Confirmations still waiting for a person, oldest first. */
+    pendingConfirmations: async (c): Promise<ConfirmationView[]> =>
+      (await c.db.execute(`SELECT * FROM confirmations WHERE status = 'pending' AND expires_at > ? ORDER BY created_at`, Date.now())).map(confirmationRow),
     /** A confirmation, with the nonce the self-hosted confirm page's form sends back. */
     confirmation: async (c, id: string): Promise<(ConfirmationView & { nonce: string }) | null> => {
       const [row] = await c.db.execute(`SELECT * FROM confirmations WHERE id = ?`, id);

@@ -4,7 +4,7 @@
 import { randomBytes } from "node:crypto";
 import { capture } from "./analytics.ts";
 import { NO_ORGANIZATION, type Auth, type AuthResult, type Identity } from "./auth.ts";
-import type { Config } from "./config.ts";
+import { confirmUrl, type Config } from "./config.ts";
 import type { Answers, JobView } from "./actors/job.ts";
 import { explain, nearMissLine, paybackLine, reasonFor, type Fix, type JobResult } from "../../openmerit-core/src/job/report.ts";
 import type { AppClient } from "./registry.ts";
@@ -409,6 +409,25 @@ async function decide(view: JobView, value: unknown, decision: Decision | null, 
     title: `${value ? "Approve" : "Decline"} the switch for ${view.task}`, items: [`${result.baseline?.model ?? view.task} → ${pick.model} (${pick.endpoint})`, ...result.edit.edits.map(edit => `${edit.file}:${edit.line}: ${edit.before} → ${edit.after}`)] });
 }
 
+/**
+ * What a coding agent should know at the start of a session: the organization it works in, and what waits
+ * for the user (requests to confirm, and results whose switch nobody decided). Read-only: it does not end
+ * the "since the last session" window openmerit_tasks reports.
+ */
+async function sessionBrief(deps: McpDeps, identity: Identity): Promise<string[]> {
+  const account = deps.client.account.getOrCreate([identity.accountId]);
+  const [info, pending, tasks, decisions] = await Promise.all([account.info(), account.pendingConfirmations(), account.tasks(), account.taskDecisions()]);
+  const name = info.name ?? identity.accountName;
+  const lines = [deps.config.mode === "hosted" ? `You act in the OpenMerit organization ${name ? `${name} (${identity.accountId})` : identity.accountId}. Tell the user, so they confirm in the same organization.` : "You act on this self-hosted OpenMerit server, for its one user."];
+  for (const item of pending) lines.push(`Waiting for the user to confirm: ${item.title}, at ${confirmUrl(deps.config, item.id)} (expires ${item.expiresAt.slice(0, 16).replace("T", " ")} UTC).`);
+  for (const task of tasks) {
+    const decision = decisions[task.id];
+    if (task.pick && task.state !== "retired" && !(decision && (decision.jobId === task.lastJobId || decision.decision === "approved"))) lines.push(`${task.name} [${task.id}]: switching ${task.currentModel} to ${task.pick} waits for the user's decision; call openmerit_result with job_id "${task.lastJobId}".`);
+  }
+  if (lines.length > 1) lines.splice(1, 0, "At the start of this session, tell the user what waits for them:");
+  return lines;
+}
+
 /** /mcp. A missing or invalid token gets 401 with the protected-resource metadata, which starts the client's Clerk sign-in. */
 export async function handleMcp(request: Request, deps: McpDeps): Promise<Response> {
   if (request.method !== "POST") return new Response("Use POST: this server answers each request on its own and opens no streams.\n", { status: 405, headers: { allow: "POST" } });
@@ -441,9 +460,10 @@ export async function handleMcp(request: Request, deps: McpDeps): Promise<Respon
     if (method === "initialize") {
       session = sessionFor(params.clientInfo);
       const asked = String(params.protocolVersion ?? "");
+      const brief = identity ? await sessionBrief(deps, identity) : [];
       replies.push(rpc(id, { result: {
         protocolVersion: PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0], capabilities: { tools: {} }, serverInfo: { name: "openmerit", title: "OpenMerit", version: VERSION },
-        instructions: "OpenMerit finds cheaper models that do a task at least as well as the current one, measured on cases from the task. Send a task bundle with openmerit_recommend, relay every question openmerit_result returns to the user, and ask before applying an edit.",
+        instructions: ["OpenMerit finds cheaper models that do a task at least as well as the current one, measured on cases from the task. Send a task bundle with openmerit_recommend, relay every question openmerit_result returns to the user, and ask before applying an edit. A budget, grades and a decision on a switch need the user's confirmation on the page OpenMerit links.", ...brief].join("\n"),
       } }));
     } else if (method === "ping") replies.push(rpc(id, { result: {} }));
     else if (method === "tools/list") replies.push(rpc(id, { result: { tools: TOOLS } }));

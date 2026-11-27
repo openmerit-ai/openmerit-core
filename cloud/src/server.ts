@@ -6,8 +6,17 @@ import { startApp } from "./app.ts";
 import { ClerkAuth, LocalAuth, localToken } from "./auth.ts";
 import { StripeBilling } from "./billing.ts";
 import { loadConfig } from "./config.ts";
+import { fetchCatalogue } from "../../openmerit-core/src/catalogue/build.ts";
+import { loadCatalogue } from "../../openmerit-core/src/catalogue/catalogue.ts";
 
 const config = loadConfig();
+
+/** A fresh catalogue from OpenRouter and Epoch. A partial upstream answer must not shrink the pool every task searches, so a catalogue under half the bundled one's size is refused and the current one kept. */
+async function refreshFromUpstream() {
+  const next = await fetchCatalogue(), bundled = loadCatalogue().models.length;
+  if (next.models.length < bundled / 2) throw new Error(`The refreshed catalogue has ${next.models.length} models, under half of the bundled ${bundled}; kept the current one.`);
+  return next;
+}
 const selfHosted = config.mode === "self-hosted";
 // Self-hosted: one local token signs in, and a local engine keeps its state in the data directory.
 const local = selfHosted ? localToken(config.dataDir) : null;
@@ -21,6 +30,8 @@ const { registry } = await startApp({
   auth: local ? new LocalAuth(local.token, local.file) : config.clerk ? new ClerkAuth(config.clerk) : null,
   billing: config.stripe ? new StripeBilling(config.stripe) : null,
   ...(local ? { local: { port: Number(process.env.OPENMERIT_ENGINE_PORT ?? config.port + 1), token: local.token } } : {}),
+  // Hosted, the catalogue refreshes daily from OpenRouter's and Epoch's public data; a self-hosted server keeps the bundled one.
+  ...(selfHosted ? {} : { services: { refreshCatalogue: refreshFromUpstream } }),
 });
 const missing = [!selfHosted && !config.clerk && "Clerk", !selfHosted && !config.stripe && "Stripe", !config.keyEncryptionKey && "the key-encryption key", !config.openrouter.apiKey && "OpenRouter"].filter(Boolean);
 console.log(`OpenMerit ${config.mode} on ${config.host ?? ""}:${config.port} for ${config.publicUrl}${local ? `; token in ${local.file}` : ""}${missing.length ? `; not configured: ${missing.join(", ")}` : ""}`);
