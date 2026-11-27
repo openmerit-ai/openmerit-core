@@ -1,7 +1,8 @@
 // /api/* for app.openmerit.ai, and reports as Markdown for agents. Requests carry a Clerk session
-// token; the account is the caller's active Clerk organization, which holds its tasks, runs, endpoints,
-// guardrails, plan and members. Changing endpoints, environment guardrails, billing and the account itself
-// needs the organization's admin role.
+// token; the account is the caller's active Clerk organization, which holds its plan, members and projects.
+// A project holds tasks, runs, endpoints and guardrails; a request names its project with X-OpenMerit-Project,
+// else it works in the default project. Changing projects, endpoints, environment guardrails, billing and the
+// account itself needs the organization's admin role.
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { statSync } from "node:fs";
 import { isAbsolute } from "node:path";
@@ -11,7 +12,7 @@ import type { AuthResult, Identity } from "./auth.ts";
 import { confirmUrl } from "./config.ts";
 import { LEVELS, type Guardrails, type Level } from "./engine.ts";
 import { explain, type JobResult } from "../job/report.ts";
-import { bundleProblem, redactBundle, rerunJob, runTask, settleOrphans } from "./start.ts";
+import { bundleProblem, DEFAULT_PROJECT, redactBundle, rerunJob, runTask, settleOrphans } from "./start.ts";
 import type { ConfirmationView, EvalSpec, EvalView } from "./actors/account.ts";
 import { OPENROUTER } from "../job/pool.ts";
 import type { Answers } from "./actors/job.ts";
@@ -204,10 +205,31 @@ export function apiRoutes(deps: AppDeps) {
       return decided.ok ? json(200, decided.view) : error(409, decided.error);
     }
 
+    if (path === "/api/projects" && method === "GET") return json(200, await account.projects());
+    if (path === "/api/projects" && method === "POST") {
+      const denied = admin(); if (denied) return denied;
+      const created = await account.createProject({ name: String((await body(request))?.name ?? "") });
+      return created.ok ? json(201, created.project) : error(400, created.error);
+    }
+    if ((match = /^\/api\/projects\/([\w-]+)$/.exec(path)) && method === "PUT") {
+      const denied = admin(); if (denied) return denied;
+      const renamed = await account.renameProject({ id: match[1]!, name: String((await body(request))?.name ?? "") });
+      return renamed.ok ? json(200, renamed.project) : error(renamed.status, renamed.error);
+    }
+    if ((match = /^\/api\/projects\/([\w-]+)$/.exec(path)) && method === "DELETE") {
+      const denied = admin(); if (denied) return denied;
+      const deleted = await account.deleteProject(match[1]!);
+      return deleted.ok ? json(200, { deleted: true }) : error(deleted.status, deleted.error);
+    }
+
+    // The project the rest of the routes work in. A task, run or confirmation found by its ID is its own project's, whichever one is open.
+    const projectId = request.headers.get("x-openmerit-project")?.trim() || DEFAULT_PROJECT;
+    if (!await account.project(projectId)) return error(404, "No such project in this account. Choose another project.");
+
     /** Holds a critical request for a person, or null to run it: it was confirmed, or a person sent it from the web app. */
     const hold = async (title: string, items: string[], input: Json | null, checks: "person" | "reverify" = "person"): Promise<Response | null> => {
       if (confirmed || who.person) return null;
-      const view = await account.requestConfirmation({ method, path, body: input ? JSON.stringify(input) : "", checks, title, items, requestedBy: who.userId, requestedVia: null });
+      const view = await account.requestConfirmation({ projectId, method, path, body: input ? JSON.stringify(input) : "", checks, title, items, requestedBy: who.userId, requestedVia: null });
       return json(202, heldReply(config, view));
     };
 
@@ -223,10 +245,10 @@ export function apiRoutes(deps: AppDeps) {
     }
 
     if (path === "/api/tasks" && method === "GET") {
-      const [tasks, decisions] = await Promise.all([account.tasks(), account.taskDecisions()]);
+      const [tasks, decisions] = await Promise.all([account.tasks(projectId), account.taskDecisions()]);
       return json(200, tasks.map(task => ({ ...task, decision: decisions[task.id] ?? null })));
     }
-    if (path === "/api/tasks/deleted" && method === "GET") return json(200, await account.deletions());
+    if (path === "/api/tasks/deleted" && method === "GET") return json(200, await account.deletions(projectId));
     if ((match = /^\/api\/tasks\/([\w-]+)$/.exec(path)) && method === "DELETE") {
       const denied = admin() ?? recent(who); if (denied) return denied;
       const row = await account.task(match[1]!);
@@ -314,7 +336,7 @@ export function apiRoutes(deps: AppDeps) {
     if ((match = /^\/api\/tasks\/([\w-]+)\/retire$/.exec(path)) && method === "POST") {
       const row = await account.task(match[1]!);
       if (!row) return error(404, "No such task in this account.");
-      await client.task.getOrCreate([who.accountId, row.id], { createWithInput: { accountId: who.accountId, taskId: row.id, environment: row.environment, name: row.name } }).retire();
+      await client.task.getOrCreate([who.accountId, row.id], { createWithInput: { accountId: who.accountId, taskId: row.id, projectId: row.projectId, environment: row.environment, name: row.name } }).retire();
       return json(200, await account.task(row.id));
     }
 
@@ -324,10 +346,10 @@ export function apiRoutes(deps: AppDeps) {
       const info = await client.task.get([who.accountId, row.id]).info();
       const evaluation = await evalOf(row.id);
       const latest = evaluation?.accepted;
-      return json(200, { ...row, eval: latest ? { version: latest.version, cases: latest.cases.length, review: evaluation.draft?.reason ?? null } : null, bundle: info.bundle, lastResult: info.lastResult, notices: info.notices, jobs: await account.jobs({ taskId: row.id, limit: 20 }), guardrails: await account.resolveGuardrails({ environment: row.environment, agent: row.agent, taskId: row.id }) });
+      return json(200, { ...row, eval: latest ? { version: latest.version, cases: latest.cases.length, review: evaluation.draft?.reason ?? null } : null, bundle: info.bundle, lastResult: info.lastResult, notices: info.notices, jobs: await account.jobs({ taskId: row.id, limit: 20 }), guardrails: await account.resolveGuardrails({ projectId: row.projectId, environment: row.environment, agent: row.agent, taskId: row.id }) });
     }
 
-    if (path === "/api/runs" && method === "GET") return json(200, await account.jobs({ limit: Math.min(200, Number(url.searchParams.get("limit") ?? 50) || 50) }));
+    if (path === "/api/runs" && method === "GET") return json(200, await account.jobs({ projectId, limit: Math.min(200, Number(url.searchParams.get("limit") ?? 50) || 50) }));
     if ((match = /^\/api\/runs\/([\w-]+)$/.exec(path)) && method === "GET") {
       const jobId = match[1]!;
       const row = await account.job(jobId);
@@ -398,21 +420,21 @@ export function apiRoutes(deps: AppDeps) {
       return json(200, { url: `${config.publicUrl}/api/share/${shareToken(config.keyEncryptionKey, who.accountId, secret)}.md` });
     }
 
-    if (path === "/api/endpoints" && method === "GET") return json(200, await account.endpoints());
+    if (path === "/api/endpoints" && method === "GET") return json(200, await account.endpoints(projectId));
     if (path === "/api/endpoints" && method === "POST") {
       const denied = admin() ?? recent(who); if (denied) return denied;
       const input = await body(request);
       if (!input) return error(400, "Send the endpoint as JSON: {kind, baseUrl, apiKey, allowedModels}.");
       const held = await hold(`Add the endpoint ${String(input.baseUrl ?? "")}`, [`A ${String(input.kind ?? "")} endpoint with the key ending ${String(input.apiKey ?? "").slice(-4)}`, `Models: ${Array.isArray(input.allowedModels) ? input.allowedModels.join(", ") : "all"}`], input, "reverify"); if (held) return held;
-      const added = await account.addEndpoint({ kind: input.kind as EndpointKind, baseUrl: String(input.baseUrl ?? ""), apiKey: String(input.apiKey ?? ""), allowedModels: input.allowedModels as string[] | "all" });
+      const added = await account.addEndpoint({ projectId, kind: input.kind as EndpointKind, baseUrl: String(input.baseUrl ?? ""), apiKey: String(input.apiKey ?? ""), allowedModels: input.allowedModels as string[] | "all" });
       return added.ok ? json(201, added.endpoint) : error(400, added.error);
     }
     if ((match = /^\/api\/endpoints\/([\w-]+)$/.exec(path)) && method === "DELETE") {
       const denied = admin() ?? recent(who); if (denied) return denied;
-      const endpoint = (await account.endpoints()).find(item => item.id === match![1]);
+      const endpoint = (await account.endpoints(projectId)).find(item => item.id === match![1]);
       if (!endpoint) return error(404, "No such endpoint.");
       const held = await hold(`Remove the endpoint ${endpoint.baseUrl}`, [`Its key ending ${endpoint.keyLast4} is deleted`], null, "reverify"); if (held) return held;
-      return (await account.removeEndpoint(match[1]!)) ? json(200, { deleted: true }) : error(404, "No such endpoint.");
+      return (await account.removeEndpoint({ projectId, id: match[1]! })) ? json(200, { deleted: true }) : error(404, "No such endpoint.");
     }
 
     if (path === "/api/guardrails" && method === "GET") {
@@ -420,9 +442,11 @@ export function apiRoutes(deps: AppDeps) {
       if (!level || !LEVELS.includes(level) || !id) return error(400, "Pass level (environment or task) and id (an environment name or a task ID).");
       const task = level === "task" ? await account.task(id) : null;
       if (level === "task" && !task) return error(404, "No such task in this account.");
-      const settings = await account.guardrails({ level, scope: id });
+      // A task's guardrails are its project's, whichever project the app has open.
+      const scope = task?.projectId ?? projectId;
+      const settings = await account.guardrails({ projectId: scope, level, scope: id });
       // The effective values at this level, with the level each came from.
-      const effective = await account.resolveGuardrails({ environment: task?.environment ?? id, ...(task ? { taskId: task.id } : {}) });
+      const effective = await account.resolveGuardrails({ projectId: scope, environment: task?.environment ?? id, ...(task ? { taskId: task.id } : {}) });
       return json(200, { level, id, settings, effective: effective.effective, from: effective.from, rejected: effective.rejected });
     }
     if (path === "/api/guardrails" && method === "PUT") {
@@ -436,7 +460,7 @@ export function apiRoutes(deps: AppDeps) {
       if (money.length) {
         const held = await hold(`Change spending limits for ${task?.name ?? id}`, money.map(([key, value]) => `${key === "budgetUsd" ? "Budget per job" : key === "spendCapUsd" ? "Monthly cap on OpenMerit's key" : "Monthly cap on your endpoints"}: ${value === null ? "inherited" : `$${String(value)}`}`), input); if (held) return held;
       }
-      const saved = await account.setGuardrails({ level, scope: id, settings: input.settings as Guardrails });
+      const saved = await account.setGuardrails({ projectId: task?.projectId ?? projectId, level, scope: id, settings: input.settings as Guardrails });
       return json(200, saved);
     }
 
@@ -485,7 +509,7 @@ export function apiRoutes(deps: AppDeps) {
     if (!decided.ok) return { ok: false, error: !decided.view ? "No such confirmation." : decided.view.status === "expired" ? "This confirmation expired: ask the coding agent to make the request again." : `This request was already ${decided.view.status === "declined" ? "declined" : "confirmed"}.` };
     if (!confirm) return { ok: true, view: decided.view };
     const held = decided.view;
-    const replay = new Request(`${origin}${held.path}`, { method: held.method, headers: { "content-type": "application/json" }, ...(decided.body ? { body: decided.body } : {}) });
+    const replay = new Request(`${origin}${held.path}`, { method: held.method, headers: { "content-type": "application/json", "x-openmerit-project": held.projectId }, ...(decided.body ? { body: decided.body } : {}) });
     let status = 500, answer: unknown = { error: "OpenMerit hit an internal error." };
     try {
       const response = await routes(replay, new URL(replay.url), who, true);
@@ -504,7 +528,7 @@ export function apiRoutes(deps: AppDeps) {
     const headers = cors(request, deps);
     const withCors = (response: Response) => { for (const [name, value] of Object.entries(headers)) response.headers.set(name, value); return response; };
     if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: { ...headers, "access-control-allow-methods": "GET, POST, PUT, DELETE", "access-control-allow-headers": "authorization, content-type", "access-control-max-age": "600" } });
+      return new Response(null, { status: 204, headers: { ...headers, "access-control-allow-methods": "GET, POST, PUT, DELETE", "access-control-allow-headers": "authorization, content-type, x-openmerit-project", "access-control-max-age": "600" } });
     }
     if (share && request.method === "GET") {
       const parsed = parseShare(deps.config.keyEncryptionKey, share[1]!);

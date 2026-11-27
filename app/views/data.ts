@@ -21,7 +21,7 @@ export const dataView: View<Data> = {
       <div class="card">
         <div class="row"><span>Task context<span class="sub">The prompts, tool schemas, output shapes and examples your coding agents sent, with secrets redacted</span></span><span style="white-space: nowrap">${plural(tasks.length, "task")}</span></div>
         <div class="row"><span>Evals and results<span class="sub">Each task's eval, every version of its cases and what the judge checks, and each model's score per case. Cases can hold real inputs from your examples, with secrets redacted. A run you grade also keeps the answers it showed you, up to 12 a round with secrets redacted, and your grades and notes</span></span><span style="white-space: nowrap">${plural(runs.length, "run")}</span></div>
-        <div class="row"><span>Endpoint keys<span class="sub">Keys you added on Coding agents and endpoints, stored encrypted and never shown again</span></span><span style="white-space: nowrap">${plural(keys, "key")}</span></div>
+        <div class="row"><span>Endpoint keys<span class="sub">Keys you added on Project settings, stored encrypted and never shown again</span></span><span style="white-space: nowrap">${plural(keys, "key")}</span></div>
       </div>
     </section>
     <section aria-labelledby="where">

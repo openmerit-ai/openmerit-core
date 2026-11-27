@@ -50,8 +50,11 @@ const SPOT_CHECK = 4;
 export interface EvalGrade { caseId: string; model: string; output: string; toolCalls: { name: string; arguments: string }[]; verdict: "good" | "bad"; note?: string }
 export const specOf = (bundle: TaskBundle): EvalSpec => Object.fromEntries((["description", "input", "steps", "criteria", "guardrails"] as const).filter(key => bundle[key] !== undefined).map(key => [key, bundle[key]])) as EvalSpec;
 
-/** A task's ID: one per environment and task name, the same whichever job or host sees it. */
-export const taskIdFor = (environment: string, task: string) => `t_${createHash("sha256").update(`${environment}\0${task}`).digest("hex").slice(0, 16)}`;
+/** The project of tasks and jobs recorded before projects, and of a coding agent's call that names none. */
+export const DEFAULT_PROJECT = "default";
+/** A task's ID: one per project, environment and task name, the same whichever job or host sees it. The default project's leave the project out, as before projects. */
+export const taskIdFor = (projectId: string, environment: string, task: string) =>
+  `t_${createHash("sha256").update(projectId === DEFAULT_PROJECT ? `${environment}\0${task}` : `${projectId}\0${environment}\0${task}`).digest("hex").slice(0, 16)}`;
 
 /** Redacts every string in a bundle (or any JSON value): secrets the coding agent pasted never reach a model or the disk. */
 export function redactBundle<T>(value: T): T {
@@ -79,6 +82,8 @@ export type JobTrigger = "app" | "mcp" | "watch";
 
 export interface JobInput {
   accountId: string;
+  /** The task's project; absent on jobs started before projects, which are in the default project. */
+  projectId?: string;
   taskId: string;
   environment: string;
   agent: string | null;
@@ -164,7 +169,7 @@ export interface JobContext<S> extends JobLoopContext<S> {
 
 /** The account's side of a job: its guardrails, eval, endpoints, ledger and records. */
 export interface JobAccount {
-  resolveGuardrails(input: { environment: string; agent?: string | null; taskId?: string }): Promise<ResolvedGuardrails>;
+  resolveGuardrails(input: { projectId?: string; environment: string; agent?: string | null; taskId?: string }): Promise<ResolvedGuardrails>;
   jobUpdate(input: { jobId: string; status: string; budgetUsd?: number; capOpenmeritUsd?: number | null; capCustomerUsd?: number | null; measured?: boolean }): Promise<void>;
   /** The task's confirmed eval command, which a self-hosted server runs to measure; null when it has none. */
   evalCommandFor(taskId: string): Promise<EvalCommandSpec | null>;
@@ -180,8 +185,8 @@ export interface JobAccount {
   evalGrades(input: { taskId: string; version: number }): Promise<EvalGrade[] | null>;
   setJobEval(input: { jobId: string; version: number }): Promise<void>;
   /** Endpoints with their keys, which the job keeps in memory only. */
-  endpointSecrets(): Promise<EndpointConfig[]>;
-  endpointsForJob(): Promise<EndpointInfo[]>;
+  endpointSecrets(projectId?: string): Promise<EndpointConfig[]>;
+  endpointsForJob(projectId?: string): Promise<EndpointInfo[]>;
   reserve(input: { jobId: string; key: string; usd: number; funding: Funding; model?: string; endpoint?: string }): Promise<ReserveResult>;
   settle(input: { key: string; cost: Settlement }): Promise<void>;
   release(key: string): Promise<void>;
@@ -248,10 +253,10 @@ const endpointKeys = new Map<string, Promise<EndpointConfig[]>>();
 /** Drops a job's endpoint keys from memory, as when its actor is destroyed. */
 export const forgetJob = (jobId: string) => { endpointKeys.delete(jobId); };
 
-function keysFor(jobId: string, account: JobAccount): Promise<EndpointConfig[]> {
+function keysFor(jobId: string, account: JobAccount, projectId: string): Promise<EndpointConfig[]> {
   let keys = endpointKeys.get(jobId);
   if (!keys) {
-    keys = account.endpointSecrets().catch((error: unknown) => { endpointKeys.delete(jobId); throw error; });
+    keys = account.endpointSecrets(projectId).catch((error: unknown) => { endpointKeys.delete(jobId); throw error; });
     endpointKeys.set(jobId, keys);
   }
   return keys;
@@ -392,17 +397,20 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
         const { input } = s.state;
         const bundle = redactBundle(input.bundle);
         const account = host.account(s, input.accountId);
-        const guardrails = await account.resolveGuardrails({ environment: input.environment, agent: input.agent, taskId: input.taskId });
+        const projectId = input.projectId ?? DEFAULT_PROJECT;
+        const guardrails = await account.resolveGuardrails({ projectId, environment: input.environment, agent: input.agent, taskId: input.taskId });
         const { effective } = guardrails;
         await account.jobUpdate({ jobId, status: "running", budgetUsd: effective.budgetUsd ?? host.settings().config.limits.defaultJobBudgetUsd, capOpenmeritUsd: effective.spendCapUsd ?? null, capCustomerUsd: effective.customerSpendCapUsd ?? null });
         s.state.status = "running"; s.state.phase = "cases"; s.state.updatedAt = now();
-        return { bundle, guardrails, accountId: input.accountId, environment: input.environment, agent: input.agent, provisional: input.provisional };
+        return { bundle, guardrails, accountId: input.accountId, projectId, environment: input.environment, agent: input.agent, provisional: input.provisional };
       },
     });
     const { guardrails } = source as { guardrails: ResolvedGuardrails };
     const sent = (source as { bundle: TaskBundle }).bundle;
     const input = { accountId: source.accountId, environment: source.environment, agent: source.agent };
-    const taskId = taskIdFor(input.environment, sent.task);
+    // A job whose source step ran before projects replays without one: it is in the default project.
+    const projectId = (source as { projectId?: string }).projectId ?? DEFAULT_PROJECT;
+    const taskId = taskIdFor(projectId, input.environment, sent.task);
     const budgetUsd = guardrails.effective.budgetUsd ?? host.settings().config.limits.defaultJobBudgetUsd;
     /** What fixes a refused spend: the job's budget is the task's to raise, a cap for the job is a guardrail, and a monthly cap waits for next month. */
     const refusalFix = (reason: string): FixFor | null => reason.includes(JOB_BUDGET) ? { kind: "raise_budget", budgetUsd: Math.ceil(budgetUsd * 2) }
@@ -467,7 +475,7 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
           const index = catalogueIndex(await host.catalogue(s));
           const account = host.account(s, accountId);
           // The writer answers with all its cases at once, so it gets longer than a ranking call to answer.
-          const models = createClient(await keysFor(jobId, account), { fetch, model: model => index.find(model), timeoutMs: 600_000 });
+          const models = createClient(await keysFor(jobId, account, projectId), { fetch, model: model => index.find(model), timeoutMs: 600_000 });
           complete = completeWith(models, { endpoint: OPENROUTER, model: config.models.caseWriter }, jobLedger(account, jobId), `${jobId}/cases`, s.abortSignal);
           count = WRITTEN_CASES;
           source = "openmerit";
@@ -571,7 +579,7 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
       name, timeout: 60_000,
       run: async s => {
           const catalogue = await host.catalogue(s);
-        const endpoints = await host.account(s, s.state.input.accountId).endpointsForJob();
+        const endpoints = await host.account(s, s.state.input.accountId).endpointsForJob(projectId);
         const built = buildPool({ catalogue, endpoints, bundle, guardrails: guardrails.effective, wide });
         // The catalogue entries the job's calls are priced by, by the name each endpoint calls the model, so every step prices on this version.
         const index = catalogueIndex(catalogue);
@@ -633,7 +641,7 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
     /** The job's model client, and the grader the bundle's output calls for. */
     const grading = async (account: JobAccount) => {
       const { config, fetch } = host.settings();
-      const client = createClient(await keysFor(jobId, account), { fetch, model: model => models.priced[model] ?? null });
+      const client = createClient(await keysFor(jobId, account, projectId), { fetch, model: model => models.priced[model] ?? null });
       // Text answers go to a fixed judge on OpenMerit's key. Its calls count in the job's spend but not in the candidate's cost per call.
       // The rubric is the task's own (rubricFor), with one check per criterion and guardrail of its spec.
       const judge = (bundle.output.kind === "text" || bundle.guardrails?.length) && config.openrouter.apiKey ? { client, endpoint: OPENROUTER, model: config.models.judge } : undefined;
@@ -645,7 +653,7 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
      * reports each item's pass or fail; a call that failed, not a wrong answer, marks its failed items errored.
      */
     const measureCommand = async (spec: EvalCommandSpec, option: Option, ids: string[] | null, key: string, account: JobAccount, signal: AbortSignal): Promise<Measured> => {
-      const endpoint = (await keysFor(jobId, account)).find(item => item.id === option.endpoint);
+      const endpoint = (await keysFor(jobId, account, projectId)).find(item => item.id === option.endpoint);
       if (!endpoint) return { kind: "unavailable", reason: `no endpoint ${option.endpoint} with a key` };
       // The run's own cost: what the proxy settled for it, which the engine divides by its items.
       const ledger = jobLedger(account, jobId), reserved = new Map<string, number>();
@@ -971,7 +979,7 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
               let harness = own?.harness;
               if (!harness) {
                 const index = catalogueIndex(await host.catalogue(s));
-                const writer = createClient(await keysFor(jobId, account), { fetch, model: model => index.find(model), timeoutMs: 600_000 });
+                const writer = createClient(await keysFor(jobId, account, projectId), { fetch, model: model => index.find(model), timeoutMs: 600_000 });
                 harness = completeHarness(completeWith(writer, { endpoint: OPENROUTER, model: config.models.caseWriter }, jobLedger(account, jobId), `${jobId}/revise-r${round}`, s.abortSignal));
               }
               value = await reviseEval({ bundle: from.bundle, cases: from.usable }, feedbackOf(artifact, grades), harness, s.abortSignal, disputed);

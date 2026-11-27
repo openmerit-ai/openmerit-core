@@ -99,6 +99,59 @@ describe("the cloud app", () => {
     assert.equal(models.calls.length, 0);
   });
 
+  test("a project keeps its own endpoints, guardrails and tasks; the default project holds the rest and cannot be deleted", async () => {
+    type Project = { id: string; name: string; tasks: number; endpoints: number };
+    const admin = caller(app, "test:user_p:org_projects:admin");
+    const member = caller(app, "test:user_m:org_projects");
+    assert.deepEqual((await admin.api<Project[]>("/api/projects")).body.map(item => [item.id, item.name]), [["default", "Default project"]]);
+    assert.equal((await member.api("/api/projects", { method: "POST", body: JSON.stringify({ name: "Claims" }) })).status, 403);
+    const claims = (await admin.api<Project>("/api/projects", { method: "POST", body: JSON.stringify({ name: "Claims" }) })).body;
+    assert.equal((await admin.api("/api/projects", { method: "POST", body: JSON.stringify({ name: " claims " }) })).status, 400, "names are unique, ignoring case");
+    const inClaims = { "x-openmerit-project": claims.id };
+
+    const endpoint = { kind: "openai-compatible", baseUrl: "https://api.fireworks.test/v1", apiKey: "sk-project-key-1234", allowedModels: ["acme/fine-tune-1"] };
+    const added = await admin.api<{ id: string }>("/api/endpoints", { method: "POST", headers: inClaims, body: JSON.stringify(endpoint) });
+    assert.equal(added.status, 201);
+    assert.deepEqual((await admin.api("/api/endpoints")).body, [], "the default project has none");
+    assert.equal((await admin.api(`/api/endpoints/${added.body.id}`, { method: "DELETE" })).status, 404, "another project cannot remove it");
+    assert.equal((await admin.api<unknown[]>("/api/endpoints", { headers: inClaims })).body.length, 1);
+
+    // The same environment's guardrails differ by project.
+    await admin.api("/api/guardrails", { method: "PUT", headers: inClaims, body: JSON.stringify({ level: "environment", id: "acme/app", settings: { budgetUsd: 2 } }) });
+    assert.deepEqual((await admin.api<{ effective: Data }>("/api/guardrails?level=environment&id=acme/app", { headers: inClaims })).body.effective, { budgetUsd: 2 });
+    assert.deepEqual((await admin.api<{ effective: Data }>("/api/guardrails?level=environment&id=acme/app")).body.effective, {});
+
+    // A coding agent names the project; the task lands there and the default project does not list it.
+    await subscribe(app, "org_projects");
+    const unknown = await admin.tool("openmerit_recommend", { bundle: bundle(), environment: "acme/app", project: "Nope" });
+    assert.equal(unknown.isError, true);
+    assert.match(unknown.text, /Its projects: Default project, Claims/);
+    const started = await admin.tool("openmerit_recommend", { bundle: bundle(), environment: "acme/app", project: "claims" });
+    assert.equal(started.isError, false, started.text);
+    assert.equal((await admin.api<unknown[]>("/api/tasks", { headers: inClaims })).body.length, 1);
+    assert.deepEqual((await admin.api("/api/tasks")).body, []);
+    // A later call from the same environment that names no project lands in the project its tasks are in.
+    const again = await admin.tool("openmerit_recommend", { bundle: bundle("reply drafter"), environment: "acme/app" });
+    assert.equal(again.isError, false, again.text);
+    assert.equal((await admin.api<unknown[]>("/api/tasks", { headers: inClaims })).body.length, 2);
+    // The same task name in the default project is another task.
+    const elsewhere = await admin.tool("openmerit_recommend", { bundle: bundle(), environment: "acme/app", project: "default" });
+    assert.equal(elsewhere.isError, false, elsewhere.text);
+    const [inDefault] = (await admin.api<{ id: string }[]>("/api/tasks")).body;
+    assert.ok(inDefault && !(await admin.api<{ id: string }[]>("/api/tasks", { headers: inClaims })).body.some(item => item.id === inDefault.id));
+    assert.match((await admin.tool("openmerit_tasks", {})).text, /project Claims, acme\/app/);
+
+    const busy = await admin.api<{ error: string }>(`/api/projects/${claims.id}`, { method: "DELETE" });
+    assert.equal(busy.status, 409);
+    assert.match(busy.body.error, /has 2 tasks/);
+    assert.equal((await admin.api("/api/projects/default", { method: "DELETE" })).status, 409);
+    const renamed = await admin.api<Project>("/api/projects/default", { method: "PUT", body: JSON.stringify({ name: "Main" }) });
+    assert.equal(renamed.body.name, "Main");
+    const empty = (await admin.api<Project>("/api/projects", { method: "POST", body: JSON.stringify({ name: "Scratch" }) })).body;
+    assert.equal((await admin.api(`/api/projects/${empty.id}`, { method: "DELETE" })).status, 200);
+    assert.equal((await admin.api("/api/tasks", { headers: { "x-openmerit-project": empty.id } })).status, 404);
+  });
+
   test("applies only Stripe webhooks with a valid signature, once each", async () => {
     const payload = JSON.stringify({ id: "evt_forged", type: "checkout.session.completed", created: 1, data: { object: { client_reference_id: "org_x", customer: "cus_x" } } });
     const forged = await fetch(`${app.url}/api/stripe/webhook`, { method: "POST", body: payload, headers: { "stripe-signature": signStripePayload(payload, "whsec_wrong") } });
@@ -855,7 +908,7 @@ test("a job whose start fails after the account recorded it is marked failed, an
     const [task] = (await agent.api<{ id: string }[]>("/api/tasks")).body;
     // What a start that failed in an outage left before startJob caught it: the account's row and no job actor.
     const orphan = "job_20261124_0rphan000001";
-    assert.equal((await rivet.account.getOrCreate(["org_orphan"]).startJob({ jobId: orphan, taskId: task!.id, kind: "run", askedBy: null })).ok, true);
+    assert.equal((await rivet.account.getOrCreate(["org_orphan"]).startJob({ jobId: orphan, projectId: "default", taskId: task!.id, kind: "run", askedBy: null })).ok, true);
     assert.equal((await runs()).find(run => run.id === orphan)?.status, "queued");
     await new Promise(resolve => setTimeout(resolve, 2_500));
     const deleted = await agent.api<Data>(`/api/tasks/${task!.id}`, { method: "DELETE" });

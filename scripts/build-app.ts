@@ -12,19 +12,20 @@ const source = join(root, "app");
 const at = process.argv.indexOf("--out");
 const out = at > 0 && process.argv[at + 1] ? resolve(process.argv[at + 1]!) : join(root, "dist", "app");
 
-// The sidebar's pages are the organization's tasks, runs and guardrails. The
-// organization's other pages and the member's own settings open from the profile menu.
+// The sidebar's project switcher picks the project; its pages are the sidebar's items. The
+// organization's pages and the member's own settings open from the profile menu.
 const nav = [
   { id: "runs", href: "/", label: "Runs", icon: '<path d="M3 12h4l3-7 4 14 3-7h4"/>' },
   { id: "tasks", href: "/tasks/", label: "Tasks", icon: '<rect x="3" y="3" width="18" height="18" rx="3"/><path d="m8 12 3 3 5-6"/>' },
   // An action item, shown with its count only while a task's eval waits for review (app/main.ts).
   { id: "evals", href: "/evals/", label: "Review evals", icon: '<path d="M9 5h10M9 12h10M9 19h10M4 5l1 1 2-2M4 12l1 1 2-2M4 19l1 1 2-2"/>', hidden: true },
   { id: "guardrails", href: "/guardrails/", label: "Guardrails", icon: '<path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/>' },
+  { id: "project", href: "/project/", label: "Project settings", icon: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9 7 7M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/>' },
 ] as const;
 
 const accountPages = [
   { id: "account", href: "/account/", label: "Account settings", icon: '<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/>' },
-  { id: "connections", href: "/connections/", label: "Coding agents and endpoints", icon: '<path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0zM12 16v5"/>' },
+  { id: "connections", href: "/connections/", label: "Coding agents", icon: '<path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0zM12 16v5"/>' },
   { id: "plan", href: "/plan/", label: "Plan and usage", icon: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h4"/>' },
   { id: "data", href: "/data/", label: "Your data", icon: '<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>' },
 ] as const;
@@ -35,8 +36,9 @@ const pages = [
   { view: "run", title: "Run report", nav: "runs", path: "r" },
   { view: "tasks", title: "Tasks", nav: "tasks", path: "tasks" },
   { view: "evals", title: "Review evals", nav: "evals", path: "evals" },
+  { view: "project", title: "Project settings", nav: "project", path: "project" },
   { view: "account", title: "Account settings", nav: "account", path: "account" },
-  { view: "connections", title: "Coding agents and endpoints", nav: "connections", path: "connections" },
+  { view: "connections", title: "Coding agents", nav: "connections", path: "connections" },
   { view: "guardrails", title: "Guardrails", nav: "guardrails", path: "guardrails" },
   { view: "plan", title: "Plan and usage", nav: "plan", path: "plan" },
   { view: "data", title: "Your data", nav: "data", path: "data" },
@@ -93,6 +95,14 @@ function page(title: string, active: string, body: string, narrow = false): stri
             <span class="label">openmerit</span>
           </a>
           <button class="sidebar-toggle" type="button" aria-label="Collapse sidebar" title="Collapse sidebar (Ctrl or ⌘ + B)">${icon('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>')}</button>
+        </div>
+        <div class="project-switch-wrap">
+          <button class="project-switch" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="project-menu" title="Switch project">
+            <span class="project-mark" aria-hidden="true"></span>
+            <span class="label"><span class="sub">Project</span><span class="project-name"><span class="skeleton" style="width: 100px"></span></span></span>
+            ${icon('<path d="m8 9 4-4 4 4M8 15l4 4 4-4"/>')}
+          </button>
+          <div class="project-menu" id="project-menu" role="menu" aria-label="Projects" hidden></div>
         </div>
         <nav class="nav" aria-label="Sections">
         ${links}

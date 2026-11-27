@@ -6,7 +6,7 @@
 // just created), preview-noorg (a token without an organization), preview-error, preview-slow and preview-expired. Each scenario keeps its own in-memory
 // state, so actions change what later requests return. Every name and number is fictional.
 import { GUARDRAIL_KINDS, LEVELS, resolveGuardrails, type Guardrails, type Level } from "../../openmerit-core/src/engine/guardrails.ts";
-import type { Decision, DeletedTask, Endpoint, EvalAccepted, EvalCase, EvalRevision, EvalSpec, EvalView, JobView, LiveProgress, MeasuredModel, Me, Report, Run, Spend, Subscriptions, Task, TaskOutput } from "../api.ts";
+import type { Decision, DeletedTask, Endpoint, Project, EvalAccepted, EvalCase, EvalRevision, EvalSpec, EvalView, JobView, LiveProgress, MeasuredModel, Me, Report, Run, Spend, Subscriptions, Task, TaskOutput } from "../api.ts";
 import { tonicUltra } from "./tonic-ultra.ts";
 
 // A task's eval in the fake: the accepted one, any draft under review, and the task's output shape.
@@ -18,6 +18,11 @@ const confirmations: Record<string, { id: string; title: string; items: string[]
 };
 
 export interface State { me: Me; tasks: Task[]; runs: Run[]; reports: Record<string, Report>; jobs: Record<string, JobView>; endpoints: Endpoint[]; spend: Spend; guardrails: Record<Level, Record<string, Guardrails>>; disconnected: number; deleted: DeletedTask[]; evals: Record<string, FakeEval> }
+
+// What a project other than the default holds; the State's own fields are the default project's.
+const SLICE = ["tasks", "runs", "endpoints", "guardrails", "deleted", "evals"] as const;
+type Slice = Pick<State, (typeof SLICE)[number]>;
+const emptySlice = (): Slice => ({ tasks: [], runs: [], endpoints: [], guardrails: { environment: {}, task: {} }, deleted: [], evals: {} });
 
 const ROUTER_OUTPUT: TaskOutput = { kind: "label", labels: ["claims", "billing", "enrollment", "clinical", "other"] };
 const routerCase = (id: string, ticket: string, expected: string | undefined, origin: EvalCase["origin"], fields: Partial<EvalCase> = {}): EvalCase => ({ id, input: { ticket }, ...(expected === undefined ? {} : { expected }), origin, ...fields });
@@ -56,10 +61,13 @@ function drafterEval(): FakeEval {
 }
 
 // The member's subscriptions, kept beside each scenario's state.
-interface Extra { subscriptions: Subscriptions; polls: number }
-function extra(): Extra {
+// The organization's projects and the member's subscriptions, kept beside each scenario's state.
+interface Extra { projects: { id: string; name: string; createdAt: string }[]; slices: Record<string, Slice>; subscriptions: Subscriptions; polls: number }
+function extra(name: string): Extra {
+  const projects = [{ id: "default", name: name === "tonic" ? "Tonic platform" : name === "populated" || name === "member" || name === "noplan" ? "Claims" : "Default project", createdAt: "2026-10-01T09:00:00Z" }];
+  if (name === "tonic" || name === "populated" || name === "member") projects.push({ id: "prj_enrollment", name: "Enrollment", createdAt: "2026-11-21T09:00:00Z" });
   return {
-    polls: 0,
+    projects, slices: Object.fromEntries(projects.slice(1).map((item) => [item.id, emptySlice()])), polls: 0,
     subscriptions: { writer: "openmerit", subscriptions: [
       { provider: "chatgpt", name: "ChatGPT", connected: false, connectedAt: null, problem: null, signIn: null },
     ] },
@@ -243,7 +251,7 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
     const denied = state.me.role === "admin" ? null : error(403, "Only an organization admin can do this.");
     let match: RegExpExecArray | null;
     let more = extras.get(name);
-    if (!more) extras.set(name, more = extra());
+    if (!more) extras.set(name, more = extra(name));
     // The member's subscription: a ChatGPT code counts as entered on the second check.
     const subs = more.subscriptions, sub = (provider: string) => subs.subscriptions.find((item) => item.provider === provider)!;
     const connect = (provider: string) => Object.assign(sub(provider), { connected: true, connectedAt: new Date().toISOString(), signIn: null });
@@ -273,7 +281,48 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       return json(200, subs);
     }
 
-    return route(state);
+    // The organization's projects, as the cloud app has them: the default can be renamed, not deleted, and a project with tasks is kept.
+    const { projects, slices } = more;
+    const projectView = (item: Extra["projects"][number]): Project => {
+      const held: Slice = item.id === "default" ? state! : slices[item.id]!;
+      return { ...item, tasks: held.tasks.length, endpoints: held.endpoints.length };
+    };
+    if (path === "/api/projects" && method === "GET") return json(200, projects.map(projectView));
+    if (path === "/api/projects" && method === "POST") {
+      if (denied) return denied;
+      const projectName = String(input?.name ?? "").trim();
+      if (!projectName) return error(400, "Name the project.");
+      if (projects.some((item) => item.name.toLowerCase() === projectName.toLowerCase())) return error(400, `This account already has a project named ${projectName}.`);
+      const created = { id: `prj_${projects.length}${Date.now().toString(36)}`, name: projectName, createdAt: new Date().toISOString() };
+      projects.push(created);
+      slices[created.id] = emptySlice();
+      return json(201, projectView(created));
+    }
+    if ((match = /^\/api\/projects\/([\w-]+)$/.exec(path)) && (method === "PUT" || method === "DELETE")) {
+      if (denied) return denied;
+      const found = projects.find((item) => item.id === match?.[1]);
+      if (!found) return error(404, "No such project in this account.");
+      if (method === "PUT") {
+        const projectName = String(input?.name ?? "").trim();
+        if (!projectName) return error(400, "Name the project.");
+        found.name = projectName;
+        return json(200, projectView(found));
+      }
+      if (found.id === "default") return error(409, "The default project cannot be deleted. Rename it instead.");
+      if (slices[found.id]!.tasks.length) return error(409, "This project has tasks. Delete them first.");
+      projects.splice(projects.indexOf(found), 1);
+      delete slices[found.id];
+      return json(200, { deleted: true });
+    }
+    // Every other route works in the project the header names: another project's state replaces the default's fields while it runs.
+    const projectId = request.headers.get("x-openmerit-project") || "default";
+    if (!projects.some((item) => item.id === projectId)) return error(404, "No such project in this account. Choose another project.");
+    if (projectId === "default") return route(state);
+    const slice = slices[projectId]!;
+    const scoped: State = { ...state, ...slice };
+    const response = await route(scoped);
+    for (const key of SLICE) Object.assign(slice, { [key]: scoped[key] });
+    return response;
 
     async function route(state: State): Promise<Response> {
     let match: RegExpExecArray | null;
