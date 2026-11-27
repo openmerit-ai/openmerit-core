@@ -2,9 +2,9 @@
 // lists by name are measured as challengers without an ECI.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { plannedSteps } from "../src/actors/job.ts";
-import { buildPool, type EndpointInfo } from "../../openmerit-core/src/job/pool.ts";
-import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
+import { plannedSteps } from "../../src/server/actors/job.ts";
+import { buildPool, type EndpointInfo } from "../../src/job/pool.ts";
+import type { TaskBundle } from "../../src/ranking/index.ts";
 import { bundle, catalogue } from "./helpers.ts";
 
 const openrouter: EndpointInfo = { id: "openrouter", kind: "openrouter", baseUrl: "https://openrouter.test/v1", allowedModels: "all", funding: "openmerit" };

@@ -5,19 +5,19 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { statSync } from "node:fs";
 import { isAbsolute } from "node:path";
-import { specOf, type EvalCommandSpec } from "../../openmerit-core/src/job/workflow.ts";
+import { specOf, type EvalCommandSpec } from "../job/workflow.ts";
 import type { AppDeps } from "./app.ts";
 import { LOCAL_USER, type AuthResult, type Identity } from "./auth.ts";
 import { confirmUrl } from "./config.ts";
 import { LEVELS, type Guardrails, type Level } from "./engine.ts";
-import { explain, type JobResult } from "../../openmerit-core/src/job/report.ts";
+import { explain, type JobResult } from "../job/report.ts";
 import { bundleProblem, redactBundle, rerunJob, runTask, settleOrphans } from "./start.ts";
 import type { ConfirmationView, EvalSpec, EvalView } from "./actors/account.ts";
-import { OPENROUTER } from "../../openmerit-core/src/job/pool.ts";
+import { OPENROUTER } from "../job/pool.ts";
 import type { Answers } from "./actors/job.ts";
-import type { Case, TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
+import type { Case, TaskBundle } from "../ranking/index.ts";
 import { isSubscriptionProvider } from "./subscriptions.ts";
-import type { EndpointKind } from "../../openmerit-core/src/ranking/index.ts";
+import type { EndpointKind } from "../ranking/index.ts";
 
 type Json = Record<string, unknown>;
 

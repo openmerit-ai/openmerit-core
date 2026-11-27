@@ -13,6 +13,7 @@ This repository holds:
 ```sh
 npm ci && npm run verify                           # website: typecheck, tests, memo and docs checks, build
 (cd openmerit-core && npm ci && npm run check)     # the npm package
+(cd openmerit-core && npm run test:server)         # the server it ships, hosted at openmerit.ai
 (cd playground && npm ci && npm run check)         # the customer playground
 ```
 

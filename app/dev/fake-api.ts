@@ -1,4 +1,4 @@
-// A local fake of the cloud app's /api/* (cloud/src/api.ts) for the preview server and
+// A local fake of the cloud app's /api/* (openmerit-core/src/server/api.ts) for the preview server and
 // tests, with the same paths, shapes, admin checks and validation messages. Guardrails
 // resolve with openmerit/engine's resolver, as in the cloud app. The bearer token picks a
 // scenario: preview-tonic (the fully populated Tonic Ultra account in tonic-ultra.ts),

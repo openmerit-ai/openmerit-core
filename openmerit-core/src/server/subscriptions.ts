@@ -10,7 +10,7 @@
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import type { SubscriptionsConfig } from "./config.ts";
-import type { Complete } from "../../openmerit-core/src/ranking/index.ts";
+import type { Complete } from "../ranking/index.ts";
 
 export type SubscriptionProvider = "chatgpt";
 export const SUBSCRIPTION_PROVIDERS: readonly SubscriptionProvider[] = ["chatgpt"];

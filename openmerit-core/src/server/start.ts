@@ -3,14 +3,14 @@
 // results, and the job's workflow starts.
 import { createHash, randomBytes } from "node:crypto";
 import { redact } from "./engine.ts";
-import { buildPool, provisionalPick, type Provisional } from "../../openmerit-core/src/job/pool.ts";
+import { buildPool, provisionalPick, type Provisional } from "../job/pool.ts";
 import { modelKeyRefusal, services } from "./services.ts";
-import { writeCases, type TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
+import { writeCases, type TaskBundle } from "../ranking/index.ts";
 import type { Guardrails } from "./engine.ts";
 import type { AppClient } from "./registry.ts";
-import { estimateJob, redactBundle, taskIdFor, type JobEstimate, type JobTrigger } from "../../openmerit-core/src/job/workflow.ts";
-import { callCost } from "../../openmerit-core/src/ranking/index.ts";
-import { catalogueIndex, DEFAULT_REPEATS } from "../../openmerit-core/src/engine/index.ts";
+import { estimateJob, redactBundle, taskIdFor, type JobEstimate, type JobTrigger } from "../job/workflow.ts";
+import { callCost } from "../ranking/index.ts";
+import { catalogueIndex, DEFAULT_REPEATS } from "../engine/index.ts";
 
 export { redactBundle, taskIdFor };
 

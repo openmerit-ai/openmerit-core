@@ -9,13 +9,13 @@
 // memory; they are never in step results or actor state, which are on disk.
 import { workflow, type WorkflowStepContext } from "@rivet-dev/workflows";
 import { queue } from "rivetkit";
-import { forgetJob, jobView, newJobState, runTaskJob, type AnswersMessage, type JobHost, type JobInput, type JobState, type JobView } from "../../../openmerit-core/src/job/workflow.ts";
+import { forgetJob, jobView, newJobState, runTaskJob, type AnswersMessage, type JobHost, type JobInput, type JobState, type JobView } from "../../job/workflow.ts";
 import { capture } from "../analytics.ts";
 import { services } from "../services.ts";
 import { PROVIDER_NAMES, subscriptionWriter } from "../subscriptions.ts";
 import type { AppClient } from "../registry.ts";
 
-export { applyAnswers, caseKey, labelQuestions, plannedSteps, type Answer, type Answers, type JobInput, type JobState, type JobStatus, type JobTrigger, type JobView, type LiveProgress, type Question } from "../../../openmerit-core/src/job/workflow.ts";
+export { applyAnswers, caseKey, labelQuestions, plannedSteps, type Answer, type Answers, type JobInput, type JobState, type JobStatus, type JobTrigger, type JobView, type LiveProgress, type Question } from "../../job/workflow.ts";
 
 /** The queue openmerit_answer and the app send answers on. */
 const queues = { answers: queue<AnswersMessage>() };

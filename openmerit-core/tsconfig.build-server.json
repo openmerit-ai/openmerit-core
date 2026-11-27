@@ -1,0 +1,8 @@
+{
+  // npm build, second pass: the server (src/server) as JavaScript without declarations. It is a program, not a
+  // library, and its Rivet registry's types cannot be named outside rivetkit.
+  "extends": "./tsconfig.build.json",
+  "compilerOptions": { "declaration": false },
+  "include": ["src/server/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}

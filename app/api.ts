@@ -1,4 +1,4 @@
-// The cloud app's /api/* (cloud/src/api.ts), which the app calls from the browser with
+// The cloud app's /api/* (openmerit-core/src/server/api.ts), which the app calls from the browser with
 // the Clerk session token. These types mirror what it returns; app/dev/fake-api.ts
 // serves the same shapes for local development and tests. Guardrail names and kinds
 // come from openmerit/engine, which the cloud app also resolves guardrails with.
@@ -60,7 +60,7 @@ export interface Task {
   decision?: Decision | null;
 }
 
-// A task's eval (cloud/src/actors/account.ts): what the judge checks (spec) and the cases. The cloud is
+// A task's eval (openmerit-core/src/server/actors/account.ts): what the judge checks (spec) and the cases. The cloud is
 // its source of truth. The accepted eval runs unchanged; its version counts acceptances. A draft is the
 // eval under review, edited in place: reopened because the coding agent sent the task with a different
 // prompt, tools or output (task_changed, with the new output shape), or by a person (revise). While a
@@ -111,7 +111,7 @@ export interface MeasuredModel {
   note: string;
 }
 
-// What fixes one of a result's notices, which it names by its exact text (cloud/src/report.ts).
+// What fixes one of a result's notices, which it names by its exact text (openmerit-core/src/server/report.ts).
 export type Fix =
   | { kind: "raise_budget"; notice: string; budgetUsd: number }
   | { kind: "rerun"; notice: string }
@@ -174,7 +174,7 @@ export interface JobView {
   createdAt: string;
   report: null;
   // While a measure step runs: the candidate under test, its passes so far against the model in
-  // use today, and its pass rate after each case (cloud/src/actors/job.ts). Null between steps and
+  // use today, and its pass rate after each case (openmerit-core/src/server/actors/job.ts). Null between steps and
   // absent from jobs that started before it; pages fall back to progress then.
   live?: LiveProgress | null;
 }

@@ -1,6 +1,6 @@
 # Amp orbs
 
-`.agents/setup` installs Node.js 22.19.0 (the CI version) into `~/.local/bin` and runs `npm ci` at the repository root (the website), in `openmerit-core/` (the `openmerit` npm package), in `playground/` and in `cloud/` (the cloud app behind openmerit.ai/mcp), each with its own lockfile; `.agents/resume` checks they are still installed. Rerun `.agents/setup` after changing a lockfile. The project declares no orb services.
+`.agents/setup` installs Node.js 22.19.0 (the CI version) into `~/.local/bin` and runs `npm ci` at the repository root (the website), in `openmerit-core/` (the `openmerit` npm package), in `playground/` and in `cloud/` (the hosted deploy of the server in `openmerit-core/src/server`, behind openmerit.ai/mcp), each with its own lockfile; `.agents/resume` checks they are still installed. Rerun `.agents/setup` after changing a lockfile. The project declares no orb services.
 
 Setup also installs Docker's buildx plugin, which the cloud app's deploy uses to build its image. The Docker daemon cannot be part of the snapshot, so start it before a cloud deploy with `amp orb service start docker --command 'sudo -n dockerd --group user'` (the `--group` gives the orb user the socket) and check it with `docker info`; stop it afterwards with `amp orb service stop docker`.
 
@@ -17,8 +17,9 @@ Every check below runs against local fakes: no secret, no paid model call, no Cl
 | Change in | While iterating | Before you finish |
 |---|---|---|
 | `openmerit-core/` | `npm run typecheck` (7 s), `npm run test:fast` (25 s) | `npm run check` (100 s), `npm run build` (6 s) |
+| the server, `openmerit-core/src/server/` | `npm run typecheck` in `openmerit-core/` (7 s) | `npm run test:server` in `openmerit-core/` (6 min: tests on a local Rivet engine with fake sign-in, Stripe and models) |
 | `playground/` | | `npm run check` (12 s) |
-| `cloud/` | `npm run typecheck` (5 s) | `npm run check` (75 s: tests on a local Rivet engine with fake sign-in, Stripe and models) |
+| `cloud/` (the hosted deploy) | | `npm run check` (5 s) |
 | website, `docs/`, `scripts/`, `demo/` | `npm run check:docs` (2 s) | `npm run verify` (15 s); `npm run check:worker-types` (18 s) after a Wrangler configuration change |
 | packaging, the CLI or the daemon in `openmerit-core/` | | also `node scripts/smoke-packed.ts` (60 s): packs and installs the tarball globally, then runs connect, setup, scout, history and MCP against a local fake |
 | several of these | | `npm run check:all` at the root runs every CI job (3.5 min) |
@@ -53,6 +54,6 @@ When changing user-visible product behavior, update the relevant Markdown guides
 
 `scripts/memo.config.ts` owns protected memo metadata; its article and Markdown must never enter public assets.
 
-Run `npm run check:docs` after documentation or policy/memo build changes. It validates Markdown links, section destinations, live-page links and memo privacy. Website changes also require the applicable checks in `npm run verify`; `openmerit-core/`, `playground/` and `cloud/` changes require `npm run check` in that directory.
+Run `npm run check:docs` after documentation or policy/memo build changes. It validates Markdown links, section destinations, live-page links and memo privacy. Website changes also require the applicable checks in `npm run verify`; `openmerit-core/`, `playground/` and `cloud/` changes require `npm run check` in that directory, and server changes (`openmerit-core/src/server/`) also `npm run test:server` in `openmerit-core/`.
 
 Cloudflare deployment runs these builds and checks before publishing. Only memo source edits are rendered as website pages. A successful local build or GitHub CI run alone does not publish them. Follow `docs/site-deployment.md` and `docs/site-design.md` for the existing workflow.

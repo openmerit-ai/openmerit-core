@@ -7,17 +7,17 @@ import { db } from "rivetkit/db";
 import type { PlanUpdate } from "../billing.ts";
 import { GUARDRAIL_KINDS, LEVELS, resolveGuardrails, settledUsd, type Funding, type GuardrailKey, type Guardrails, type Level, type ReserveResult, type ResolvedGuardrails, type Settlement } from "../engine.ts";
 import { decryptKey, encryptKey, endpointUrlProblem } from "../keys.ts";
-import { OPENROUTER, type EndpointInfo } from "../../../openmerit-core/src/job/pool.ts";
-import type { Case, EndpointConfig, EndpointKind, TaskBundle } from "../../../openmerit-core/src/ranking/index.ts";
-import type { EvalCommandSpec } from "../../../openmerit-core/src/job/workflow.ts";
+import { OPENROUTER, type EndpointInfo } from "../../job/pool.ts";
+import type { Case, EndpointConfig, EndpointKind, TaskBundle } from "../../ranking/index.ts";
+import type { EvalCommandSpec } from "../../job/workflow.ts";
 import type { Registry } from "../registry.ts";
 import { services } from "../services.ts";
 
 type Row = Record<string, unknown>;
 
 // The eval and budget names the task job (openmerit-core/src/job/workflow.ts) shares with this actor.
-export { JOB_BUDGET, type EvalBar, type EvalSource, type EvalSpec } from "../../../openmerit-core/src/job/workflow.ts";
-import { JOB_BUDGET, type EvalBar, type EvalSource, type EvalSpec } from "../../../openmerit-core/src/job/workflow.ts";
+export { JOB_BUDGET, type EvalBar, type EvalSource, type EvalSpec } from "../../job/workflow.ts";
+import { JOB_BUDGET, type EvalBar, type EvalSource, type EvalSpec } from "../../job/workflow.ts";
 
 /** Bumped when the schema changes in a way old accounts cannot keep: their tables are dropped. */
 const SCHEMA_VERSION = 2;

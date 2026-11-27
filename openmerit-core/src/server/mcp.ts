@@ -6,13 +6,13 @@ import { capture } from "./analytics.ts";
 import { NO_ORGANIZATION, type Auth, type AuthResult, type Identity } from "./auth.ts";
 import { confirmUrl, type Config } from "./config.ts";
 import type { Answers, JobView } from "./actors/job.ts";
-import { explain, nearMissLine, paybackLine, reasonFor, type Fix, type JobResult } from "../../openmerit-core/src/job/report.ts";
+import { explain, nearMissLine, paybackLine, reasonFor, type Fix, type JobResult } from "../job/report.ts";
 import type { AppClient } from "./registry.ts";
-import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
+import type { TaskBundle } from "../ranking/index.ts";
 import { bundleProblem, DEFAULT_ENVIRONMENT, redactBundle, rerunJob, runTask, startJob, taskIdFor } from "./start.ts";
 import type { Decision } from "./actors/account.ts";
 import { evalCommandSpec, heldReply, HOSTED_EVAL_COMMAND } from "./api.ts";
-import { estimateLine } from "../../openmerit-core/src/job/workflow.ts";
+import { estimateLine } from "../job/workflow.ts";
 
 export const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const VERSION = "0.1.0";

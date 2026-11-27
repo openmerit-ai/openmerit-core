@@ -1,9 +1,8 @@
 # Only the cloud app's image is built from this repository (cloud/Dockerfile): send it only what it copies.
 *
-!cloud/package.json
-!cloud/package-lock.json
-!cloud/src
 !openmerit-core/package.json
+!openmerit-core/package-lock.json
+!openmerit-core/src/server
 !openmerit-core/src/engine
 !openmerit-core/src/ranking
 !openmerit-core/src/eval/proxy.ts

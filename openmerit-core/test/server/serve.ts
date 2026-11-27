@@ -3,11 +3,11 @@
 // job's start fails after the account recorded the job), and a broken agent eval with TEST_AGENT_EVAL=broken. The tests start it as a child process
 // so they can SIGKILL it. TEST_STRIPE_API_BASE swaps the fake billing for the real Stripe client
 // pointed at a local fake Stripe. It prints `ready <url>` once it answers.
-import { startApp } from "../src/app.ts";
-import { TestAuth } from "../src/auth.ts";
-import { FakeBilling, StripeBilling } from "../src/billing.ts";
-import { loadConfig } from "../src/config.ts";
-import { bundledCatalogue } from "../src/services.ts";
+import { startApp } from "../../src/server/app.ts";
+import { TestAuth } from "../../src/server/auth.ts";
+import { FakeBilling, StripeBilling } from "../../src/server/billing.ts";
+import { loadConfig } from "../../src/server/config.ts";
+import { bundledCatalogue } from "../../src/server/services.ts";
 
 const env = process.env;
 process.env.RIVETKIT_STORAGE_PATH = env.TEST_STORAGE!;

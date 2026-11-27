@@ -1,5 +1,5 @@
-# The OpenMerit cloud app as a Rivet Cloud actor node. Build from the repository root, since the app
-# imports openmerit-core's engine and ranking from source:
+# The OpenMerit cloud app as a Rivet Cloud actor node. The server is openmerit-core/src/server, run from
+# source with the openmerit-core modules it imports. Build from the repository root:
 #   docker build -f cloud/Dockerfile .
 FROM node:22.19.0-bookworm-slim
 # The harness's read-only grep and find tools run ripgrep and fd. Debian's fd (8.6) lacks --no-require-git, which Pi's
@@ -21,13 +21,12 @@ RUN mkdir -p /opt/pi-agent/bin \
 	&& printf '#!/bin/sh\nexec env -i PATH=/usr/bin:/bin /usr/local/bin/fd "$@"\n' > /opt/pi-agent/bin/fd \
 	&& chmod 755 /opt/pi-agent/bin/rg /opt/pi-agent/bin/fd
 WORKDIR /app
-COPY cloud/package.json cloud/package-lock.json cloud/
-# The engine binary is only for tests and local development: a node connects to the cluster's engine.
-RUN cd cloud && npm ci --omit=dev --ignore-scripts \
+# The server's packages are openmerit-core's.
+COPY openmerit-core/package.json openmerit-core/package-lock.json openmerit-core/
+# The engine binary is only for tests, local development and self-hosting: a node connects to the cluster's engine.
+RUN cd openmerit-core && npm ci --omit=dev --ignore-scripts \
 	&& rm -rf node_modules/@rivetkit/engine-cli* node_modules/@rivet-dev/agentos-* node_modules/@rivet-dev/agent-os-* node_modules/@agentos-software \
 	&& npm cache clean --force
-# openmerit-core's package.json says its .ts files are ES modules.
-COPY openmerit-core/package.json openmerit-core/
 COPY openmerit-core/src/engine openmerit-core/src/engine
 COPY openmerit-core/src/ranking openmerit-core/src/ranking
 COPY openmerit-core/src/eval/proxy.ts openmerit-core/src/eval/loop.ts openmerit-core/src/eval/generated.ts openmerit-core/src/eval/runner.ts openmerit-core/src/eval/
@@ -39,13 +38,11 @@ COPY openmerit-core/src/review openmerit-core/src/review
 COPY openmerit-core/src/job openmerit-core/src/job
 COPY openmerit-core/src/harness openmerit-core/src/harness
 COPY openmerit-core/src/state/config.ts openmerit-core/src/state/paths.ts openmerit-core/src/state/
-# openmerit-core's sources import their packages (ajv) from the nearest node_modules above them.
-RUN ln -s cloud/node_modules node_modules
 COPY openmerit-core/data/catalogue.json openmerit-core/data/eci-estimates.csv openmerit-core/data/
-COPY cloud/src cloud/src
+COPY openmerit-core/src/server openmerit-core/src/server
 # PI_OFFLINE: a missing rg or fd fails the review's search instead of Pi downloading one at run time.
 # PI_CODING_AGENT_DIR must be set before the app starts: Pi fixes its bin directory when it loads.
 ENV NODE_ENV=production RIVET_LOG_LEVEL=warn PI_OFFLINE=1 PI_SKIP_VERSION_CHECK=1 PI_CODING_AGENT_DIR=/opt/pi-agent
-WORKDIR /app/cloud
+WORKDIR /app/openmerit-core/src/server
 USER node
-CMD ["node", "src/server.ts"]
+CMD ["node", "server.ts"]

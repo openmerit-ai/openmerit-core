@@ -7,10 +7,10 @@ import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { signStripePayload } from "../src/billing.ts";
-import type { Catalogue } from "../src/engine.ts";
+import { signStripePayload } from "../../src/server/billing.ts";
+import type { Catalogue } from "../../src/server/engine.ts";
 
-export const catalogue = JSON.parse(readFileSync(new URL("../../openmerit-core/data/catalogue.json", import.meta.url), "utf8")) as Catalogue;
+export const catalogue = JSON.parse(readFileSync(new URL("../../data/catalogue.json", import.meta.url), "utf8")) as Catalogue;
 
 export const TICKETS: Record<string, string> = {
   "My card was charged twice": "billing", "The app crashes on login": "technical", "How do I change my plan?": "billing",

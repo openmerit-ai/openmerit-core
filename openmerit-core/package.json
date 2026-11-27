@@ -55,16 +55,19 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json && node scripts/rewrite-declaration-imports.ts && chmod +x dist/cli.js",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && tsc -p tsconfig.build-server.json && node scripts/rewrite-declaration-imports.ts && chmod +x dist/cli.js",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "OPENMERIT_TELEMETRY=0 node --test --test-concurrency=3 \"src/**/*.test.ts\" \"test/**/*.test.ts\"",
-    "test:fast": "OPENMERIT_TELEMETRY=0 node --test \"src/**/*.test.ts\" \"test/**/!(daemon).test.ts\"",
+    "test": "OPENMERIT_TELEMETRY=0 node --test --test-concurrency=3 \"src/**/*.test.ts\" \"test/*.test.ts\"",
+    "test:fast": "OPENMERIT_TELEMETRY=0 node --test \"src/**/*.test.ts\" \"test/!(daemon).test.ts\"",
+    "test:server": "node --test --test-concurrency=1 \"test/server/*.test.ts\"",
     "check": "npm run typecheck && npm test",
     "prepack": "npm run build",
     "openmerit": "node src/cli.ts",
+    "server": "node src/server/server.ts",
     "build:catalogue": "node scripts/build-catalogue.ts"
   },
   "dependencies": {
+    "@clerk/backend": "3.26.1",
     "@earendil-works/pi-agent-core": "1.5.2",
     "@earendil-works/pi-ai": "1.5.2",
     "@earendil-works/pi-coding-agent": "1.5.2",
