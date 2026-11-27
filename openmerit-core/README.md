@@ -231,6 +231,16 @@ Sending never changes a command's output or exit code. It gives up after about 1
 - Coding agents and scripts sign in with the token in `~/.openmerit/server/token`, sent as `Authorization: Bearer <token>`. The web app's Runs page shows the `claude mcp add` command with it. A critical request sent with the token, such as a higher budget, grades or a decision on a switch, waits until you confirm it in the web app: the token cannot confirm.
 - `openmerit server status` shows whether it runs; `openmerit server stop` stops it. Its log is `~/.openmerit/server/server.log`.
 
+## Client commands
+
+The CLI is also a client of an OpenMerit server, with one command for each of the server's MCP tools, so a script or a coding agent without MCP gets the same tools and fields.
+
+- `openmerit login` signs in to openmerit.ai in your browser (OAuth with PKCE, on a loopback port). When the browser runs on another machine, paste the address it ends on. `openmerit login --server <url>` signs in to a self-hosted server with its token file (`--token-file`, default `~/.openmerit/server/token`). The sign-in is kept in `~/.openmerit/login.json` (mode 0600), and the access token refreshes on its own. `openmerit logout` forgets it.
+- Without a login, the commands use the server `openmerit server start` runs on this machine. `OPENMERIT_SERVER` with `OPENMERIT_TOKEN` overrides both, for scripts and CI.
+- `openmerit whoami [--json]` names the server, organization and role.
+- `openmerit recommend`, `result`, `answer`, `confirmation`, `eval-command`, `tasks`, `eval` and `retire` call `openmerit_recommend` and the rest. Each argument is a flag (`job_id` is `--job-id`); objects and arrays take JSON, `@file` or `-` for stdin, and `--input` takes every argument as one JSON object. They print the tool's text, or with `--json` its structured result. `openmerit <command> --help` lists the arguments. `openmerit eval <dir>` without `--task-id` still runs an eval Scout wrote.
+- A critical request, such as a higher budget, grades or a decision on a switch, answers `needs_confirmation` with a link, as it does over MCP: you confirm it in the web app, never with a CLI flag.
+
 ## Uninstall
 
 ```sh

@@ -6,7 +6,8 @@ import { parseArgs } from "node:util";
 
 const HELP = `OpenMerit: find cheaper models that perform at least as well as the ones your code uses today,
 measured with an eval OpenMerit writes from a review of your code, and your own evals when you have them.
-Runs locally; no OpenMerit account.
+Scout runs locally with no account; the other commands are clients of an OpenMerit server, openmerit.ai
+or one you run with \`openmerit server start\`.
 
 Usage:
   openmerit setup                 Connect OpenMerit Harness (as openmerit connect does), register the MCP
@@ -28,6 +29,23 @@ Usage:
                                   + 3 and + 11), and print a sign-in link for its web app.
   openmerit server [status|stop|link]
                                   Whether it runs, stop it, or a new one-time sign-in link for its web app.
+  openmerit login [--server <url>] [--token-file <path>]
+                                  Sign in to openmerit.ai (default) or a self-hosted server; the commands
+                                  below then use it. Without a login they use the server this machine runs.
+  openmerit logout                Forget that sign-in.
+  openmerit whoami [--json]       The server, organization and role the CLI acts as.
+
+Commands for the server's MCP tools (each takes the tool's arguments as flags, --input <json|@file|->,
+and --json; \`openmerit <command> --help\` lists them):
+  openmerit recommend             Start measuring cheaper models for a task (openmerit_recommend)
+  openmerit result --job-id <id>  A job's state, questions or result (openmerit_result)
+  openmerit answer                Send the user's answers to a job's questions (openmerit_answer)
+  openmerit confirmation          Whether the user confirmed a held request (openmerit_confirmation)
+  openmerit eval-command          Measure a task with the repository's eval, self-hosted (openmerit_eval_command)
+  openmerit tasks                 The account's tasks (openmerit_tasks)
+  openmerit eval --task-id <id>   A task's accepted eval (openmerit_eval)
+  openmerit retire --task-id <id> Stop re-running a task (openmerit_retire)
+
   openmerit mcp                   The local MCP server (stdio), for Claude Code, Codex and other clients.
   openmerit daemon [status|stop]  The background process that runs Scout (started by scout and mcp when needed).
                                   Without an argument it runs in the foreground.
@@ -52,12 +70,15 @@ Setup options (for scripts; interactive setup asks instead):
 const started = Date.now();
 const [command = "help", ...rest] = process.argv.slice(2);
 const log = (line: string) => process.stderr.write(`${line}\n`);
-const isHelp = command === "help" || command === "--help" || command === "-h" || rest.includes("--help") || rest.includes("-h");
+/** The commands for the server's MCP tools (tool-cli.ts), which print their own help. test/server/cli.test.ts checks them against the tools. */
+const TOOL_COMMAND_NAMES = ["recommend", "result", "answer", "confirmation", "eval-command", "tasks", "eval", "retire"];
+const ownHelp = TOOL_COMMAND_NAMES.includes(command);
+const isHelp = command === "help" || command === "--help" || command === "-h" || (!ownHelp && (rest.includes("--help") || rest.includes("-h")));
 const isVersion = command === "--version" || command === "-v" || command === "version";
 // The command's name for telemetry, never its arguments. `mcp` reports each tool call instead, and the
 // daemon that scout and mcp start in the background is not a command someone ran.
 const tracked = isHelp ? "help" : isVersion ? "version" : command === "mcp" || (command === "daemon" && !rest[0]) ? null
-  : ["setup", "connect", "scout", "history", "daemon", "eval", "server"].includes(command) ? command : "unknown";
+  : ["setup", "connect", "scout", "history", "daemon", "eval", "server", "login", "logout", "whoami", ...TOOL_COMMAND_NAMES].includes(command) ? command : "unknown";
 let handedOver = false;
 
 async function update(json: boolean): Promise<number | null> {
@@ -233,12 +254,29 @@ async function generatedEval(args: string[]) {
   else process.stdout.write(`${result}\n`);
 }
 
+async function loginCommand(args: string[]) {
+  const { values } = parseArgs({ args, options: { server: { type: "string" }, "token-file": { type: "string" }, "no-browser": { type: "boolean" } } });
+  const { login } = await import("./client.ts");
+  const signedIn = await login({ log, ...(values.server ? { server: values.server } : {}), ...(values["token-file"] ? { tokenFile: values["token-file"] } : {}), ...(values["no-browser"] ? { open: () => {} } : {}) });
+  log(`Signed in to ${signedIn.server}${signedIn.mode === "self-hosted" ? " (self-hosted)" : ""}. \`openmerit whoami\` shows the organization.`);
+}
+
 async function main() {
   if (isHelp) return void process.stdout.write(`${HELP}\n`);
   if (isVersion) return void process.stdout.write(`${(await import("./update.ts")).packageVersion()}\n`);
   if (command === "mcp") return (await import("./mcp.ts")).serveMcp();
   if (command === "daemon") return daemon(rest);
-  if (command === "eval") return generatedEval(rest);
+  // \`openmerit eval <dir>\` runs an eval Scout wrote; with --task-id or --input it is the openmerit_eval tool.
+  if (command === "eval" && !rest.some(arg => /^--(task-id|input|help)\b|^-h$/.test(arg))) return generatedEval(rest);
+  if (command === "login") return loginCommand(rest);
+  if (command === "logout") {
+    const { logout } = await import("./client.ts");
+    const was = logout();
+    return void log(was ? `Signed out of ${was.server}.` : "The CLI was not signed in.");
+  }
+  if (command === "whoami") return (await import("./tool-cli.ts")).whoami(rest);
+  const tools = await import("./tool-cli.ts");
+  if (tools.TOOL_COMMANDS.has(command)) return tools.toolCommand(command, rest, log);
   if (command === "server") return (await import("./server-cli.ts")).serverCommand(rest, log);
   if (!["setup", "connect", "scout", "history"].includes(command)) throw new Error(`Unknown command "${command}". Run \`openmerit help\`.`);
   const took = await update(rest.includes("--json"));
