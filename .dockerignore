@@ -12,9 +12,6 @@
 !openmerit-core/src/catalogue
 !openmerit-core/src/connectors/agent-bundle.ts
 !openmerit-core/src/connectors/eval-command.ts
-!openmerit-core/src/scout/scan.ts
-!openmerit-core/src/scout/candidates.ts
-!openmerit-core/src/review
 !openmerit-core/src/job
 !openmerit-core/src/harness
 !openmerit-core/src/state/config.ts
