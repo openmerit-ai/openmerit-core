@@ -15,7 +15,7 @@ export function liveText(job: JobView, agent?: string): Record<string, string> {
   const live = job.live;
   const status = job.status === "running"
     ? live?.minutesLeft ? `Evaluating · about ${live.minutesLeft} min left` : "Evaluating"
-    : job.status === "queued" ? "Queued" : job.status === "needs_input" ? (agent ? `Needs input · ${agent}` : "Needs input") : job.status;
+    : job.status === "queued" ? "Queued" : job.status === "needs_input" && job.phase === "grading" ? "Waiting for your grades" : job.status === "needs_input" ? (agent ? `Needs input · ${agent}` : "Needs input") : job.status;
   return {
     status,
     cases: live ? `${live.done} of ${live.total}` : job.progress.planned ? `${job.progress.measured} of about ${job.progress.planned}` : "–",

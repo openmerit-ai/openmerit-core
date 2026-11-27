@@ -11,7 +11,6 @@ import { planView } from "../views/plan.ts";
 import { runView } from "../views/run.ts";
 import { runsView } from "../views/runs.ts";
 import { tasksView } from "../views/tasks.ts";
-import { evalsView } from "../views/evals.ts";
 import type { EvalDraft, EvalView, GitHubAccess, Repo, TaskDetail } from "../api.ts";
 
 // The pages render what the cloud app returns, as served by the local fake of its /api/*.
@@ -34,7 +33,7 @@ test("names from the cloud app are shown as text, never as markup", async () => 
   const tasks = (await get<Task[]>("/api/tasks")).map((task) => ({ ...task, name: hostile, environment: hostile }));
   const report = { ...await get<Report>("/api/runs/k7m2q9"), task: hostile, notices: [hostile] };
   const job = { ...await get<JobView>("/api/runs/z1c7m4"), error: hostile };
-  for (const html of [tasksView.render({ tasks }, page({ ...me, account: { ...me.account, name: hostile } })), runView.render(report, page(me)), runView.render(job, page(me))]) {
+  for (const html of [tasksView.render({ kind: "list", tasks, drafts: [], waiting: {} }, page({ ...me, account: { ...me.account, name: hostile } })), runView.render(report, page(me)), runView.render(job, page(me))]) {
     assert.doesNotMatch(html.__html, /<img/);
     assert.match(html.__html, /&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;/);
   }
@@ -86,18 +85,34 @@ test("a run shows its saved report, or the job's live state until it has one", a
   assert.match(text(runView.render(await get<JobView>("/api/runs/z1c7m4"), page(me))), /Coding reviewer: the run did not finish .*no known answers/);
 });
 
-test("a run in the grading loop shows each sampled answer to grade, and a report says what the grades decided", async () => {
+// Loads a view as the app does, from a fake API of its own.
+const loaded = async <D>(view: { load: (ctx: never) => Promise<D> }, me: Account, params: string, call = createFakeApi()): Promise<D> => {
+  const get = async (path: string): Promise<unknown> => {
+    const response = await call(new Request(`https://openmerit.ai${path}`, { headers: { authorization: "Bearer preview-populated" } }));
+    if (!response.ok) throw new Error(`${path}: ${response.status}`);
+    return await response.json();
+  };
+  return await view.load({ ...page(me, params), api: { get } } as never);
+};
+
+test("a run in the grading loop asks for grades on its task's page, blind to the eval's own grade, and a report says what the grades decided", async () => {
   const me = await account();
   const job = await get<JobView>("/api/runs/g4r9d2");
-  const shown = runView.render(job, page(me)).__html;
+  // The run page says it waits and links to the task; the form is on the task's page.
+  const run = text(runView.render(job, page(me)));
+  assert.match(run, /Waiting for your grades 2 answers to grade\. Grade them on Coding reviewer or in your coding agent/);
+  assert.doesNotMatch(runView.render(job, page(me)).__html, /<fieldset class="card grade"/);
+  const task = await loaded(tasksView, me, "task=coding-reviewer");
+  const shown = tasksView.render(task, page(me, "task=coding-reviewer")).__html;
   assert.equal(shown.match(/<fieldset class="card grade"/g)?.length, 2);
-  for (const question of job.questions) assert.match(shown, new RegExp(`name="${question.id}" value="good"[^>]*> Looks good`));
-  const read = text(runView.render(job, page(me)));
-  assert.match(read, /Grade its answers Grade them here or in your coding agent, which shows you the same 2 answers/);
-  assert.match(read, /Coding reviewer, answer 1 of 2: does it look right\? anthropic\/claude-sonnet-5\.5 \(your current model\), typical case written-1/);
-  assert.match(read, /OpenMerit: passed/);
-  assert.match(read, /OpenMerit: failed G3: The invalid_code finding for R5O\.9 has no activity_id\./);
+  for (const question of job.questions) assert.match(shown, new RegExp(`name="${question.id}" value="good"[^>]*> Right answer[^]*value="bad"[^>]*> Wrong answer`));
+  const read = text(tasksView.render(task, page(me, "task=coding-reviewer")));
+  assert.match(read, /Coding reviewer The code uses[^]* Grade answers Retire[^]*Grade Its Answers Is each answer right for your product\?[^]*g4r9d2 claude-code 18 Nov 2026 – Waiting for your grades/);
+  assert.match(read, /Coding reviewer, answer 1 of 2: is this answer right\? anthropic\/claude-sonnet-5\.5 \(your current model\), typical case written-1/);
+  // Blind: neither the eval's verdict nor its reason is shown.
+  assert.doesNotMatch(read, /OpenMerit's grade|OpenMerit: (passed|failed)|has no activity_id/);
   assert.match(read, /Send 2 grades/);
+  assert.doesNotMatch(shown, /data-action="run"/, "a run waiting for grades is not started again");
   // The fake applies grades as the cloud app does: once every answer has one, the run measures again.
   const graded = await fake(new Request("https://openmerit.ai/api/runs/g4r9d2/answers", { method: "POST", headers: { authorization: "Bearer preview-populated", "content-type": "application/json" }, body: JSON.stringify({ answers: Object.fromEntries(job.questions.map(question => [question.id, "bad: placeholder code"])) }) }));
   assert.deepEqual([graded.status, ((await graded.json()) as JobView).status], [200, "running"]);
@@ -105,7 +120,7 @@ test("a run in the grading loop shows each sampled answer to grade, and a report
   const base = await get<Report>("/api/runs/k7m2q9");
   const summary = "Your current model fails 1 of your checks (G3); the cheapest model that passes them is anthropic/claude-haiku-5-5, at $0.40 more per 1,000 calls.";
   const criteria = text(runView.render({ ...base, grading: { rounds: 2, accepted: true, bar: "criteria", failedChecks: ["G3"], summary, barSet: { round: 1, cases: ["written-4"] } } }, page(me)));
-  assert.match(criteria, /You accepted the eval after 2 rounds of grading\. In round 1 you graded the answer of the model in use now to written-4 as not looking right, so every model was measured against the eval's checks/);
+  assert.match(criteria, /You accepted the eval after 2 rounds of grading\. In round 1 you graded the answer of the model in use now to written-4 as wrong, so every model was measured against the eval's checks/);
   assert.ok(criteria.includes(summary), "the pick card says what the current model misses");
   assert.doesNotMatch(text(runView.render(base, page(me))), /Your Grades/, "a run nobody graded has no grades section");
 });
@@ -199,16 +214,18 @@ test("a result shows the decision the coding agent sent back, or that it waits f
   assert.match(waiting, /asks you before applying it, and sends your answer back here/);
   // Tasks: an approved task runs the pick now, with the decision; a pick without one waits for it.
   // A fresh fake: earlier tests start runs in the shared one.
-  const listed = text(tasksView.render({ tasks: await (await createFakeApi()(new Request("https://openmerit.ai/api/tasks", { headers: { authorization: "Bearer preview-populated" } }))).json() as Task[] }, page(me)));
+  // Reply drafter's pick, as if its eval were not waiting for review.
+  const decisions = (await (await createFakeApi()(new Request("https://openmerit.ai/api/tasks", { headers: { authorization: "Bearer preview-populated" } }))).json() as Task[]).map((task) => (task.id === "reply-drafter" ? { ...task, state: "watching" as const, watching: true } : task));
+  const listed = text(tasksView.render({ kind: "list", tasks: decisions, drafts: [], waiting: {} }, page(me, "show=all")));
   assert.match(listed, /Ticket router[^]*?claude-haiku-5-5[^]*?Switched to claude-haiku-5-5 saves about \$234 a month Approved in the coding agent by Amira Haddad[^]*?Bill and claim matcher/);
-  assert.match(listed, /Reply drafter[^]*?Switch to claude-haiku-5-5[^]*?Waiting for a decision in the coding agent/);
+  assert.match(listed, /Reply drafter[^]*?Recommendation Switch to claude-haiku-5-5[^]*?Waiting for a decision in the coding agent/);
   // Tinted rows: Tasks marks only a model that changed; Runs marks every run that found a cheaper one,
   // including a pick still waiting and an older one declined since.
   const fresh = createFakeApi();
   const load = async <T>(path: string): Promise<T> => await (await fresh(new Request(`https://openmerit.ai${path}`, { headers: { authorization: "Bearer preview-populated" } }))).json() as T;
   const tinted = (html: { __html: string }) => [...html.__html.matchAll(/<tr class="switch">\s*<td><a href="[^"]*">([^<]+)<\/a>/g)].map((row) => row[1]);
   const freshTasks = await load<Task[]>("/api/tasks");
-  assert.deepEqual(tinted(tasksView.render({ tasks: freshTasks }, page(me))), ["Ticket router"]);
+  assert.deepEqual(tinted(tasksView.render({ kind: "list", tasks: freshTasks, drafts: [], waiting: {} }, page(me, "show=all"))), ["Ticket router"]);
   const runRows = runsView.render({ runs: await load<Run[]>("/api/runs"), tasks: freshTasks, jobs: [] }, page(me)).__html;
   assert.deepEqual([...runRows.matchAll(/<tr class="switch"><td><a href="\/r\/(\w+)\/">/g)].map((row) => row[1]).sort(), ["b2v5h3", "k7m2q9", "m5d8q2"]);
   const settings = projectView.render({ project: claims, endpoints: await get<Endpoint[]>("/api/endpoints"), repos: [], github: noGithub }, page(me)).__html;
@@ -304,7 +321,7 @@ test("a task's Eval tab shows the accepted eval read-only; a revision pauses run
   };
   const render = async (id: string, tab = "eval") => {
     const [detail, evaluation] = [(await send<TaskDetail>(`/api/tasks/${id}`)).body, (await send<EvalView>(`/api/tasks/${id}/eval`)).body];
-    return { detail, evaluation, html: tasksView.render({ kind: "task", detail, eval: evaluation }, page(me, `task=${id}${tab ? `&tab=${tab}` : ""}`)) };
+    return { detail, evaluation, html: tasksView.render({ kind: "task", detail, eval: evaluation, waiting: null }, page(me, `task=${id}${tab ? `&tab=${tab}` : ""}`)) };
   };
   const router = await render("ticket-router");
   assert.match(text(router.html), /Accepted: version 2 Accepted in the app · Amira Haddad[^]*6 cases measured of 6 1 run on this version/);
@@ -319,7 +336,7 @@ test("a task's Eval tab shows the accepted eval read-only; a revision pauses run
   assert.equal(draft.body.draft!.reason, "revise");
   assert.equal((await send("/api/tasks/ticket-router/run", "POST")).status, 409, "runs wait for the revision");
   const revising = await render("ticket-router");
-  assert.match(text(revising.html), /Needs review[^]*Draft of version 3[^]*Runs and the watch wait until you accept or discard it/);
+  assert.match(text(revising.html), /Check its eval[^]*Draft of version 3[^]*Runs and the watch wait until you accept or discard it/);
   assert.doesNotMatch(revising.html.__html, /data-action="run"/);
   assert.match(revising.html.__html, /Accept as version 3[^]*data-action="saveDraft"[^]*data-action="discardDraft"/);
   const cases = draft.body.draft!.cases.slice(1);
@@ -335,11 +352,11 @@ test("a task's Eval tab shows the accepted eval read-only; a revision pauses run
   assert.match(text(drafter.html), /Your coding agent sent Reply drafter with its tools changed[^]*Runs and the watch wait until you accept it\./);
   assert.doesNotMatch(drafter.html.__html, /data-action="discardDraft"/);
   assert.equal((await send("/api/tasks/reply-drafter/eval/draft", "DELETE")).status, 409);
-  const queue = text(evalsView.render({ drafts: [], tasks: (await send<Task[]>("/api/tasks")).body.filter((task) => task.state === "review") }, page(me)));
-  assert.match(queue, /Tasks waiting for their eval Reply drafter/);
+  const queue = text(tasksView.render({ kind: "list", tasks: (await send<Task[]>("/api/tasks")).body, drafts: [], waiting: {} }, page(me)));
+  assert.match(queue, /Needs you[^]*Reply drafter[^]*Check its eval Check its eval your coding agent sent it changed/);
 
   // A retired task's eval is read-only, with no revise.
-  const retired = tasksView.render({ kind: "task", detail: { ...router.detail, state: "retired" }, eval: accepted.body }, page(me, "task=ticket-router&tab=eval")).__html;
+  const retired = tasksView.render({ kind: "task", detail: { ...router.detail, state: "retired" }, eval: accepted.body, waiting: null }, page(me, "task=ticket-router&tab=eval")).__html;
   assert.match(retired, /<fieldset disabled>/);
   assert.doesNotMatch(retired, /data-action="retire"|data-action="revise"/);
 });
@@ -371,14 +388,23 @@ test("a project adds GitHub repositories by URL, token or the member's GitHub co
   assert.deepEqual(went, ["/account/?installation_id=41&setup_action=install"]);
   assert.equal((await send<Repo>("/api/repos", "POST", { url: "https://github.com/sahra-health/billing-worker", via: "github" })).status, 201);
 
-  // The review's drafts wait in Review evals; approving one adds the task, not run yet, with no accepted eval.
+  // The review's drafts are on Tasks as Found in code, with Measure and Ignore; measuring approves one, which adds the task
+  // with no accepted eval, and runs it.
   const drafts = (await send<EvalDraft[]>("/api/eval-drafts")).body;
-  const queue = text(evalsView.render({ drafts, tasks: [] }, page(me)));
-  assert.match(queue, /From repository reviews Claim summary writer Denial letter checker[^]*Approve and add task/);
-  const approved = await send<{ taskId: string }>(`/api/eval-drafts/${drafts[0]!.id}/approve`, "POST", { spec: { criteria: ["States the amount"] }, cases: drafts[0]!.cases });
+  const list = await loaded(tasksView, me, "", call);
+  const queue = text(tasksView.render(list, page(me)));
+  assert.match(queue, /Needs you \(\d+\)[^]*Claim summary writer[^]*Found in code Measure it or ignore it[^]*Denial letter checker[^]*Found in code/);
+  const draftPage = await loaded(tasksView, me, `draft=${drafts[0]!.id}`, call);
+  const opened = tasksView.render(draftPage, page(me, `draft=${drafts[0]!.id}`));
+  assert.match(text(opened), /Claim summary writer Found in code A repository review found it in[^]*What the Review Read in the Code/);
+  assert.match(opened.__html, /data-action="measure"[^]*data-action="ignore"/);
+  assert.doesNotMatch(opened.__html, /<textarea|<input/, "nothing is edited before the first run: grading fixes the eval");
+  assert.doesNotMatch(tasksView.render(draftPage, page(await account("member"), `draft=${drafts[0]!.id}`)).__html, /data-action="measure"/);
+  const approved = await send<{ taskId: string }>(`/api/eval-drafts/${drafts[0]!.id}/approve`, "POST", {});
   assert.equal(approved.status, 201);
   const task = (await send<Task[]>("/api/tasks")).body.find((item) => item.id === approved.body.taskId)!;
   assert.deepEqual([task.name, task.status, task.lastRunAt], ["Claim summary writer", "new", null]);
+  assert.match(text(tasksView.render(await loaded(tasksView, me, "", call), page(me))), /Claim summary writer[^]*Not measured Measure it/);
   assert.equal((await send<EvalView>(`/api/tasks/${task.id}/eval`)).body.accepted, null, "approval accepts no eval: the first run grades one");
   assert.equal((await send(`/api/eval-drafts/${drafts[1]!.id}`, "DELETE")).status, 200);
   assert.deepEqual((await send<EvalDraft[]>("/api/eval-drafts")).body, []);

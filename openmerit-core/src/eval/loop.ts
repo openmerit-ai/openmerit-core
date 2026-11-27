@@ -1,5 +1,5 @@
 // The grading loop, one state machine for the CLI and the cloud app: OpenMerit shows sampled answers
-// with its own grade, and a person marks each answer Looks good or Doesn't look right, with an optional
+// without its own grade, and a person marks each answer Right answer or Wrong answer, with an optional
 // note. Where a person and the eval disagree, the eval is wrong: it is written again from their notes
 // and measured again. Once they agree on every sample, the person has accepted the eval, and it is
 // saved as the task's Eval, versioned.
@@ -8,7 +8,7 @@
 // cheaper model's, and the search runs only on the accepted eval. Otherwise (the cloud app, until it
 // moves to this order) the answers come from a search, and a regenerated eval is searched again.
 //
-// Marking the current model's own answer Doesn't look right makes the accepted Eval the bar instead of
+// Marking the current model's own answer Wrong answer makes the accepted Eval the bar instead of
 // the current model's score (`bar: "criteria"`): the search then runs once more against the criteria,
 // with the current model as one candidate. The coding agent never grades; a person does.
 import { redact, type Criteria } from "../engine/index.ts";
@@ -194,20 +194,22 @@ export interface GradeQuestion { id: string; kind: "choice"; prompt: string; det
 
 const slug = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40) || "task";
 
-/** One question per sample of a round, the same in the CLI and the cloud app: the answer with its input, tool calls and OpenMerit's grade. */
+/**
+ * One question per sample of a round: the answer with its input and tool calls. The eval's own grade is left out, so
+ * the person judges the answer itself; the loop compares their grade with the eval's to find where the eval is wrong.
+ */
 export function gradeQuestions(task: string, loop: LoopState): GradeQuestion[] {
   const samples = loop.artifact!.samples;
   return samples.map((sample, index) => ({
     // The round is in the ID: one advance can grade a round, measure the next and ask again, with the same answers.
-    id: `grade_${slug(task)}_r${loop.round}_${index + 1}`, kind: "choice", prompt: `${task}, answer ${index + 1} of ${samples.length}: does it look right?`,
+    id: `grade_${slug(task)}_r${loop.round}_${index + 1}`, kind: "choice", prompt: `${task}, answer ${index + 1} of ${samples.length}: is this answer right?`,
     detail: [
       `${sample.model} (${sample.role === "current" ? "your current model" : sample.role === "trial" ? "a cheaper model" : "a candidate"}), ${sample.kind} case ${sample.caseId}${loop.round > 1 ? `, round ${loop.round}` : ""}`,
       `Input:\n${sample.input}`,
       `Answer:\n${sample.output || "(no text)"}`,
       ...(sample.toolCalls.length ? [`Tool calls: ${sample.toolCalls.map(call => `${call.name}(${call.arguments})`).join("; ")}`] : []),
-      `OpenMerit's grade: ${sample.pass ? "passed" : `failed${sample.reason ? `: ${sample.reason}` : ""}`}`,
     ].join("\n"),
-    options: [{ value: "good", label: "Looks good" }, { value: "bad", label: "Doesn't look right" }],
+    options: [{ value: "good", label: "Right answer" }, { value: "bad", label: "Wrong answer" }],
     hint: GRADE_HINT,
   }));
 }
@@ -215,10 +217,10 @@ export function gradeQuestions(task: string, loop: LoopState): GradeQuestion[] {
 /** A grade from an answer: good or bad, or either with a note after a colon. */
 export function readGrade(answer: unknown): Omit<SampleGrade, "sampleId"> | null {
   if (typeof answer !== "string") return null;
-  const match = /^\s*(good|bad|looks good|doesn'?t look right)\s*(?::\s*([\s\S]*))?$/i.exec(answer);
+  const match = /^\s*(good|bad|right(?: answer)?|wrong(?: answer)?|looks good|doesn'?t look right)\s*(?::\s*([\s\S]*))?$/i.exec(answer);
   if (!match) return null;
   const note = match[2]?.trim();
-  return { verdict: /^(good|looks good)$/i.test(match[1]!) ? "good" : "bad", ...(note ? { note: note.slice(0, 2000) } : {}) };
+  return { verdict: /^(good|right(?: answer)?|looks good)$/i.test(match[1]!) ? "good" : "bad", ...(note ? { note: note.slice(0, 2000) } : {}) };
 }
 
 /** What a round's grades say about the eval, for the reviser and the case writer: each disagreement, with the person's note. */

@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 import type { EvalView, JobRow } from "../../src/server/actors/account.ts";
-import { bundle, caller, fakeModels, startApp, stop, subscribe, untilDone, waitFor, type App, type FakeModels } from "./helpers.ts";
+import { bundle, caller, fakeModels, startApp, stop, subscribe, TICKETS, untilDone, waitFor, WRITTEN, type App, type FakeModels } from "./helpers.ts";
 
 interface Case { id: string; input: Record<string, string>; expected?: unknown; origin: string; approved?: boolean }
 
@@ -96,7 +96,8 @@ describe("evals", () => {
     const grading = await waitFor(result(reopening.data.job_id as string), value => finished(value) || value.data.phase === "grading");
     assert.equal(grading.data.phase, "grading", grading.text);
     assert.match(grading.text, /The task changed since eval version 2 was accepted, so this run grades its draft with you/);
-    const reopenedDone = await untilDone(me, reopening.data.job_id as string);
+    // The person grades as they edited the eval: the March invoice belongs to account.
+    const reopenedDone = await untilDone(me, reopening.data.job_id as string, undefined, undefined, { ...TICKETS, ...WRITTEN, "Where is my invoice for March?": "account" });
     assert.equal(reopenedDone.data.status, "done", reopenedDone.text);
     const third = (await me.api<EvalView>(evalUrl)).body;
     assert.deepEqual([third.accepted!.version, third.accepted!.source, third.draft], [3, "grading", null]);

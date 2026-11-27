@@ -16,9 +16,8 @@ const out = at > 0 && process.argv[at + 1] ? resolve(process.argv[at + 1]!) : jo
 // organization's pages and the member's own settings open from the profile menu.
 const nav = [
   { id: "runs", href: "/", label: "Runs", icon: '<path d="M3 12h4l3-7 4 14 3-7h4"/>' },
-  { id: "tasks", href: "/tasks/", label: "Tasks", icon: '<rect x="3" y="3" width="18" height="18" rx="3"/><path d="m8 12 3 3 5-6"/>' },
-  // An action item, shown with its count only while a task's eval waits for review (app/main.ts).
-  { id: "evals", href: "/evals/", label: "Review evals", icon: '<path d="M9 5h10M9 12h10M9 19h10M4 5l1 1 2-2M4 12l1 1 2-2M4 19l1 1 2-2"/>', hidden: true },
+  // Tasks counts the tasks that need a person (app/main.ts).
+  { id: "tasks", href: "/tasks/", label: "Tasks", icon: '<rect x="3" y="3" width="18" height="18" rx="3"/><path d="m8 12 3 3 5-6"/>', count: true },
   { id: "guardrails", href: "/guardrails/", label: "Guardrails", icon: '<path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/>' },
   { id: "project", href: "/project/", label: "Project settings", icon: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9 7 7M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/>' },
 ] as const;
@@ -35,7 +34,6 @@ const pages = [
   { view: "runs", title: "Runs", nav: "runs", path: "/" },
   { view: "run", title: "Run report", nav: "runs", path: "r" },
   { view: "tasks", title: "Tasks", nav: "tasks", path: "tasks" },
-  { view: "evals", title: "Review evals", nav: "evals", path: "evals" },
   { view: "project", title: "Project settings", nav: "project", path: "project" },
   { view: "account", title: "Account settings", nav: "account", path: "account" },
   { view: "connections", title: "Coding agents", nav: "connections", path: "connections" },
@@ -66,7 +64,7 @@ const initialMode = `<script>try{if(localStorage.getItem("om-sidebar")==="hover"
 
 function page(title: string, active: string, body: string, narrow = false): string {
   const current = (id: string): string => (id === active ? ' aria-current="page"' : "");
-  const links = nav.map((item) => `<a class="nav-item${"hidden" in item ? " nav-action" : ""}" href="${item.href}" title="${item.label}"${current(item.id)}${"hidden" in item && item.id !== active ? " hidden" : ""}>${icon(item.icon)}<span class="label">${item.label}</span>${"hidden" in item ? '<span class="count" aria-label="waiting"></span>' : ""}</a>`).join("\n        ");
+  const links = nav.map((item) => `<a class="nav-item" href="${item.href}" title="${item.label}"${current(item.id)}>${icon(item.icon)}<span class="label">${item.label}</span>${"count" in item ? '<span class="count" aria-label="need you"></span>' : ""}</a>`).join("\n        ");
   const menuLinks = accountPages.map((item) => `<a role="menuitem" href="${item.href}"${current(item.id)}>${icon(item.icon)}${item.label}</a>`).join("\n            ");
   const onAccountPage = accountPages.some((item) => item.id === active);
   return `<!DOCTYPE html>

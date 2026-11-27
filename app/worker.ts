@@ -86,6 +86,8 @@ export default {
     if (url.pathname === "/r" || url.pathname === "/r/") return Response.redirect(`${url.origin}/`, 308);
     // The cloud app returns Stripe Checkout and the billing portal to /billing.
     if (url.pathname === "/billing" || url.pathname === "/billing/") return Response.redirect(`${url.origin}/plan/${url.search}`, 302);
+    // Review evals moved into Tasks, which lists what needs a person.
+    if (url.pathname === "/evals" || url.pathname === "/evals/") return Response.redirect(`${url.origin}/tasks/`, 302);
     // Every run report shares one page, which reads the run ID from the address.
     const run = /^\/r\/([\w-]{1,64})(\/?)$/.exec(url.pathname);
     if (run) {

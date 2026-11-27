@@ -103,7 +103,7 @@ function inProgress(all: JobView[], runs: Run[], byId: Map<string, Task>): Html 
               const text = liveText(job, agent), id = job.jobId, live = job.live;
               const testing = live?.model ?? job.provisional?.model;
               return html`<tr data-live="${id}" data-status="${job.status}"${agent ? html` data-agent="${agent}"` : ""}>
-              <td><a href="/r/${id}/">${job.task}</a><span class="sub">${task?.environment ?? ""}${run ? html` · ${when(run.startedAt)}` : ""}</span></td>
+              <td><a href="${job.status === "needs_input" && job.phase === "grading" ? `/tasks/?task=${encodeURIComponent(job.taskId)}` : `/r/${id}/`}">${job.task}</a><span class="sub">${task?.environment ?? ""}${run ? html` · ${when(run.startedAt)}` : ""}</span></td>
               <td>${testing ? model(testing) : html`<span class="sub">–</span>`}${live?.baseline ? html`<span class="sub">vs ${model(live.baseline.model)} · ${Math.round(live.baseline.rate)}%</span>` : job.provisional ? html`<span class="sub">on ${endpointName(job.provisional.endpoint)}</span>` : ""}</td>
               <td class="num"><span data-live="${id}" data-morph="cases">${text.cases}</span></td>
               <td class="num"><span data-live="${id}" data-morph="rate">${text.rate}</span></td>

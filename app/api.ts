@@ -83,8 +83,8 @@ export interface EvalView {
 }
 // A task's output shape, from the bundle the coding agent or a repository review sent, for editing expected answers.
 export type TaskOutput = { kind: "text" } | { kind: "json"; schema: object } | { kind: "label"; labels: string[] };
-// A task a repository review found, waiting for a person. Approving it creates the task, not run yet, with the
-// spec and cases as its examples; its first run writes more cases and grades them with the person, which accepts version 1.
+// A task a repository review found, listed on Tasks as Found in code. Measuring it approves it, which creates the task with
+// the spec and cases as its examples, and starts its first run, which writes more cases and grades them with the person.
 export interface EvalDraft { id: string; projectId: string; repoId: string | null; environment: string; name: string; bundle: EvalSpec & { task: string; current: { model: string }; output: TaskOutput }; cases: EvalCase[]; status: "pending" | "approved" | "dismissed"; createdAt: string; taskId: string | null }
 // GET /api/tasks/:id: the task's row with its bundle, eval summary and latest runs.
 export interface TaskDetail extends Task { bundle: { output: TaskOutput; current: { model: string } } | null; eval: { version: number; cases: number; review: EvalRevision["reason"] | null } | null; jobs: Run[] }
@@ -163,7 +163,7 @@ export interface Decision { jobId: string; taskId: string; decision: "approved" 
 export interface Report extends JobResult { jobId: string; task: string; createdAt: string; decision?: Decision | null }
 
 // A job's question. In the grading loop (phase "grading") each is one sampled answer: detail holds the model, the
-// input, the answer and OpenMerit's grade, and the answer is good or bad, with an optional note after a colon.
+// input and the answer, without the eval's own grade, and the answer is good or bad, with an optional note after a colon.
 export interface Question { id: string; kind: "choice" | "multi" | "confirm" | "text"; prompt: string; detail?: string; options?: { value: string; label: string }[]; hint?: string }
 
 // GET /api/runs/:id before then: the job's live state, with report null.

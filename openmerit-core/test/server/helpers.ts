@@ -247,17 +247,29 @@ export const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, 
  * a person who agrees with the eval on every sample accepts it in the first round.
  */
 /**
- * Polls openmerit_result until the job finishes. A grading round is graded by OpenMerit's own grades,
+ * A person's grade of a grading question, which shows the answer without the eval's own grade: right when the answer
+ * names the ticket's queue, by `truth` when a test's person changed an expected answer. Like the eval's judge, it grades
+ * the answer; the agent eval checks the tool calls.
+ */
+export function personGrade(detail: string, truth: Record<string, string> = QUEUES): "good" | "bad" {
+  const input = /Input:\n([^]*?)\nAnswer:/.exec(detail)?.[1] ?? "";
+  const answer = /Answer:\n([^]*?)(?:\nTool calls: |$)/.exec(detail)?.[1]?.trim() ?? "";
+  const ticket = Object.keys(truth).find(item => input.includes(item));
+  return ticket && answer === truth[ticket] ? "good" : "bad";
+}
+
+/**
+ * Polls openmerit_result until the job finishes. A grading round is graded as a person would (personGrade),
  * relayed by the coding agent and confirmed by the same caller as the person, as the app would.
  */
-/** Runs a job to its end, grading each answer as OpenMerit did; `onGrades` sees each set of grading questions. */
-export async function untilDone<T extends { text: string; data: Record<string, unknown> }>(agent: { tool: (name: string, args: Record<string, unknown>) => Promise<T>; api: (path: string, init?: RequestInit) => Promise<{ status: number; body: unknown }> }, jobId: string, timeoutMs = 180_000, onGrades?: (questions: { id: string; detail: string }[]) => void): Promise<T> {
+/** Runs a job to its end, grading each answer as a person would; `onGrades` sees each set of grading questions. */
+export async function untilDone<T extends { text: string; data: Record<string, unknown> }>(agent: { tool: (name: string, args: Record<string, unknown>) => Promise<T>; api: (path: string, init?: RequestInit) => Promise<{ status: number; body: unknown }> }, jobId: string, timeoutMs = 180_000, onGrades?: (questions: { id: string; detail: string }[]) => void, truth?: Record<string, string>): Promise<T> {
   return waitFor(async () => {
     const value = await agent.tool("openmerit_result", { job_id: jobId });
     if (value.data.status === "needs_input" && value.data.phase === "grading") {
       const questions = value.data.questions as { id: string; detail: string }[];
       onGrades?.(questions);
-      const held = await agent.tool("openmerit_answer", { job_id: jobId, answers: Object.fromEntries(questions.map(question => [question.id, question.detail.includes("OpenMerit's grade: passed") ? "good" : "bad"])) });
+      const held = await agent.tool("openmerit_answer", { job_id: jobId, answers: Object.fromEntries(questions.map(question => [question.id, personGrade(question.detail, truth)])) });
       const confirmation = held.data.confirmation as { id: string } | undefined;
       if (!confirmation) throw new Error(`Grades were not held for confirmation: ${held.text}`);
       await agent.api(`/api/confirmations/${confirmation.id}`, { method: "POST", body: JSON.stringify({ confirm: true }) });

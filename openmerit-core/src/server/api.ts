@@ -376,7 +376,7 @@ export function apiRoutes(deps: AppDeps) {
       // Grades are a person's judgment of the answers: the coding agent relays them, and the person confirms them.
       const grades = view.questions.filter(question => question.id.startsWith("grade_") && Object.hasOwn(answers, question.id));
       if (grades.length) {
-        const held = await hold(`Grades for ${view.task}`, grades.map(question => `${question.prompt.replace(/: does it look right\?$/, "")}: ${String((answers as Answers)[question.id])}`), input); if (held) return held;
+        const held = await hold(`Grades for ${view.task}`, grades.map(question => `${question.prompt.replace(/: is this answer right\?$/, "")}: ${String((answers as Answers)[question.id])}`), input); if (held) return held;
       }
       await handle.send("answers", { answers: answers as Answers, by: who.userId });
       // The job applies them in a moment: answer with its state once it has, or as it stands after a few seconds.
