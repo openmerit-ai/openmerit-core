@@ -88,33 +88,53 @@ test("an update installs only with approval and continues on the chosen version"
   assert.equal(asked, false, "non-interactive use never prompts");
 });
 
-test("the MCP server keeps stdout to protocol messages and reports an available update through the client", async () => {
-  const registry = createServer((_req, res) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ version: "99.0.0" })); });
-  await new Promise<void>(resolve => registry.listen(0, "127.0.0.1", resolve));
-  const home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
-  const repo = mkdtempSync(join(tmpdir(), "openmerit-repo-"));
-  execFileSync("git", ["init", "-q"], { cwd: repo });
-  const child = spawn(process.execPath, [cli, "mcp"], { cwd: repo, env: { ...process.env, OPENMERIT_HOME: home, OPENMERIT_REGISTRY: `http://127.0.0.1:${(registry.address() as AddressInfo).port}` }, stdio: ["pipe", "pipe", "pipe"] });
-  let stdout = "";
-  child.stdout.on("data", chunk => { stdout += chunk; });
-  const send = (message: object) => child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
-  send({ id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "1" } } });
-  send({ method: "notifications/initialized" });
-  send({ id: 2, method: "tools/list" });
-  send({ id: 3, method: "tools/call", params: { name: "openmerit_history", arguments: { cwd: repo } } });
-  send({ id: 4, method: "tools/call", params: { name: "openmerit_scout", arguments: { cwd: repo } } });
-  child.stdin.end();
-  await new Promise(resolve => child.on("close", resolve));
-  registry.close();
-  const messages = stdout.trim().split("\n").map(line => JSON.parse(line) as { id?: number; method?: string; params?: { data?: string }; result?: Record<string, unknown> });
-  assert.ok(messages.every(message => (message as { jsonrpc?: string }).jsonrpc === "2.0"), "every stdout line is a JSON-RPC message");
-  const byId = (id: number) => messages.find(message => message.id === id)!.result!;
-  assert.match(String(byId(1).instructions), /99\.0\.0/);
-  assert.ok(messages.some(message => message.method === "notifications/message" && /99\.0\.0/.test(String(message.params?.data))));
-  const tools = byId(2).tools as { name: string; annotations: { readOnlyHint: boolean } }[];
-  assert.deepEqual(tools.map(tool => [tool.name, tool.annotations.readOnlyHint]), [["openmerit_status", true], ["openmerit_scout", false], ["openmerit_history", true]]);
-  assert.deepEqual((byId(3).structuredContent as { runs: unknown[] }).runs, []);
-  const scout = byId(4).structuredContent as { status: string; missing: string[] };
-  assert.equal(scout.status, "needs_setup", "missing setup is a structured answer, not a terminal prompt");
-  assert.equal(scout.missing.length, 2);
+test("openmerit mcp forwards each message to the server's /mcp with the CLI's token, and says how to get a server when there is none", async () => {
+  const seen: { auth: string | undefined; session: string | undefined; body: { method?: string } }[] = [];
+  const server = createServer((req, res) => {
+    let body = "";
+    req.on("data", chunk => { body += chunk; });
+    req.on("end", () => {
+      const message = JSON.parse(body) as { id?: number; method?: string };
+      seen.push({ auth: req.headers.authorization, session: req.headers["mcp-session-id"] as string | undefined, body: message });
+      if (message.id === undefined) { res.writeHead(202).end(); return; }
+      const result = message.method === "initialize" ? { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "fake", version: "1" } }
+        : message.method === "tools/call" ? { content: [{ type: "text", text: "held" }], structuredContent: { status: "held" } } : { tools: [{ name: "from_server" }] };
+      res.writeHead(200, { "content-type": "application/json", ...(message.method === "initialize" ? { "mcp-session-id": "s-1" } : {}) });
+      res.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
+    });
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const mcp = async (env: Record<string, string>) => {
+    const home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
+    const child = spawn(process.execPath, [cli, "mcp"], { env: { ...process.env, OPENMERIT_HOME: home, OPENMERIT_NO_UPDATE_CHECK: "1", OPENMERIT_TELEMETRY: "0", ...env }, stdio: ["pipe", "pipe", "pipe"] });
+    let stdout = "";
+    child.stdout.on("data", chunk => { stdout += chunk; });
+    const send = (message: object) => child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
+    send({ id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "1" } } });
+    // The next messages wait for initialize's reply, as a client does, so they carry its session.
+    await new Promise<void>(resolve => { const check = () => (stdout.includes("\n") ? resolve() : setTimeout(check, 20)); check(); });
+    send({ method: "notifications/initialized" });
+    send({ id: 2, method: "tools/list" });
+    send({ id: 3, method: "tools/call", params: { name: "openmerit_tasks", arguments: {} } });
+    child.stdin.end();
+    await new Promise(resolve => child.on("close", resolve));
+    const messages = stdout.trim().split("\n").map(line => JSON.parse(line) as { jsonrpc?: string; id?: number; result?: Record<string, unknown> });
+    assert.ok(messages.every(message => message.jsonrpc === "2.0"), "every stdout line is a JSON-RPC message");
+    return (id: number) => messages.find(message => message.id === id)!.result!;
+  };
+  try {
+    const proxied = await mcp({ OPENMERIT_SERVER: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, OPENMERIT_TOKEN: "tok" });
+    assert.deepEqual((proxied(1).serverInfo as { name: string }).name, "fake", "initialize is the server's");
+    assert.deepEqual(proxied(2).tools, [{ name: "from_server" }]);
+    assert.deepEqual(proxied(3).structuredContent, { status: "held" });
+    assert.deepEqual(seen.map(request => request.body.method), ["initialize", "notifications/initialized", "tools/list", "tools/call"]);
+    assert.ok(seen.every(request => request.auth === "Bearer tok"), "every request carries the CLI's token");
+    assert.deepEqual(seen.slice(1).map(request => request.session), ["s-1", "s-1", "s-1"], "later requests carry the session initialize returned");
+
+    const alone = await mcp({});
+    assert.match(String(alone(1).instructions), /openmerit login/);
+    assert.ok((alone(2).tools as { name: string }[]).some(tool => tool.name === "openmerit_recommend"), "tools/list works before there is a server");
+    assert.equal(alone(3).isError, true);
+    assert.match(String((alone(3).content as { text: string }[])[0]!.text), /openmerit login.*openmerit server start/);
+  } finally { server.close(); }
 });

@@ -186,7 +186,7 @@ try {
   assert.match(await openmerit("history", runId), new RegExp(`Run ${runId}`));
 
   const { tools } = await mcpToolsList();
-  assert.deepEqual(tools.map(tool => tool.name).sort(), ["openmerit_history", "openmerit_scout", "openmerit_status"]);
+  assert.deepEqual(tools.map(tool => tool.name).sort(), ["openmerit_answer", "openmerit_confirmation", "openmerit_eval", "openmerit_eval_command", "openmerit_recommend", "openmerit_result", "openmerit_retire", "openmerit_tasks"], "openmerit mcp lists the server's tools before there is a server");
   // Telemetry is off above. The installed package sends to the production project; here only to this fake.
   assert.equal(telemetry.length, 0, "the opted-out commands sent no telemetry");
   const tracking = { ...Object.fromEntries(Object.entries(env).filter(([key]) => !["CI", "DO_NOT_TRACK", "OPENMERIT_TELEMETRY"].includes(key))), OPENMERIT_POSTHOG_HOST: base };

@@ -178,19 +178,17 @@ writeFileSync(process.env.OPENMERIT_RESULT, JSON.stringify({ items }));
 
 ## MCP
 
-`openmerit mcp` is a stdio MCP server; setup registers it for you. Its stdout carries only protocol messages. Its tools are:
+`openmerit mcp` is a stdio MCP server for Claude Code, Codex and other clients; setup registers it for you. It forwards every message to the `/mcp` of the server the CLI uses (see [Client commands](#client-commands)): openmerit.ai after `openmerit login`, or the server `openmerit server start` runs. So the coding agent gets the server's tools (`openmerit_recommend`, `openmerit_result` and the rest), its confirmations and its results, signed in as the CLI, without a token in the client's configuration. Its stdout carries only protocol messages.
 
-| Tool | Hint | Does |
-| --- | --- | --- |
-| `openmerit_status` | read-only | Setup state, package and catalogue versions, available updates |
-| `openmerit_scout` | not read-only | The same workflow and state as the CLI |
-| `openmerit_history` | read-only | Runs, or one run in detail |
+- It looks up the server for each message, so `openmerit login` or `openmerit server start` takes effect without restarting the client.
+- Until there is a server, it still lists the tools, and each tool call answers that the user should run `openmerit login` or `openmerit server start`.
+- A client that speaks MCP over HTTP can connect to `https://openmerit.ai/mcp`, or a self-hosted server's `/mcp`, directly instead.
 
-`openmerit_scout` returns structured `questions` (missing input, task choice, eval approval, budget, configuration) instead of prompting. The client asks the user and calls the tool again with `answers`. A run started in the CLI can continue through MCP and the other way round. The daemon works on a run one step at a time.
+Scout's own tools (`openmerit_status`, `openmerit_scout` and `openmerit_history`) are no longer served over MCP; run `openmerit scout` in a terminal until Scout moves to the server.
 
 ## Daemon
 
-Scout runs in a background process, the OpenMerit daemon. `openmerit scout` and `openmerit mcp` are its clients: the first one that needs it starts it, and it keeps running after they exit. `openmerit setup` and `openmerit history` do not use it.
+Scout runs in a background process, the OpenMerit daemon. `openmerit scout` is its client: the first run that needs it starts it, and it keeps running after they exit. `openmerit setup` and `openmerit history` do not use it.
 
 - Each Scout run is a Rivet Workflow actor in a local Rivet engine that ships in the package. The engine listens on `127.0.0.1` only: port 6720, with the next port (6721) for its peer API and the port 10 above (6730) for metrics. `OPENMERIT_DAEMON_PORT` moves all three: `7720` uses 7720, 7721 and 7730. It makes no connections of its own outside the machine, and it accepts only requests that carry the token in `~/.openmerit/daemon.json`, which is new at every start.
 - A run waiting for your answer keeps waiting when the daemon stops, crashes or the machine restarts: the next command starts the daemon again and the run continues from its question.
@@ -215,7 +213,7 @@ Updating the package refreshes the bundled catalogue; history stays intact. Set 
 
 OpenMerit sends anonymous usage data to OpenMerit's PostHog project: one `cli_command_run` event for each command you run and each tool call to the local MCP server. The first command that sends one prints a notice to stderr; OpenMerit never asks.
 
-- **What is sent:** the command or tool name (such as `scout` or `openmerit_status`), whether it ran in the CLI or the MCP server, whether it succeeded, how long it took, and the OpenMerit version, OS, CPU architecture and Node.js version. The ID is a random install ID kept in `~/.openmerit/telemetry.json`; it is not linked to you or to an account.
+- **What is sent:** the command or tool name (such as `scout` or `openmerit_recommend`), whether it ran in the CLI or the MCP server, whether it succeeded, how long it took, and the OpenMerit version, OS, CPU architecture and Node.js version. The ID is a random install ID kept in `~/.openmerit/telemetry.json`; it is not linked to you or to an account.
 - **What never is:** arguments, answers, code, file paths, repository names, model IDs, endpoint details, keys, error messages and output.
 - **Turning it off:** set `OPENMERIT_TELEMETRY=0` (or `false` or `off`) or `DO_NOT_TRACK=1`. It is always off when `CI` is set. For the MCP server, set it in the environment your client starts `openmerit mcp` in.
 
@@ -223,7 +221,7 @@ Sending never changes a command's output or exit code. It gives up after about 1
 
 ## Server
 
-`openmerit server start` runs the OpenMerit server, the same server openmerit.ai runs, on this machine for one person, in the background. It is new and separate from Scout for now: `openmerit scout` and `openmerit mcp` still use the daemon above.
+`openmerit server start` runs the OpenMerit server, the same server openmerit.ai runs, on this machine for one person, in the background. It is new and separate from Scout for now: `openmerit scout` still uses the daemon above, while `openmerit mcp` forwards to this server.
 
 - It listens on `127.0.0.1` only, on port 7330 (`--port` or `OPENMERIT_PORT`). Its local Rivet engine takes the next two ports and the port 11 above, and its metrics the port 3 above: 7330 uses 7330 to 7333 and 7341.
 - It keeps its tasks, runs, ledger, token and log in `~/.openmerit/server` (`OPENMERIT_DATA_DIR`). No account, plan or Clerk sign-in; the spend caps still apply.
@@ -269,7 +267,7 @@ export OPENMERIT_DAEMON_PORT=7720           # the daemon then uses 7720, 7721 an
 openmerit scout --resume <run>
 ```
 
-The first client that finds no daemon starts it, so set `OPENMERIT_DAEMON_PORT` everywhere OpenMerit runs: in your shell profile, and in the environment your MCP client starts `openmerit mcp` in.
+The first client that finds no daemon starts it, so set `OPENMERIT_DAEMON_PORT` everywhere OpenMerit runs: in your shell profile and wherever you run `openmerit scout`.
 
 **Several users on one machine.** Each user has their own `~/.openmerit` and daemon, but every daemon defaults to port 6720, so only the first one starts; the others stop with the port message above. Give each user their own `OPENMERIT_DAEMON_PORT`, 20 apart (such as 6740, 6760) so that no two users' three ports overlap.
 

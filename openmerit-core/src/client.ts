@@ -48,14 +48,14 @@ function writeSaved(env: Env, saved: Saved): void {
 
 const serverDir = (env: Env) => env.OPENMERIT_DATA_DIR || join(openmeritHome(env), "server");
 const trim = (url: string) => url.replace(/\/+$/, "");
-async function getJson<T>(url: string, init: RequestInit = {}): Promise<{ status: number; body: T }> {
+async function getJson<T>(url: string, init: RequestInit = {}): Promise<{ status: number; body: T; headers: Headers }> {
   let response: Response;
-  try { response = await fetch(url, { ...init, signal: AbortSignal.timeout(30_000) }); }
+  try { response = await fetch(url, { signal: AbortSignal.timeout(30_000), ...init }); }
   catch { throw new Error(`${new URL(url).origin} could not be reached.`); }
   const text = await response.text();
   let body: unknown = null;
   try { body = text ? JSON.parse(text) : null; } catch { body = { error: text.slice(0, 200) }; }
-  return { status: response.status, body: body as T };
+  return { status: response.status, body: body as T, headers: response.headers };
 }
 
 /** The server the CLI uses now, or null when it has none. */
@@ -99,7 +99,7 @@ async function refreshLogin(env: Env, saved: Saved, login: Login, oauth: OAuthLo
 }
 
 /** A request to the server with the CLI's sign-in; an expired hosted token is refreshed once. */
-export async function call<T>(conn: Connection, path: string, init: RequestInit = {}): Promise<{ status: number; body: T }> {
+export async function call<T>(conn: Connection, path: string, init: RequestInit = {}): Promise<{ status: number; body: T; headers: Headers }> {
   const send = () => getJson<T>(`${conn.server}${path}`, { ...init, headers: { ...(init.headers as Record<string, string> | undefined), authorization: `Bearer ${conn.token()}` } });
   let answer = await send();
   if (answer.status === 401 && conn.refresh && await conn.refresh()) answer = await send();

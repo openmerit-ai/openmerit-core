@@ -1,142 +1,80 @@
-// OpenMerit's local MCP server: newline-delimited JSON-RPC 2.0 over stdio, for Claude Code, Codex and
-// other MCP clients. Stdout carries protocol messages only; progress goes to stderr. It runs the
-// same workflow and SQLite state as the CLI. Questions and approvals come back as structured
-// `questions` for the client to ask the user; the server never prompts on a terminal.
+// `openmerit mcp`: a stdio MCP server for Claude Code, Codex and other clients that forwards each
+// message to the /mcp of the OpenMerit server the CLI uses (openmerit.ai after `openmerit login`, or
+// a self-hosted one; see client.ts), signed in as the CLI. The agent gets the same tools,
+// confirmations and results as over HTTP. Stdout carries protocol messages only.
+//
+// The server is looked up for each message, so signing in or starting a server takes effect without
+// restarting the client. Until there is one, initialize and tools/list are answered here and each tool
+// call says how to get a server.
 import { createInterface } from "node:readline";
-import { renderRun, renderStep } from "./cli/render.ts";
-import { localContext, missingSetup, startRun } from "./local.ts";
-import { advanceInDaemon } from "./daemon/daemon.ts";
-import { step, type Answers } from "./scout/workflow.ts";
+import { call, connection } from "./client.ts";
+import { TOOLS } from "./server/tools.ts";
 import { sendCommandRun } from "./telemetry.ts";
-import { checkForUpdate, packageVersion, updateNotice, type UpdateInfo } from "./update.ts";
-
-const PROTOCOL = "2025-06-18";
-
-const TOOLS = [
-  {
-    name: "openmerit_status",
-    title: "OpenMerit status",
-    description: "Read-only. Reports whether OpenMerit is set up for a repository (harness, candidate endpoints, eval budget), the installed package and catalogue versions, and whether a newer openmerit is available.",
-    inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Repository directory (default: the server's working directory)" } }, additionalProperties: false },
-    annotations: { readOnlyHint: true, openWorldHint: false },
-  },
-  {
-    name: "openmerit_scout",
-    title: "OpenMerit Scout",
-    description: "Runs OpenMerit Scout: scans the repository's model usages, lets the user pick a model and its agents/tasks, runs Scout Model Binary Search with the task's existing eval (the current model on every item, ECI-ranked candidates screened on five items it passes, five finalists on every item; paid model requests, within the run's eval budget; per-item results from the eval's own report), ranks the cheapest finalists at least as good as the current model, and can edit the application's model configuration. Call without runId to start; each call returns `questions` when it needs the user. Show every question (with its detail) to the user and pass their answers back in `answers`, keyed by question id, with the same runId. Never answer approval, budget or configuration questions on the user's behalf. Not read-only: it sends code context to the harness, spends on evals and can change files, each only after the matching approval.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        cwd: { type: "string", description: "Repository directory (default: the server's working directory)" },
-        runId: { type: "string", description: "Run to continue; omit to start a new run" },
-        answers: { type: "object", description: "Answers keyed by question id: strings, string arrays, booleans or numbers", additionalProperties: true },
-      },
-      additionalProperties: false,
-    },
-    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
-  },
-  {
-    name: "openmerit_history",
-    title: "OpenMerit history",
-    description: "Read-only. Lists this repository's Scout runs, including failed, interrupted and budget-paused ones, or shows one run's results, eval runs, spend, budget approvals and configuration decisions.",
-    inputSchema: { type: "object", properties: { cwd: { type: "string" }, runId: { type: "string" } }, additionalProperties: false },
-    annotations: { readOnlyHint: true, openWorldHint: false },
-  },
-];
+import { checkForUpdate, packageVersion, updateNotice } from "./update.ts";
 
 type Json = Record<string, unknown>;
+type Env = Record<string, string | undefined>;
+// Tools answer without waiting for a run; a bundle upload is the slowest request.
+const TIMEOUT_MS = 5 * 60_000;
+const NO_SERVER = "No OpenMerit server: ask the user to run `openmerit login` to use openmerit.ai, or `openmerit server start` to run one on this machine.";
 
-export async function serveMcp(input: NodeJS.ReadableStream = process.stdin, output: NodeJS.WritableStream = process.stdout, env: Record<string, string | undefined> = process.env) {
+export async function serveMcp(input: NodeJS.ReadableStream = process.stdin, output: NodeJS.WritableStream = process.stdout, env: Env = process.env) {
   const send = (message: Json) => output.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
-  const log = (line: string) => process.stderr.write(`[openmerit] ${line}\n`);
-  let update: UpdateInfo | null = null;
-  const updateCheck = checkForUpdate(env).then(info => { update = info; return info; });
-  const running = new Set<string>();
+  const updateCheck = checkForUpdate(env);
   const telemetry = new Set<Promise<void>>();
+  // The session ID the server returned on initialize; it names the client on held confirmations.
+  let session: string | null = null;
 
-  const call = async (name: string, args: Json): Promise<{ text: string; data: Json; isError?: boolean }> => {
-    const cwd = typeof args.cwd === "string" && args.cwd ? args.cwd : process.cwd();
-    const progress: string[] = [];
-    const ctx = localContext({ cwd, env, log: line => { progress.push(line); log(line); } });
-    const notice = update ? updateNotice(update) : null;
+  /** The replies when the server cannot give them: initialize and tools/list still work, everything else says why. */
+  const answerHere = (message: Json, problem: string): Json[] => {
+    const id = message.id;
+    if (id === undefined) return [];
+    const method = message.method;
+    if (method === "initialize") {
+      const params = (message.params ?? {}) as Json;
+      return [{ id, result: { protocolVersion: params.protocolVersion ?? "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "openmerit", version: packageVersion() }, instructions: `OpenMerit finds the cheapest model that does a task as well as the current one. ${problem}` } }];
+    }
+    if (method === "ping") return [{ id, result: {} }];
+    if (method === "tools/list") return [{ id, result: { tools: TOOLS } }];
+    if (method === "tools/call") return [{ id, result: { content: [{ type: "text", text: problem }], isError: true } }];
+    return [{ id, error: { code: -32000, message: problem } }];
+  };
+
+  /** Sends one message to the server and returns its replies. */
+  const forward = async (message: Json): Promise<Json[]> => {
+    const conn = connection(env);
+    if (!conn) return answerHere(message, NO_SERVER);
+    let status: number, body: unknown, headers: Headers;
     try {
-      if (name === "openmerit_status") {
-        const missing = missingSetup(ctx);
-        const data = { repository: ctx.repo.root, ready: !missing.length, missing, packageVersion: packageVersion(), catalogueVersion: ctx.catalogue.version, update, history: ctx.state.listRuns(ctx.repo.id, 5).map(run => ({ id: run.id, status: run.status, phase: run.phase })) };
-        return { text: `${missing.length ? `Not ready. Run \`openmerit setup\` in ${ctx.repo.root} for: ${missing.join("; ")}.` : `Ready in ${ctx.repo.root}.`} openmerit ${data.packageVersion}, catalogue ${data.catalogueVersion}.${notice ? ` ${notice}` : ""}`, data };
-      }
-      if (name === "openmerit_history") {
-        ctx.state.reapInterrupted(ctx.repo.id);
-        if (typeof args.runId === "string") {
-          const run = ctx.state.getRun(args.runId);
-          if (!run || run.repoId !== ctx.repo.id) return { text: `No run ${args.runId} in ${ctx.repo.root}.`, data: {}, isError: true };
-          const current = step(ctx, run.id, [], []);
-          return { text: renderRun(ctx.state, run, current), data: { run: { ...run, state: undefined }, step: current, units: ctx.state.units(run.id), budget: ctx.state.budgetEvents(run.id), decisions: ctx.state.decisions(run.id) } };
-        }
-        const runs = ctx.state.listRuns(ctx.repo.id);
-        return { text: runs.map(run => `${run.id} ${run.status} ${run.phase} ${run.createdAt}`).join("\n") || "No runs yet.", data: { runs: runs.map(run => ({ id: run.id, status: run.status, phase: run.phase, createdAt: run.createdAt, model: run.state.model ?? null, tasks: run.state.selected ?? [], spend: ctx.state.spend(run.id), budgetUsd: run.budgetUsd, packageVersion: run.packageVersion, catalogueVersion: run.catalogueVersion })) } };
-      }
-      if (name === "openmerit_scout") {
-        const missing = missingSetup(ctx);
-        if (missing.length) return { text: `OpenMerit is not set up for ${ctx.repo.root}. Ask the user to run \`openmerit setup\` in a terminal there.`, data: { status: "needs_setup", missing } };
-        const runId = typeof args.runId === "string" && args.runId ? args.runId : startRun(ctx);
-        if (running.has(runId)) return { text: `Run ${runId} is already being advanced by another call.`, data: { runId, status: "busy" }, isError: true };
-        running.add(runId);
-        try {
-          const result = await advanceInDaemon({ runId, cwd, env, answers: (args.answers && typeof args.answers === "object" ? args.answers : {}) as Answers, log: line => { progress.push(line); log(line); } });
-          const questions = result.questions.map(question => `- [${question.id}] (${question.kind}) ${question.prompt}${question.options ? `\n  Options: ${question.options.map(option => `${option.value}${option.label !== option.value ? ` = ${option.label}` : ""}`).join(" | ")}` : ""}${question.detail ? `\n  ${question.detail.split("\n").join("\n  ")}` : ""}${question.hint ? `\n  Also: ${question.hint}` : ""}`).join("\n");
-          // The grading loop's answers are the person's own judgment: the agent shows them and relays the grade, never grades.
-          const grading = result.questions.some(question => question.id.startsWith("grade_")) ? " Show the person each answer below and relay their grade, good or bad with an optional note after a colon; do not grade answers yourself." : "";
-          const text = [
-            ...(notice ? [notice] : []), ...result.notices,
-            questions ? `Run ${runId} needs the user (${result.status}). Ask them, then call openmerit_scout again with runId "${runId}" and answers keyed by question id.${grading}\n${questions}` : renderStep(result),
-          ].join("\n\n");
-          return { text, data: { ...result, progress: progress.slice(-40), ...(update ? { update } : {}) }, ...(result.status === "failed" ? { isError: true } : {}) };
-        } finally { running.delete(runId); }
-      }
-      return { text: `Unknown tool ${name}`, data: {}, isError: true };
-    } finally { ctx.state.close(); }
+      ({ status, body, headers } = await call<unknown>(conn, "/mcp", {
+        method: "POST", body: JSON.stringify(message), signal: AbortSignal.timeout(TIMEOUT_MS),
+        headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...(session ? { "mcp-session-id": session } : {}) },
+      }));
+    } catch (error) { return answerHere(message, error instanceof Error ? error.message : String(error)); }
+    session = headers.get("mcp-session-id") ?? session;
+    if (status === 202) return [];
+    if (status !== 200 || !body || typeof body !== "object") {
+      const error = (body as { error?: unknown } | null)?.error;
+      return answerHere(message, `${conn.server} answered ${status}${typeof error === "string" ? `: ${error}` : ""}.`);
+    }
+    return [body].flat() as Json[];
   };
 
   const handle = async (message: Json) => {
-    const id = message.id as string | number | undefined;
-    const method = message.method as string | undefined;
-    if (!method) return;
-    try {
-      if (method === "initialize") {
-        const info = await Promise.race([updateCheck, new Promise<null>(resolve => setTimeout(() => resolve(null), 3000))]);
-        const notice = info ? updateNotice(info) : null;
-        send({ id, result: { protocolVersion: (message.params as Json | undefined)?.protocolVersion ?? PROTOCOL, capabilities: { tools: {}, logging: {} }, serverInfo: { name: "openmerit", version: packageVersion() },
-          instructions: `OpenMerit Scout finds cheaper models that perform at least as well as the current one on a repository's own evals. Relay every question it returns to the user.${notice ? ` ${notice}` : ""}` } });
-        return;
-      }
-      if (method === "notifications/initialized") {
-        const info = await updateCheck;
-        const notice = updateNotice(info);
-        if (notice) send({ method: "notifications/message", params: { level: "warning", logger: "openmerit", data: notice } });
-        return;
-      }
-      if (method === "ping") return void send({ id, result: {} });
-      if (method === "tools/list") return void send({ id, result: { tools: TOOLS } });
-      if (method === "tools/call") {
-        const params = (message.params ?? {}) as { name?: string; arguments?: Json };
-        const started = Date.now();
-        // One telemetry event per tool call, with the tool's name only; not awaited, so the reply never waits for it.
-        const report = (ok: boolean) => {
-          const sending = sendCommandRun({ command: TOOLS.some(tool => tool.name === params.name) ? params.name! : "unknown", surface: "mcp", ok, durationMs: Date.now() - started }, env, log);
-          telemetry.add(sending);
-          void sending.finally(() => telemetry.delete(sending));
-        };
-        let result: Awaited<ReturnType<typeof call>>;
-        try { result = await call(params.name ?? "", params.arguments ?? {}); } catch (error) { report(false); throw error; }
-        report(!result.isError);
-        return void send({ id, result: { content: [{ type: "text", text: result.text }], structuredContent: result.data, ...(result.isError ? { isError: true } : {}) } });
-      }
-      if (method === "logging/setLevel") return void send({ id, result: {} });
-      if (id !== undefined) send({ id, error: { code: -32601, message: `Method not found: ${method}` } });
-    } catch (error) {
-      if (id !== undefined) send({ id, result: { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }], isError: true } });
+    const started = Date.now();
+    const replies = await forward(message).catch(error => answerHere(message, error instanceof Error ? error.message : String(error)));
+    for (const reply of replies) send(reply);
+    if (message.method === "notifications/initialized") {
+      const notice = updateNotice(await updateCheck);
+      if (notice) send({ method: "notifications/message", params: { level: "warning", logger: "openmerit", data: notice } });
     }
+    if (message.method !== "tools/call") return;
+    // One telemetry event per tool call, with the tool's name only; the reply never waits for it.
+    const name = (message.params as { name?: string } | undefined)?.name;
+    const ok = replies.length > 0 && replies.every(reply => !reply.error && !(reply.result as { isError?: boolean } | undefined)?.isError);
+    const sending = sendCommandRun({ command: TOOLS.some(tool => tool.name === name) ? name! : "unknown", surface: "mcp", ok, durationMs: Date.now() - started }, env);
+    telemetry.add(sending);
+    void sending.finally(() => telemetry.delete(sending));
   };
 
   const lines = createInterface({ input });

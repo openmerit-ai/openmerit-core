@@ -46,8 +46,9 @@ and --json; \`openmerit <command> --help\` lists them):
   openmerit eval --task-id <id>   A task's accepted eval (openmerit_eval)
   openmerit retire --task-id <id> Stop re-running a task (openmerit_retire)
 
-  openmerit mcp                   The local MCP server (stdio), for Claude Code, Codex and other clients.
-  openmerit daemon [status|stop]  The background process that runs Scout (started by scout and mcp when needed).
+  openmerit mcp                   These tools as a stdio MCP server for Claude Code, Codex and other clients,
+                                  forwarded to the server the CLI uses.
+  openmerit daemon [status|stop]  The background process that runs Scout (started by scout when needed).
                                   Without an argument it runs in the foreground.
 
 Scout options:

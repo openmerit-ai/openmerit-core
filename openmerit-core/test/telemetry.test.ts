@@ -83,7 +83,7 @@ test("a CLI command sends one event with metadata only, and the opt-outs send no
   } finally { posthog.close(); }
 });
 
-test("a local MCP tool call sends one event with surface mcp, and the server itself none", async () => {
+test("an MCP tool call through openmerit mcp sends one event with surface mcp, and the proxy itself none", async () => {
   const posthog = await fakePostHog();
   const home = mkdtempSync(join(tmpdir(), "openmerit-telemetry-"));
   const repo = mkdtempSync(join(tmpdir(), "openmerit-telemetry-repo-"));
@@ -95,15 +95,16 @@ test("a local MCP tool call sends one event with surface mcp, and the server its
     const send = (message: object) => child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
     send({ id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "1" } } });
     send({ id: 2, method: "tools/list" });
-    send({ id: 3, method: "tools/call", params: { name: "openmerit_history", arguments: { cwd: repo } } });
+    // No server: the call fails, and the event says so.
+    send({ id: 3, method: "tools/call", params: { name: "openmerit_tasks", arguments: {} } });
     child.stdin.end();
     await new Promise(resolve => child.on("close", resolve));
     assert.ok(stdout.trim().split("\n").every(line => (JSON.parse(line) as { jsonrpc?: string }).jsonrpc === "2.0"), "stdout carries protocol messages only");
     assert.equal(posthog.events.length, 1, JSON.stringify(posthog.events));
     const { properties } = posthog.events[0]!;
-    assert.equal(properties.command, "openmerit_history");
+    assert.equal(properties.command, "openmerit_tasks");
     assert.equal(properties.surface, "mcp");
-    assert.equal(properties.ok, true);
+    assert.equal(properties.ok, false);
     assert.equal(properties.interface, "cli");
   } finally { posthog.close(); }
 });
