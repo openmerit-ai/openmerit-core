@@ -226,7 +226,7 @@ export const tasksView: View<Data> = {
       const grades = waiting?.phase === "grading" && waiting.questions.length;
       return html`<div class="eyebrow"><a href="/tasks/">Tasks</a><span>›</span><span>${detail.environment}</span></div>
         <h1 class="title">${detail.name}</h1>
-        <p class="lede">The code uses ${model(detail.currentModel)}. ${notRun(detail) ? "It has not been measured yet." : html`Latest: ${result(detail)}`}</p>
+        <p class="lede">The code uses ${model(detail.currentModel)}. ${notRun(detail) ? "It has not been measured yet." : status === "grade" || status === "agent" || status === "measuring" ? "" : html`Latest: ${result(detail)}`}</p>
         <p class="task-actions">${pill(status, detail)}
           ${status === "eval" || status === "grade" || status === "agent" || status === "measuring" ? "" : html`<button class="btn${notRun(detail) ? " primary" : ""}" type="button" data-action="run">${notRun(detail) ? "Measure" : "Run again"}</button>`}
           ${retired ? "" : html`<button class="btn" type="button" data-action="retire">Retire</button>`}
