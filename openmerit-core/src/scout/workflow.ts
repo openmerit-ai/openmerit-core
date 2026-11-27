@@ -3,8 +3,12 @@
 // budget or fails. Every step is saved in SQLite, so a run continues after a restart and history
 // keeps failed, interrupted and budget-paused runs.
 //
-// scan → map → model → tasks (with corrections) → pool → discover → approve → evaluate
+// scan → map → model → tasks (with corrections) → pool → discover → approve → evaluate ⇄ grade
 // → compare → configure → done
+//
+// An eval OpenMerit wrote is graded before it is searched: evaluate first runs its trial (the current
+// model on every item, and one cheaper model), grade asks a person about sampled answers, and only an
+// accepted eval goes back to evaluate for the search.
 //
 // Evaluate is Scout Model Binary Search (search.ts) on the task's own eval: the current model runs
 // every item; candidates are screened on sampled items the current model passes; five finalists
@@ -24,7 +28,7 @@ import { evalCommand, evalEvidence } from "../connectors/eval-command.ts";
 import { basedOn, basedOnAll, mergeEvidence, strongest, type EvidencePart, type TaskEvidence } from "../engine/evidence.ts";
 import { caseEvidence } from "../connectors/agent-bundle.ts";
 import { criteriaSummary, qualificationNote } from "../engine/result.ts";
-import { CandidateUnavailable, CHALLENGERS, FINALISTS, order, SAMPLE_SIZE, type Stage } from "../engine/search.ts";
+import { CandidateUnavailable, CHALLENGERS, FINALISTS, order, SAMPLE_SIZE, trialOption, type Stage } from "../engine/search.ts";
 import { EvalProxy, retryable, type UnitTally } from "../eval/proxy.ts";
 import { runEval, type EvalOutcome } from "../eval/runner.ts";
 import type { Harness, HarnessUsage } from "../harness/harness.ts";
@@ -149,6 +153,8 @@ export interface RunState {
   /** The grading loop of each task with a generated eval, and the Eval version saved for each so far. */
   loop?: Record<string, LoopState>;
   savedEvals?: Record<string, number>;
+  /** The cheaper model each task's latest trial graded, or null when none could run. */
+  trialModel?: Record<string, string | null>;
   evalApproved?: boolean;
   repeats?: number;
   samples?: Record<string, string[]>;
@@ -493,7 +499,7 @@ const PHASE_HANDLERS: Record<Phase, Handler> = {
       const bundle = generated.bundle;
       const dir = generatedDir(name);
       data.generated[name] = generated;
-      (data.loop ??= {})[name] = startLoop();
+      (data.loop ??= {})[name] = startLoop(1, "current", true);
       const plan: PlannedEval = { source: "generated", command: `openmerit eval ${dir}`, generated: dir };
       if (own) {
         const { source: _source, helperFiles, explanation, generated: _generated, repoEval: _repoEval, items: _items, ...repoEval } = own;
@@ -681,7 +687,7 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
   const runUnit = async (task: string, plan: PlannedEval, kind: UnitRow["role"], entry: ModelRef, repeat: number, items: readonly string[] | null): Promise<UnitResult> => {
     const id = unitId(runId, taskKey(data, task), kind, entry, repeat);
     const unit = state.ensureUnit({ id, runId, task, model: entry.model, endpoint: entry.endpoint, role: kind, repeat });
-    const label = `${kind === "baseline" ? "current" : kind} ${entry.model}${kind === "screen" ? "" : ` ${repeat}/${repeats}`}`;
+    const label = `${kind === "baseline" ? "current" : kind} ${entry.model}${kind === "screen" || kind === "trial" ? "" : ` ${repeat}/${repeats}`}`;
     if (unit.status === "done") return unit.result as unknown as UnitResult;
     if (unit.status === "unavailable") throw new CandidateUnavailable(unit.error ?? "could not run");
     if (unit.status === "budget_paused") throw new NeedsInput(budgetQuestions(ctx, runId), "budget_paused");
@@ -788,6 +794,15 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
       command: plan.command,
       run: async (option, items, call) => {
         const entry: ModelRef = option ?? base;
+        // The trial ran the search's first probe on every item before grading: its screen reads that run instead of paying again.
+        const trialUnit = call.role === "screen" && option ? taskUnits(ctx, runId, data, task).find(unit => unit.role === "trial" && unit.status === "done" && unit.model === entry.model && unit.endpoint === entry.endpoint) : undefined;
+        const tried = trialUnit?.result as unknown as UnitResult | undefined;
+        if (trialUnit && tried && items?.every(item => item in tried.items)) {
+          const checks = Object.fromEntries(items.flatMap(item => (tried.checks?.[item] ? [[item, tried.checks[item]!]] : [])));
+          // The screen's share of the trial's cost, by item count.
+          const cost = unitCost(ctx, runId, [trialUnit])?.cost ?? null;
+          return { items: Object.fromEntries(items.map(item => [item, tried.items[item]!])), costUsd: cost === null ? null : cost * items.length / Math.max(1, tried.total), costIsEstimate: true, ...(Object.keys(checks).length ? { checks } : {}) };
+        }
         let result: UnitResult;
         try {
           // Screens run on the samples; the current model and finals on every item the eval runs.
@@ -845,10 +860,31 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
     save();
   };
 
+  /**
+   * The trial a person grades before the search: the current model on every item, `repeats` times (the
+   * search's baseline, which it replays), and one cheaper model once: the search's first probe, moving
+   * down the weaker half while it fails no item the current model passed in every run.
+   */
+  const trialTask = async (task: string, plan: PlannedEval) => {
+    const baseline: UnitResult[] = [];
+    for (let repeat = 1; repeat <= repeats; repeat++) baseline.push(await runUnit(task, plan, "baseline", base, repeat, null));
+    const reliable = Object.keys(baseline[0]!.items).filter(item => baseline.every(run => run.items[item] === true));
+    const picked = await trialOption(order(data.pool?.[task] ?? []), async option => {
+      const result = await runUnit(task, plan, "trial", option, 1, null);
+      return reliable.some(item => result.items[item] === false);
+    });
+    (data.trialModel ??= {})[task] = picked?.model ?? null;
+    save();
+  };
+
   try {
     for (const [task, plan] of plannedEvals(data)) {
       if (data.stopped[task]) continue;
-      try { await evaluateTask(task, plan); }
+      // A loop saved before grading came first is graded first from its current round on.
+      const loop = data.loop?.[task];
+      if (loop && !loop.gradeFirst && loop.status !== "accepted") data.loop![task] = { ...loop, gradeFirst: true, ...(loop.status === "regenerating" ? {} : { status: "trial", artifact: null }) };
+      const grading = plan.generated && data.loop?.[task] && data.loop[task]!.status !== "accepted";
+      try { if (!grading) await evaluateTask(task, plan); else if (data.loop![task]!.status === "trial") await trialTask(task, plan); }
       catch (error) {
         if (!(error instanceof StopTask)) throw error;
         data.stopped[task] = error.message;
@@ -862,15 +898,15 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
 }
 
 
-/** The grading loop for each generated eval: a person grades sampled answers, and the eval is accepted, written again or measured against its criteria. */
+/** The grading loop for each generated eval: a person grades sampled answers of its trial, and the eval is accepted, written again, or accepted against its criteria. An accepted eval goes back to evaluate for the search. */
 async function gradePhase({ ctx, runId, data, answers, getHarness, save }: PhaseInput): Promise<Phase> {
   const pending: Question[] = [];
   let again = false;
   for (const [task, plan] of plannedEvals(data)) {
     let loop = data.loop?.[task];
     if (!plan.generated || !loop || loop.status === "accepted" || data.stopped?.[task]) continue;
-    if (loop.status === "searching") {
-      loop = data.loop![task] = advanceLoop(loop, { type: "searched", artifact: { samples: samplesOf(ctx, runId, data, task) } });
+    if (loop.status === "trial") {
+      loop = data.loop![task] = advanceLoop(loop, { type: "tried", artifact: { samples: samplesOf(ctx, runId, data, task) } });
       save();
     }
     if (loop.status === "grading") {
@@ -899,10 +935,11 @@ async function gradePhase({ ctx, runId, data, answers, getHarness, save }: Phase
       ctx.state.event(runId, "grade", `${task}: OpenMerit wrote eval version ${loop.evalVersion} from the grades of round ${loop.round - 1}.`);
       save();
     }
-    if (loop.savedVersion && loop.savedVersion !== data.savedEvals?.[task]) saveAccepted(ctx, runId, data, task, plan, loop);
-    if (loop.status === "searching") {
-      // The next round measures again from scratch: its units have keys of their own.
-      delete data.search![task]; delete data.samples![task];
+    // Accepted now: the search runs on it next.
+    if (loop.savedVersion && loop.savedVersion !== data.savedEvals?.[task]) { saveAccepted(ctx, runId, data, task, plan, loop); again = true; }
+    if (loop.status === "trial") {
+      // The next round's trial measures again from scratch: its units have keys of their own.
+      delete data.search?.[task]; delete data.samples?.[task];
       again = true;
       save();
     }
@@ -911,17 +948,15 @@ async function gradePhase({ ctx, runId, data, answers, getHarness, save }: Phase
   return again ? "evaluate" : "compare";
 }
 
-/** The answers a person grades in a round: the current model's first run, and the pick's (else the best measured finalist's) first full run. */
+/** The answers a person grades in a round: the current model's first run, and the trial model's run. */
 function samplesOf(ctx: Context, runId: string, data: RunState, task: string) {
   const units = taskUnits(ctx, runId, data, task).filter(unit => unit.status === "done" && unit.repeat === 1);
   const answersOf = (unit: UnitRow | undefined) => ((unit?.result as unknown as UnitResult | undefined)?.answers ?? []);
   const current = units.find(unit => unit.role === "baseline");
-  const finals = units.filter(unit => unit.role === "final");
-  const score = (unit: UnitRow) => Number((unit.result as unknown as UnitResult).passes) / Math.max(1, Number((unit.result as unknown as UnitResult).total));
-  const candidate = finals.find(unit => unit.model === data.search?.[task]?.pick) ?? [...finals].sort((a, b) => score(b) - score(a))[0];
+  const trial = units.find(unit => unit.role === "trial" && unit.model === data.trialModel?.[task]);
   return pickSamples([
     ...(current ? [{ model: current.model, role: "current" as const, answers: answersOf(current) }] : []),
-    ...(candidate ? [{ model: candidate.model, role: "candidate" as const, answers: answersOf(candidate) }] : []),
+    ...(trial ? [{ model: trial.model, role: "trial" as const, answers: answersOf(trial) }] : []),
   ]);
 }
 
@@ -993,7 +1028,7 @@ function approvalQuestion(ctx: Context, runId: string, data: RunState): Question
     return [
       `${name}`,
       ...(plan.generated ? [
-        `  Eval: written by OpenMerit from its review of the code${generated ? `, ${generated.cases.length} cases (${kinds})` : ""}, saved in ${plan.generated}/ once you accept it: after the run you grade sampled answers, and OpenMerit writes the eval again where you disagree`,
+        `  Eval: written by OpenMerit from its review of the code${generated ? `, ${generated.cases.length} cases (${kinds})` : ""}, saved in ${plan.generated}/ once you accept it: first ${data.model} runs every case ${repeats} times and a cheaper model from the pool once, you grade sampled answers, and OpenMerit writes the eval again where you disagree; the search runs on the eval you accept`,
         ...(generated?.bundle.criteria?.length ? [`  Criteria: ${generated.bundle.criteria.join("; ")}`] : []),
         ...(generated?.bundle.guardrails?.length ? [`  Guardrails: ${generated.bundle.guardrails.join("; ")}`] : []),
         `  Judge: ${judgeRef(ctx, data).model}, for text answers and guardrails; its calls count in the budget, not in a model's cost per item`,
@@ -1005,7 +1040,7 @@ function approvalQuestion(ctx: Context, runId: string, data: RunState): Question
         `  Results: $OPENMERIT_RESULT${own.threshold !== undefined && !plan.generated ? `; pass rate ≥ ${own.threshold}` : ""}`,
       ] : []),
       `  Candidates: ${candidates.length} cheaper than ${data.model}${candidates.length ? `, ECI ${candidates[0]!.eci.toFixed(1)}–${candidates.at(-1)!.eci.toFixed(1)}` : ""}${data.unranked?.[name] ? ` (${data.unranked[name]} without ECI left out)` : ""}`,
-      `  Runs: at most ${runs.fullRuns} full and ${runs.screens} ${SAMPLE_SIZE}-item screens`,
+      `  Runs: at most ${runs.fullRuns} full and ${runs.screens} ${SAMPLE_SIZE}-item screens${plan.generated && data.loop?.[name]?.status !== "accepted" ? `, plus 1 to ${runs.probes} full trial runs of a cheaper model in each grading round` : ""}`,
       ...(plan.helperFiles ?? []).map(helper => `  New helper file ${helper.path} (${helper.purpose}):\n${helper.content.split("\n").map(line => `    + ${line}`).join("\n")}`),
     ].join("\n");
   });

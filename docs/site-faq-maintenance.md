@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Scout grades its eval before it searches — unreleased, 27 November 2026
+
+Reviewed the homepage against Scout running a trial (the current model and one cheaper model) and asking a person to grade it before any model search, with the search running only on the accepted eval. `site/index.html` has no FAQ block and makes no claim about when grading happens, how many models a person sees or what a run costs before the search. No FAQ change.
+
 ## Steadier picks: fixed screening cases, a retried screen and the last pick measured again — unreleased, 24 November 2026
 
 Reviewed the homepage against screens drawing the same cases for the same eval, a screen that misses one of five cases being retried once on five others, and the provisional pick being measured when it lists under the cheapest qualified model. `site/index.html` has no FAQ block and makes no claim about the search, its screening cases, screen size or run-to-run variance. No FAQ change.

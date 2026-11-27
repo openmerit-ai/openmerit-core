@@ -275,6 +275,15 @@ test("the grading loop: a disagreement rewrites the eval, the current model's wr
   other = advanceLoop(other, { type: "graded", grades: all((_id, pass) => (pass ? "good" : "bad")) });
   assert.deepEqual([other.status, other.bar, other.evalVersion, other.savedVersion, other.round], ["searching", "criteria", 3, 3, 2]);
   assert.throws(() => advanceLoop(other, { type: "regenerated" }), /not regenerating/);
+
+  // Grading first, the search has not run: the same grades accept the eval with the new bar at once, and a rewrite goes back to a trial run.
+  let first = startLoop(1, "current", true);
+  assert.throws(() => advanceLoop(first, { type: "searched", artifact: { samples } }), /not searching/);
+  first = advanceLoop(first, { type: "tried", artifact: { samples } });
+  const agreed = advanceLoop(first, { type: "graded", grades: all((_id, pass) => (pass ? "good" : "bad")) });
+  assert.deepEqual([agreed.status, agreed.bar, agreed.savedVersion, agreed.round], ["accepted", "criteria", 1, 1]);
+  const rewritten = advanceLoop(advanceLoop(first, { type: "graded", grades: all(() => "good") }), { type: "regenerated" });
+  assert.deepEqual([rewritten.status, rewritten.round, rewritten.evalVersion], ["trial", 2, 2]);
 });
 
 test("history names every harness a run used, in order, when `openmerit connect` switched it between steps", async () => {
@@ -581,8 +590,19 @@ test("Scout always writes an eval from its review of the code, runs the reposito
   const ctx = context(root, home, harness);
   requests.length = 0; judged.count = 0;
   const runId = startRun(ctx);
-  const { step, asked } = await drive(ctx, runId);
+  // A person grades the trial's answers before the search: no candidate has been screened when they are asked.
+  const searchedBeforeGrading = new Set<number>();
+  const { step, asked } = await drive(ctx, runId, {}, question => { searchedBeforeGrading.add(ctx.state.units(runId).filter(unit => unit.role === "screen" || unit.role === "final").length); return agree(question); });
   assert.equal(step.status, "done", step.error ?? JSON.stringify([step.questions, step.notices]).slice(0, 1500));
+  assert.deepEqual([...searchedBeforeGrading], [0]);
+  // The trial starts at the search's first probe; that model passed every case the current model passes, so the trial moved down the weaker half to one that fails some, and that one's answers were graded.
+  const trialModel = (ctx.state.getRun(runId)!.state as { trialModel: Record<string, string> }).trialModel["ticket classifier"];
+  const trials = ctx.state.units(runId).filter(unit => unit.role === "trial" && unit.status === "done");
+  const probes = step.result!.tasks[0]!.search!.trials.map(trial => trial.model);
+  assert.deepEqual(trials.map(unit => unit.model), probes.slice(0, 2));
+  assert.equal(trialModel, probes[1]);
+  // The search's screens of those two read the trial runs instead of running again.
+  assert.ok(!ctx.state.units(runId).some(unit => unit.role === "screen" && trials.some(trial => trial.model === unit.model)), "no second screen of a trial model");
   // Ten tickets are fewer than the twelve cases asked for, so the writer is asked once more.
   assert.deepEqual(harness.calls.filter(call => call !== "map"), ["discover:ticket classifier", "review:ticket classifier", "write", "write"]);
   const approval = asked.find(question => question.id === "approve_evals")!.detail!;
@@ -604,7 +624,7 @@ test("Scout always writes an eval from its review of the code, runs the reposito
   assert.ok(judged.count >= 30, `${judged.count} judge calls`);
   // The person agreed with every grade they were shown, the current model's and the pick's: that accepted the Eval, version 1.
   const grades = asked.filter(question => question.id.startsWith("grade_"));
-  assert.ok(grades.some(question => /your current model/.test(question.detail!)) && grades.some(question => /a candidate/.test(question.detail!)), "both models' answers are shown");
+  assert.ok(grades.some(question => /your current model/.test(question.detail!)) && grades.some(question => /a cheaper model/.test(question.detail!)), "both models' answers are shown");
   assert.deepEqual(JSON.parse(readFileSync(join(root, ".openmerit/evals/ticket-classifier/eval.json"), "utf8")), { version: 1, bar: "current", acceptedAt: JSON.parse(readFileSync(join(root, ".openmerit/evals/ticket-classifier/eval.json"), "utf8")).acceptedAt });
   // Accepting saved the Eval and the repository's eval beside it; nothing else in the repository changed.
   const saved = readRepoConfig(root).evals!["ticket classifier"]!;
@@ -655,8 +675,8 @@ test("below the floor a person's grades decide: answers the eval failed look goo
   const { step, asked } = await drive(ctx, runId, {}, question => (/, round 2/.test(question.detail!) ? agree(question) : `good: ${note}`));
   assert.equal(step.status, "done", step.error ?? JSON.stringify([step.questions, step.notices]).slice(0, 1500));
   const round1 = asked.filter(question => question.id.startsWith("grade_") && !/, round 2/.test(question.detail!));
-  assert.equal(round1.length, 6);
-  assert.ok(round1.every(question => /your current model/.test(question.detail!)), "below the floor nothing was screened, so only the current model's answers are shown");
+  assert.equal(round1.length, 12);
+  assert.deepEqual([round1.filter(question => /your current model/.test(question.detail!)).length, round1.filter(question => /a cheaper model/.test(question.detail!)).length], [6, 6], "below the floor the trial still shows both models");
   assert.ok(round1.filter(question => /OpenMerit's grade: failed: Answered (billing|technical|account), expected/.test(question.detail!)).length >= 3, "failed answers first, with the grader's reason");
   // The reviser heard what the person said, and the case writer was told it too.
   assert.deepEqual(harness.calls.filter(call => call === "revise" || call === "rewrite"), ["revise", "rewrite", "rewrite"], "ten tickets are fewer than twelve cases, so the writer is asked twice");

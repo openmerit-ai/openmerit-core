@@ -43,7 +43,8 @@ export interface UnitRow {
   model: string;
   endpoint: string;
   /** baseline: the current model on every item; screen: a candidate on the sampled items; final: a candidate on every item. */
-  role: "baseline" | "screen" | "final";
+  /** `trial`: a cheaper model's run that a person grades before the search. */
+  role: "baseline" | "screen" | "final" | "trial";
   repeat: number;
   status: UnitStatus;
   attempts: number;

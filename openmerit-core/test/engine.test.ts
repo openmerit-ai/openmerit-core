@@ -6,7 +6,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { approve, basedOn, binarySearch, CRITERIA_PASS_RATE, EVAL_FLOOR, meetsCriteria, challengers, checkAgent, evaluateTask, stableSample, mergeEvidence, MemoryLedger, proposeEdit, strongest, taskResult, type EvidencePart, type CatalogueModel, resolveGuardrails, type AgentRun, type Ledger, type MeasureCall, type Rung } from "../src/engine/index.ts";
+import { approve, basedOn, binarySearch, trialOption, CandidateUnavailable, CRITERIA_PASS_RATE, EVAL_FLOOR, meetsCriteria, challengers, checkAgent, evaluateTask, stableSample, mergeEvidence, MemoryLedger, proposeEdit, strongest, taskResult, type EvidencePart, type CatalogueModel, resolveGuardrails, type AgentRun, type Ledger, type MeasureCall, type Rung } from "../src/engine/index.ts";
 import { State } from "../src/state/db.ts";
 
 test("the search keeps a ladder's own order, and unplaced options are always challengers", async () => {
@@ -19,6 +19,35 @@ test("the search keeps a ladder's own order, and unplaced options are always cha
   const fineTune: Rung = { key: "acme/fraud-ft", price: null };
   assert.deepEqual(challengers(tiers, searched.selected!, tried, { unplaced: [fineTune] }).map(item => item.key), ["large", "acme/fraud-ft"]);
   assert.deepEqual(challengers(tiers, { key: "unpriced", price: null }, tried, { unplaced: [fineTune] }).map(item => item.key), ["acme/fraud-ft"]);
+});
+
+test("the grading trial runs the search's first probe, and moves down the weaker half while it finds nothing to grade", async () => {
+  const ladder = (keys: string[]): Rung[] => keys.map(key => ({ key, price: 1 }));
+  const seven = ladder(["a", "b", "c", "d", "e", "f", "g"]), six = ladder(["a", "b", "c", "d", "e", "f"]);
+  const firstProbe = async (rungs: Rung[]) => (await binarySearch(rungs, async () => true, 1)).trials[0]!.candidate.key;
+  const trial = async (rungs: Rung[], finds: (key: string) => boolean | "unavailable") => {
+    const ran: string[] = [];
+    const picked = await trialOption(rungs, async rung => {
+      const found = finds(rung.key);
+      if (found === "unavailable") throw new CandidateUnavailable(`${rung.key} cannot run`);
+      ran.push(rung.key);
+      return found;
+    });
+    return { picked: picked?.key ?? null, ran };
+  };
+  // Odd and even ladders start where the binary search does.
+  assert.deepEqual(await trial(seven, () => true), { picked: "d", ran: ["d"] });
+  assert.equal(await firstProbe(seven), "d");
+  assert.deepEqual(await trial(six, () => true), { picked: "c", ran: ["c"] });
+  assert.equal(await firstProbe(six), "c");
+  // Nothing to grade moves to the middle of the weaker half, down to the weakest.
+  assert.deepEqual(await trial(seven, key => key === "a"), { picked: "a", ran: ["d", "b", "a"] });
+  assert.deepEqual(await trial(seven, () => false), { picked: "a", ran: ["d", "b", "a"] }, "the weakest that ran when none finds anything");
+  // An option that cannot run is dropped, as the search drops it, and the last one that ran stays the answer.
+  assert.deepEqual(await trial(seven, key => (key === "d" ? "unavailable" : key === "c")), { picked: "c", ran: ["c"] });
+  assert.deepEqual(await trial(seven, key => (key === "b" ? "unavailable" : false)), { picked: "a", ran: ["d", "a"] });
+  assert.deepEqual(await trial(seven, () => "unavailable"), { picked: null, ran: [] });
+  assert.deepEqual(await trial([], () => true), { picked: null, ran: [] });
 });
 
 test("challengers are capped at the leader's list price, or at the ceiling the caller passes", () => {
