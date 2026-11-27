@@ -2,7 +2,7 @@
 // #view[data-view] from the cloud app's /api/* with the session token. Served by a self-hosted
 // OpenMerit server, they sign in with the browser session its sign-in link opened instead.
 import { trackPageview } from "./analytics.ts";
-import { ApiError, createApi, DEFAULT_PROJECT, type Api, type EvalDraft, type Me, type Project, type Task } from "./api.ts";
+import { ApiError, createApi, DEFAULT_PROJECT, type Api, type EvalDraft, type Me, type Project, type Run, type Task } from "./api.ts";
 import { loadClerk, needsOrganization, signedIn, unavailable, type AppConfig, type Clerk, type LocalConfig } from "./auth.ts";
 import { html, setLogos, type Html } from "./html.ts";
 import { startLive, stopLive } from "./live.ts";
@@ -12,7 +12,6 @@ import { confirmView } from "./views/confirm.ts";
 import { install, setLocalServer } from "./views/common.ts";
 import { connectionsView } from "./views/connections.ts";
 import { dataView } from "./views/data.ts";
-import { evalsView } from "./views/evals.ts";
 import { guardrailsView } from "./views/guardrails.ts";
 import { planView } from "./views/plan.ts";
 import { projectView } from "./views/project.ts";
@@ -24,7 +23,7 @@ declare const __LOGOS__: Record<string, string>;
 setLogos(__LOGOS__);
 
 const views: Record<string, (ctx: Ctx) => Promise<Mounted>> = {
-  runs: mount(runsView), run: mount(runView), tasks: mount(tasksView), evals: mount(evalsView), connections: mount(connectionsView),
+  runs: mount(runsView), run: mount(runView), tasks: mount(tasksView), connections: mount(connectionsView),
   guardrails: mount(guardrailsView), plan: mount(planView), data: mount(dataView), project: mount(projectView), account: mount(accountView), confirm: mount(confirmView),
 };
 
@@ -279,15 +278,19 @@ async function newProject(): Promise<void> {
   dialog.showModal();
 }
 
-// The sidebar's Review evals item: shown with its count only while drafts or tasks whose eval waits for review wait.
+// The sidebar's Tasks item counts what needs a person: tasks a repository review found, runs waiting for grades or an
+// answer, evals to check and picks to decide. The Tasks page lists the same.
 async function fillReview(api: Api): Promise<void> {
-  const item = document.querySelector<HTMLElement>(".nav-action[href='/evals/']");
-  if (!item) return;
-  const [tasks, drafts] = await Promise.all([api.get<Task[]>("/api/tasks").catch((): Task[] => []), api.get<EvalDraft[]>("/api/eval-drafts").catch((): EvalDraft[] => [])]);
-  const waiting = tasks.filter((task) => task.state === "review").length + drafts.length;
-  item.hidden = waiting === 0 && !item.hasAttribute("aria-current");
-  item.querySelector(".count")!.textContent = waiting ? String(waiting) : "";
-  item.title = waiting ? `Review evals: ${waiting} waiting` : "Review evals";
+  const item = document.querySelector<HTMLElement>(".nav-item[href='/tasks/']");
+  const count = item?.querySelector<HTMLElement>(".count");
+  if (!item || !count) return;
+  const [tasks, drafts, runs] = await Promise.all([api.get<Task[]>("/api/tasks").catch((): Task[] => []), api.get<EvalDraft[]>("/api/eval-drafts").catch((): EvalDraft[] => []), api.get<Run[]>("/api/runs").catch((): Run[] => [])]);
+  const latest = new Map<string, Run>();
+  for (const run of runs) if (!latest.has(run.taskId) || latest.get(run.taskId)!.startedAt < run.startedAt) latest.set(run.taskId, run);
+  const needs = tasks.filter((task) => task.state !== "retired" && (task.state === "review" || latest.get(task.id)?.status === "needs_input"
+    || (task.lastRunAt === null && task.status === "new") || (task.status === "picked" && !(task.decision && task.decision.jobId === task.lastJobId)))).length + drafts.length;
+  count.textContent = needs ? String(needs) : "";
+  item.title = needs ? `Tasks: ${needs} need${needs === 1 ? "s" : ""} you` : "Tasks";
 }
 
 async function render(ctx: Ctx): Promise<void> {

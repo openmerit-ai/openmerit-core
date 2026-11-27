@@ -227,7 +227,7 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
         items: grades.map(question => {
           const [grade = "", ...note] = String((answers as Answers)[question.id]).split(":");
           const label = question.options?.find(option => option.value === grade.trim())?.label ?? grade;
-          return `${question.prompt.replace(/: does it look right\?$/, "")}: ${label}${note.length ? ` (${note.join(":").trim()})` : ""}`;
+          return `${question.prompt.replace(/: is this answer right\?$/, "")}: ${label}${note.length ? ` (${note.join(":").trim()})` : ""}`;
         }) });
     }
     const handle = client.job.get([view.jobId]);

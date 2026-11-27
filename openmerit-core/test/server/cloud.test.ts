@@ -16,7 +16,7 @@ import { watchState } from "../../src/server/actors/account.ts";
 import { evaluateTask, trialOption } from "../../src/server/engine.ts";
 import { buildPool } from "../../src/job/pool.ts";
 import type { TaskBundle } from "../../src/ranking/index.ts";
-import { bundle, caller, costOf, LOCAL_TOKEN, signedInPerson, crash, fakeCapture, fakeModels, startApp, stop, subscribe, untilDone, waitFor, WEAK_BELOW, WRITTEN, TICKETS, catalogue, type App, type FakeModels } from "./helpers.ts";
+import { bundle, caller, costOf, LOCAL_TOKEN, signedInPerson, crash, fakeCapture, fakeModels, startApp, stop, subscribe, untilDone, personGrade, waitFor, WEAK_BELOW, WRITTEN, TICKETS, catalogue, type App, type FakeModels } from "./helpers.ts";
 
 const CLERK = { CLERK_SECRET_KEY: "sk_test_fake", CLERK_PUBLISHABLE_KEY: `pk_test_${Buffer.from("clerk.openmerit.test$").toString("base64")}` };
 type Data = Record<string, unknown>;
@@ -601,7 +601,7 @@ test("a person grades a run's answers: a disagreement writes the eval again, agr
     assert.match(started.text, /Before it searches, you grade answers of the current model and a cheaper one: .* up to 3 rounds/);
     const result = () => agent.tool("openmerit_result", { job_id: jobId });
 
-    // Round 1, before any search: the current model's answers and a cheaper model's from the trial, each with OpenMerit's grade.
+    // Round 1, before any search: the current model's answers and a cheaper model's from the trial, without the eval's grade.
     const asked = await waitFor(result, value => value.data.phase === "grading");
     const questions = asked.data.questions as { id: string; detail: string }[];
     assert.ok(questions.length > 6 && questions.every(question => question.id.startsWith("grade_graded_classifier_r1_")), asked.text);
@@ -609,9 +609,10 @@ test("a person grades a run's answers: a disagreement writes the eval again, agr
     const current = questions.filter(question => question.detail.startsWith("openai/gpt-5.4 (your current model)"));
     const cheaper = questions.filter(question => /^\S+ \(a cheaper model\)/.test(question.detail));
     assert.equal(current.length + cheaper.length, questions.length);
-    assert.ok(current.every(question => question.detail.endsWith("OpenMerit's grade: passed")), "the fake's current model answers every case right");
-    // The trial moved down the pool to a model the fake answers wrongly, so a person sees what the eval fails.
-    assert.ok(cheaper.length > 0 && cheaper.some(question => /OpenMerit's grade: failed/.test(question.detail)), JSON.stringify(cheaper.map(question => question.detail.split("\n")[0])));
+    assert.ok(questions.every(question => !/OpenMerit's grade|passed|failed/.test(question.detail)), "a person judges the answer without the eval's grade");
+    assert.ok(current.every(question => personGrade(question.detail) === "good"), "the fake's current model answers every case right");
+    // The trial moved down the pool to a model the fake answers wrongly, so a person sees wrong answers too.
+    assert.ok(cheaper.length > 0 && cheaper.some(question => personGrade(question.detail) === "bad"), JSON.stringify(cheaper.map(question => question.detail.split("\n")[0])));
     const screened = models.calls.filter(call => !call.ticket.startsWith("writer:")).map(call => call.model);
     assert.equal(new Set(screened).size, 1 + new Set(screened.filter(model => model !== "openai/gpt-5.4")).size);
     assert.ok(new Set(screened.filter(model => model !== "openai/gpt-5.4")).size <= Math.ceil(Math.log2(catalogue.models.length + 1)), "only the trial's models ran before grading, not the search");
@@ -623,7 +624,7 @@ test("a person grades a run's answers: a disagreement writes the eval again, agr
     const refused = await agent.api<{ notices: string[]; questions: unknown[] }>(`/api/runs/${jobId}/answers`, { method: "POST", body: JSON.stringify({ answers: { [mine.id]: "maybe" } }) });
     assert.equal(refused.status, 200);
     assert.ok(refused.body.notices.some(notice => notice.startsWith(`Answer not used: ${mine.id}`)), refused.body.notices.join("\n"));
-    const grades = Object.fromEntries(questions.map(question => [question.id, question === mine ? "bad: the queue should name the product area" : question.detail.endsWith("OpenMerit's grade: passed") ? "good" : "bad"]));
+    const grades = Object.fromEntries(questions.map(question => [question.id, question === mine ? "bad: the queue should name the product area" : personGrade(question.detail)]));
     const sent = await agent.api(`/api/runs/${jobId}/answers`, { method: "POST", body: JSON.stringify({ answers: grades }) });
     assert.equal(sent.status, 200);
 

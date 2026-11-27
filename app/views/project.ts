@@ -46,7 +46,7 @@ function taskSpecs(repo: Repo): Html {
             ${list("A right answer", spec.criteria)}${list("It must never", spec.guardrails)}
           </div>`)}
           ${unmapped.map((item) => html`<p class="note">${plural(item.usageIds.length, "model call")} in no spec: ${item.reason}</p>`)}
-          ${result.tasks.length ? html`<p class="note">A spec for a task this project does not have yet waits in <a href="/evals/">Review evals</a> as a draft.</p>` : ""}
+          ${result.tasks.length ? html`<p class="note">A task this project does not have yet is listed on <a href="/tasks/">Tasks</a> as Found in code, to measure or ignore.</p>` : ""}
           ${result.costUsd ? html`<p class="note">This review cost OpenMerit $${result.costUsd.toFixed(2)} in model calls, counted in your spend; it is not one of your plan's evaluations.</p>` : ""}
         </details>`;
 }

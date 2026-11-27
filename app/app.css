@@ -55,8 +55,8 @@ button { font: inherit; color: inherit; cursor: pointer; background: none; borde
 .nav-item[aria-current] .icon { color: var(--ink); }
 /* An action item: its count of waiting drafts, right-aligned in the item. */
 .nav-item[hidden] { display: none; }
-.nav-action .count { margin-left: auto; padding: 0 6px; min-width: 18px; height: 18px; border-radius: 9px; background: var(--ink); color: var(--paper); font-size: 11px; font-weight: 500; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
-.nav-action .count:empty { display: none; }
+.nav-item .count { margin-left: auto; padding: 0 6px; min-width: 18px; height: 18px; border-radius: 9px; background: var(--ink); color: var(--paper); font-size: 11px; font-weight: 500; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
+.nav-item .count:empty { display: none; }
 .sidebar-foot { position: relative; margin: auto -8px 0; padding: 8px 8px 0; border-top: 1px solid var(--line); }
 .profile { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 8px; border-radius: 6px; text-align: left; font-weight: 500; }
 .profile:hover, .profile[aria-expanded="true"], .profile.current { background: var(--hover); }
@@ -332,7 +332,7 @@ body.standalone main { min-height: 100vh; display: grid; place-items: start cent
 .sign-in .steps { margin: 0 0 8px; padding-left: 20px; display: grid; gap: 4px; }
 .device-code { font-family: var(--mono); font-size: 15px; letter-spacing: .08em; padding: 2px 8px; border-radius: 6px; background: var(--code-bg); color: var(--code-ink); }
 
-/* The grading loop: one card per sampled answer, with its input, answer and OpenMerit's grade, then the person's grade and note. */
+/* The grading loop on a task's page: one card per sampled answer, with its input and answer, then the person's grade and note. */
 .grade-form > p:first-child { margin-bottom: 14px; }
 fieldset.grade { margin: 0 0 12px; min-width: 0; display: grid; gap: 8px; }
 fieldset.grade legend { font-weight: 600; padding: 0; float: left; width: 100%; }
@@ -342,6 +342,11 @@ fieldset.grade legend { font-weight: 600; padding: 0; float: left; width: 100%; 
 .grade-choice input { accent-color: var(--green); width: auto; padding: 0; margin: 0; }
 .grade-choice label { white-space: nowrap; }
 .grade-note { display: grid; gap: 2px; }
+
+/* Tasks with none yet: the two ways in, side by side where they fit. */
+.ways { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.ways .card.empty { margin: 0; min-width: 0; }
+.ways .diff div { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* A coding agent's request to confirm: one column that fits a phone. */
 .confirm-page { width: 100%; max-width: 560px; min-width: 0; display: grid; gap: 14px; }
