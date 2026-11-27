@@ -36,7 +36,7 @@ export const planView: View<Spend> = {
         </div>`
       : html`<div class="card">
           <div class="pick-head"><span class="pick-model">No plan</span>${me.plan.status === "canceled" ? html`<span class="pill">Canceled</span>` : ""}</div>
-          <p class="sub" style="margin-top: 8px">A plan lets OpenMerit measure your coding agents' tasks. OpenMerit pays for the model calls on OpenRouter; calls on your own endpoints bill your keys.</p>
+          <p class="sub" style="margin-top: 8px">A plan lets OpenMerit measure your coding agents' tasks and review your GitHub repositories. OpenMerit pays for the model calls on OpenRouter; calls on your own endpoints bill your keys.</p>
           <p style="margin-top: 10px">${admin ? html`<button class="btn primary" type="button" data-action="checkout">Choose a plan</button>` : html`<span class="sub">Ask an admin of ${me.account.name} to choose a plan.</span>`}</p>
           <p class="note">Checkout opens on Stripe.</p>
         </div>`;

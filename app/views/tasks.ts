@@ -11,7 +11,7 @@ const taskLink = (task: Task, tab = "") => `/tasks/?task=${encodeURIComponent(ta
 // Watching is automatic; the cloud app reports why a task is not watched. Before it sends state,
 // a task that is not watching is taken as frozen by its watch guardrail.
 const stateOf = (task: Task): TaskState => task.state ?? (task.watching ? "watching" : "frozen");
-// A task that has not run yet neither watches nor spends until its first run.
+// A task approved from a repository review has no run yet: it neither watches nor spends until its first.
 const notRun = (task: Task): boolean => task.lastRunAt === null && task.status === "new";
 const states: Record<TaskState, (task: Task) => Html> = {
   watching: () => html`<span class="pill good">Watching</span>`,
@@ -89,7 +89,7 @@ function evalTab(detail: TaskDetail, view: EvalView, editable: boolean): Html {
 }
 
 function runsTab(detail: TaskDetail): Html {
-  if (!detail.jobs.length) return html`<section>${empty("Not run yet", "Its first run measures cheaper models on its eval; after that OpenMerit watches it.", html`<p><button class="btn primary" type="button" data-action="run">Run now</button></p>`)}</section>`;
+  if (!detail.jobs.length) return html`<section>${empty("Not run yet", "This task was approved from a repository review. Its first run writes its test cases and asks you to grade them, which accepts its eval, then measures cheaper models on it; after that OpenMerit watches it.", html`<p><button class="btn primary" type="button" data-action="run">Run now</button></p>`)}</section>`;
   const versions = new Set(detail.jobs.map((run) => run.evalVersion).filter((value) => value !== null && value !== undefined));
   return html`<section aria-labelledby="runs">
       <h2 id="runs">Runs</h2>
@@ -127,7 +127,7 @@ export const tasksView: View<Data> = {
       const retired = stateOf(detail) === "retired";
       return html`<div class="eyebrow"><a href="/tasks/">Tasks</a><span>›</span><span>${detail.environment}</span></div>
         <h1 class="title">${detail.name}</h1>
-        <p class="lede">The code uses ${model(detail.currentModel)}. ${notRun(detail) ? "It has not run yet." : html`Latest: ${result(detail)}`}</p>
+        <p class="lede">The code uses ${model(detail.currentModel)}. ${notRun(detail) ? "Approved from a repository review; it has not run yet." : html`Latest: ${result(detail)}`}</p>
         <p class="task-actions">${watch(detail)}
           ${stateOf(detail) === "review" ? "" : html`<button class="btn${notRun(detail) ? " primary" : ""}" type="button" data-action="run">${notRun(detail) ? "Run now" : "Run again"}</button>`}
           ${retired ? "" : html`<button class="btn" type="button" data-action="retire">Retire</button>`}
@@ -144,7 +144,7 @@ export const tasksView: View<Data> = {
     const tasks = [...active.filter((task) => !notRun(task)), ...active.filter(notRun)], retired = all.filter((task) => stateOf(task) === "retired");
     const watching = all.filter((task) => stateOf(task) === "watching" && !notRun(task)).length;
     const top = header(me, "Tasks", "OpenMerit watches every task: it re-runs a task's tests when a new model could fit it or prices change, and tells you when a cheaper model matches the one you use.", [plural(tasks.length, "task"), `${watching} watched`]);
-    if (!all.length) return html`${top}<section aria-labelledby="tasks"><h2 id="tasks">All Tasks</h2>${empty("No tasks yet", "A task appears the first time a coding agent asks OpenMerit which model it should use.")}</section>`;
+    if (!all.length) return html`${top}<section aria-labelledby="tasks"><h2 id="tasks">All Tasks</h2>${empty("No tasks yet", "A task appears the first time a coding agent asks OpenMerit which model it should use, or when you approve a draft from a repository review.")}</section>`;
     return html`${top}
     <section aria-labelledby="tasks">
       <h2 id="tasks">All Tasks</h2>

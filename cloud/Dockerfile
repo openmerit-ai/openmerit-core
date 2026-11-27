@@ -2,7 +2,8 @@
 # source with the openmerit-core modules it imports. Build from the repository root:
 #   docker build -f cloud/Dockerfile .
 FROM node:22.19.0-bookworm-slim
-# The harness's read-only grep and find tools run ripgrep and fd. Debian's fd (8.6) lacks --no-require-git, which Pi's
+# git clones the GitHub repositories a project adds (src/server/github.ts), over HTTPS only. The reviewer's
+# and harness's read-only grep and find tools run ripgrep and fd. Debian's fd (8.6) lacks --no-require-git, which Pi's
 # find passes, so fd is the pinned upstream release, checked against its SHA-256; curl leaves with the layer.
 ARG FD_VERSION=10.3.0
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates ripgrep curl \
@@ -34,6 +35,7 @@ COPY openmerit-core/src/catalogue openmerit-core/src/catalogue
 COPY openmerit-core/src/connectors/agent-bundle.ts openmerit-core/src/connectors/eval-command.ts openmerit-core/src/connectors/
 COPY openmerit-core/src/job openmerit-core/src/job
 COPY openmerit-core/src/harness openmerit-core/src/harness
+COPY openmerit-core/src/review openmerit-core/src/review
 COPY openmerit-core/src/state/config.ts openmerit-core/src/state/paths.ts openmerit-core/src/state/
 COPY openmerit-core/data/catalogue.json openmerit-core/data/eci-estimates.csv openmerit-core/data/
 COPY openmerit-core/src/server openmerit-core/src/server

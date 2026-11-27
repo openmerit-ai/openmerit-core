@@ -1,6 +1,6 @@
 // /api/* for app.openmerit.ai, and reports as Markdown for agents. Requests carry a Clerk session
 // token; the account is the caller's active Clerk organization, which holds its plan, members and projects.
-// A project holds tasks, runs, endpoints and guardrails; a request names its project with X-OpenMerit-Project,
+// A project holds tasks, runs, endpoints, GitHub repositories and guardrails; a request names its project with X-OpenMerit-Project,
 // else it works in the default project. Changing projects, endpoints, environment guardrails, billing and the
 // account itself needs the organization's admin role.
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
@@ -12,7 +12,8 @@ import type { AuthResult, Identity } from "./auth.ts";
 import { confirmUrl } from "./config.ts";
 import { LEVELS, type Guardrails, type Level } from "./engine.ts";
 import { explain, type JobResult } from "../job/report.ts";
-import { bundleProblem, DEFAULT_PROJECT, redactBundle, rerunJob, runTask, settleOrphans } from "./start.ts";
+import { bundleProblem, DEFAULT_PROJECT, redactBundle, rerunJob, runTask, settleOrphans, taskIdFor } from "./start.ts";
+import { appInstallations } from "./github.ts";
 import type { ConfirmationView, EvalSpec, EvalView } from "./actors/account.ts";
 import { OPENROUTER } from "../job/pool.ts";
 import type { Answers } from "./actors/job.ts";
@@ -70,11 +71,14 @@ async function body(request: Request): Promise<Json | null> {
   try { const value = await request.json() as unknown; return value && typeof value === "object" && !Array.isArray(value) ? value as Json : null; } catch { return null; }
 }
 
-/** Why an edited eval cannot be saved, or null: its spec is checked as a bundle's, and each case needs an ID and string inputs. */
+/**
+ * Why an edited eval cannot be saved, or null: its spec is checked as a bundle's, and each case needs an ID and string
+ * inputs. Cases null checks the spec only, for an approved draft with no examples, whose first run writes its cases.
+ */
 function evalProblem(bundle: TaskBundle, spec: unknown, cases: unknown): string | null {
   if (!spec || typeof spec !== "object" || Array.isArray(spec)) return "Send the eval's spec as an object.";
   const problem = bundleProblem({ ...bundle, ...specOf(spec as TaskBundle), examples: undefined });
-  if (problem) return problem;
+  if (problem || cases === null) return problem;
   if (!Array.isArray(cases) || !cases.length) return "An eval needs at least one case.";
   const ids = new Set<string>();
   for (const item of cases as unknown[]) {
@@ -418,6 +422,64 @@ export function apiRoutes(deps: AppDeps) {
       const secret = await account.share(match[1]!);
       if (!secret) return error(404, "This run has no report yet.");
       return json(200, { url: `${config.publicUrl}/api/share/${shareToken(config.keyEncryptionKey, who.accountId, secret)}.md` });
+    }
+
+    // The member's GitHub connection, for every organization: the OpenMerit GitHub App's install link and, once they connected
+    // GitHub, the installations their GitHub token reaches and the repositories each gives OpenMerit.
+    if (path === "/api/github" && method === "GET") {
+      const slug = config.github.appSlug;
+      const installUrl = slug ? `https://github.com/apps/${slug}/installations/new` : null;
+      const token = slug && deps.auth ? await deps.auth.githubToken(who.userId).catch(() => null) : null;
+      if (!slug || !token) return json(200, { app: slug, installUrl, signedIn: false, installations: [], error: null });
+      const found = await appInstallations(token, config.github, fetch);
+      return json(200, { app: slug, installUrl, signedIn: true, installations: found.ok ? found.installations : [], error: found.ok ? null : found.error });
+    }
+    // The project's GitHub repositories, read-only: a public one by its URL, a private one with a fine-grained token, or one
+    // an installation of the OpenMerit GitHub App gives the member who connected GitHub. Each review writes task drafts.
+    if (path === "/api/repos" && method === "GET") return json(200, await account.repos(projectId));
+    if (path === "/api/repos" && method === "POST") {
+      const denied = admin(); if (denied) return denied;
+      const input = await body(request);
+      if (!input) return error(400, "Send the repository as JSON: {url, token}. The token is only for a private repository.");
+      if (typeof input.token === "string" && input.token.trim()) {
+        const held = await hold(`Add the repository ${String(input.url ?? "")}`, [`With the fine-grained token ending ${input.token.trim().slice(-4)}`], input); if (held) return held;
+      }
+      const added = await account.addRepo({ projectId, url: String(input.url ?? ""), token: typeof input.token === "string" ? input.token : null, githubUser: input.via === "github" ? who.userId : null });
+      return added.ok ? json(201, added.repo) : error(400, added.error);
+    }
+    if ((match = /^\/api\/repos\/([\w-]+)\/review$/.exec(path)) && method === "POST") {
+      const denied = admin(); if (denied) return denied;
+      const started = await account.reviewRepo({ projectId, id: match[1]! });
+      return started.ok ? json(202, started.repo) : error(started.status, started.error);
+    }
+    if ((match = /^\/api\/repos\/([\w-]+)$/.exec(path)) && method === "DELETE") {
+      const denied = admin(); if (denied) return denied;
+      return (await account.removeRepo({ projectId, id: match[1]! })) ? json(200, { deleted: true }) : error(404, "No such repository.");
+    }
+
+    // Tasks a repository review found, until a person approves (creating the task, not run yet) or dismisses each.
+    if (path === "/api/eval-drafts" && method === "GET") return json(200, await account.evalDrafts({ projectId, status: "pending" }));
+    if ((match = /^\/api\/eval-drafts\/([\w-]+)\/approve$/.exec(path)) && method === "POST") {
+      const draft = (await account.evalDrafts({ projectId, status: "pending" })).find(item => item.id === match![1]);
+      if (!draft) return error(404, "No such draft in this project.");
+      const input = await body(request) ?? {};
+      // The person may edit the spec and the cases as they approve. The cases become the task's examples: its first run
+      // writes more cases from the spec and grades them with the person before any search, which accepts version 1.
+      // A draft may have no examples: its first run writes every case. Cases the person left out are not examples.
+      const spec = (input.spec ?? specOf(draft.bundle)) as EvalSpec, cases = ((input.cases ?? draft.cases) as Case[]);
+      const problem = evalProblem(draft.bundle, spec, cases.length ? cases : null);
+      if (problem) return error(400, problem);
+      const kept = cases.filter(item => item.approved !== false);
+      const { examples: _reviewed, ...rest } = draft.bundle;
+      const bundle = redactBundle({ ...rest, ...specOf(spec as TaskBundle), ...(kept.length ? { examples: kept.map(item => ({ input: item.input, ...(item.expected === undefined ? {} : { expected: item.expected }), ...(item.toolResults ? { toolResults: item.toolResults as Record<string, unknown> } : {}) })) } : {}) });
+      const taskId = taskIdFor(projectId, draft.environment, bundle.task);
+      const approved = await account.approveDraft({ id: draft.id, taskId, userId: who.userId, bundle });
+      if (!approved.ok) return error(approved.status, approved.error);
+      await client.task.getOrCreate([who.accountId, taskId], { createWithInput: { accountId: who.accountId, taskId, projectId, environment: draft.environment, name: bundle.task } }).prepare(bundle);
+      return json(201, { taskId });
+    }
+    if ((match = /^\/api\/eval-drafts\/([\w-]+)$/.exec(path)) && method === "DELETE") {
+      return (await account.dismissDraft({ projectId, id: match[1]!, userId: who.userId })) ? json(200, { dismissed: true }) : error(404, "No such pending draft.");
     }
 
     if (path === "/api/endpoints" && method === "GET") return json(200, await account.endpoints(projectId));

@@ -2,7 +2,7 @@
 // #view[data-view] from the cloud app's /api/* with the session token. Served by a self-hosted
 // OpenMerit server, they sign in with the browser session its sign-in link opened instead.
 import { trackPageview } from "./analytics.ts";
-import { ApiError, createApi, DEFAULT_PROJECT, type Api, type Me, type Project, type Task } from "./api.ts";
+import { ApiError, createApi, DEFAULT_PROJECT, type Api, type EvalDraft, type Me, type Project, type Task } from "./api.ts";
 import { loadClerk, needsOrganization, signedIn, unavailable, type AppConfig, type Clerk, type LocalConfig } from "./auth.ts";
 import { html, setLogos, type Html } from "./html.ts";
 import { startLive, stopLive } from "./live.ts";
@@ -279,12 +279,12 @@ async function newProject(): Promise<void> {
   dialog.showModal();
 }
 
-// The sidebar's Review evals item: shown with its count only while tasks whose eval waits for review wait.
+// The sidebar's Review evals item: shown with its count only while drafts or tasks whose eval waits for review wait.
 async function fillReview(api: Api): Promise<void> {
   const item = document.querySelector<HTMLElement>(".nav-action[href='/evals/']");
   if (!item) return;
-  const tasks = await api.get<Task[]>("/api/tasks").catch((): Task[] => []);
-  const waiting = tasks.filter((task) => task.state === "review").length;
+  const [tasks, drafts] = await Promise.all([api.get<Task[]>("/api/tasks").catch((): Task[] => []), api.get<EvalDraft[]>("/api/eval-drafts").catch((): EvalDraft[] => [])]);
+  const waiting = tasks.filter((task) => task.state === "review").length + drafts.length;
   item.hidden = waiting === 0 && !item.hasAttribute("aria-current");
   item.querySelector(".count")!.textContent = waiting ? String(waiting) : "";
   item.title = waiting ? `Review evals: ${waiting} waiting` : "Review evals";

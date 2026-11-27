@@ -24,9 +24,9 @@ export interface Me {
   plan: Plan;
 }
 
-// A project in the organization (GET /api/projects): it holds tasks, runs, guardrails and model endpoints.
-// The default project holds what the organization had before projects.
-export interface Project { id: string; name: string; createdAt: string; tasks: number; endpoints: number }
+// A project in the organization (GET /api/projects): it holds tasks, runs, guardrails, model endpoints and
+// GitHub repositories. The default project holds what the organization had before projects.
+export interface Project { id: string; name: string; createdAt: string; tasks: number; endpoints: number; repos: string[] }
 export const DEFAULT_PROJECT = "default";
 
 // The member's own ChatGPT subscription (GET /api/me/subscriptions), for every organization they belong to.
@@ -81,8 +81,11 @@ export interface EvalView {
   accepted: EvalAccepted | null;
   draft: EvalRevision | null;
 }
-// A task's output shape, from the bundle the coding agent sent, for editing expected answers.
+// A task's output shape, from the bundle the coding agent or a repository review sent, for editing expected answers.
 export type TaskOutput = { kind: "text" } | { kind: "json"; schema: object } | { kind: "label"; labels: string[] };
+// A task a repository review found, waiting for a person. Approving it creates the task, not run yet, with the
+// spec and cases as its examples; its first run writes more cases and grades them with the person, which accepts version 1.
+export interface EvalDraft { id: string; projectId: string; repoId: string | null; environment: string; name: string; bundle: EvalSpec & { task: string; current: { model: string }; output: TaskOutput }; cases: EvalCase[]; status: "pending" | "approved" | "dismissed"; createdAt: string; taskId: string | null }
 // GET /api/tasks/:id: the task's row with its bundle, eval summary and latest runs.
 export interface TaskDetail extends Task { bundle: { output: TaskOutput; current: { model: string } } | null; eval: { version: number; cases: number; review: EvalRevision["reason"] | null } | null; jobs: Run[] }
 
@@ -194,6 +197,51 @@ export interface LiveProgress {
   // Pass rate so far, 0 to 100, after each case; time is Unix seconds.
   history: { time: number; rate: number }[];
   minutesLeft: number | null;
+}
+
+// A model call a repository's review found: where it is and the model it names, or the expression that picks it (openmerit-core/src/server/github.ts).
+export interface ModelCall { file: string; line: number; value: string; catalogueId: string | null; dynamic: boolean; envVar: string | null }
+// A task spec a repository's review wrote (openmerit/ranking's TaskBundle): the fields the app shows.
+export interface TaskSpec {
+  task: string; description?: string; output: { kind: "text" | "json" | "label"; labels?: string[] }; tools?: { name: string }[];
+  criteria?: string[]; guardrails?: string[]; codeRefs?: { file: string; line: number }[];
+}
+export interface RepoReview {
+  // scan lists the model calls only (the app had no reviewer key, or the review predates 24 Nov 2026); review also writes the task specs in tasks.
+  reviewer: string;
+  commit: string;
+  branch: string;
+  files: number;
+  bytes: number;
+  models: { value: string; catalogueId: string | null; calls: number }[];
+  // The application's model calls only; examples, scripts and demos count as the application.
+  modelCalls: ModelCall[];
+  totalCalls: number;
+  // Model calls in tests, fixtures, docs and other support files, which are counted but not listed, and the
+  // sentence that says so ("3 more in tests, fixtures or docs, not listed"). Absent from reviews before 24 Nov 2026.
+  supportCalls?: number;
+  notListed?: string | null;
+  tasks: TaskSpec[];
+  // Application model calls in no spec, and why, such as a review that reached its budget. Absent from scan-only reviews.
+  unmapped?: { usageIds: string[]; reason: string }[];
+  // What the review's model calls cost OpenMerit, counted in the account's spend.
+  costUsd?: number;
+  durationMs: number;
+}
+// GET /api/github: the OpenMerit GitHub App's install link and, for a member signed in with GitHub, the installations
+// their GitHub token reaches and the repositories each gives OpenMerit. error is GitHub's refusal of that token.
+export interface GitHubAccess {
+  app: string | null; installUrl: string | null; signedIn: boolean; error: string | null;
+  installations: { id: number; account: string; type: string; selection: "all" | "selected"; manageUrl: string; repos: { fullName: string; private: boolean; defaultBranch: string }[] }[];
+}
+// A GitHub repository the account added (GET /api/repos). tokenLast4 is null for a public one added by its URL.
+// review.result is the last review that finished, kept while another runs or after one fails.
+export type ReviewStatus = "queued" | "reviewing" | "done" | "failed";
+export interface Repo {
+  id: string; fullName: string; url: string; private: boolean; defaultBranch: string; tokenLast4: string | null; addedAt: string; checkedAt: string;
+  // How OpenMerit reads it: its public URL, a fine-grained token, or the GitHub sign-in of the member who added it (a Clerk user ID).
+  access: "public" | "token" | "github"; githubUser: string | null;
+  review: { status: ReviewStatus; requestedAt: string; finishedAt: string | null; error: string | null; result: RepoReview | null };
 }
 
 export type EndpointKind = "openrouter" | "openai-compatible" | "anthropic";

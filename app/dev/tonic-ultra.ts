@@ -239,9 +239,9 @@ export function tonicUltra(): State {
   const ordered = tasks.slice().sort((a, b) => (b.lastRunAt ?? "").localeCompare(a.lastRunAt ?? ""));
   return {
     me: { user: { id: "user_jordan" }, account: { id: "org_tonic", name: "Tonic Ultra" }, role: "admin", plan: { name: "Cloud", status: "active", periodEnd: "2026-12-01T00:00:00Z", includedEvals: 100, usedEvals: 87 } },
-    tasks: ordered, runs, reports, jobs, endpoints: endpoints.map((item) => ({ ...item })),
+    tasks: ordered, runs, reports, jobs, endpoints: endpoints.map((item) => ({ ...item })), repos: [],
     spend: { openmeritUsd: 211.4, customerUsd: 143.85, monthlyCapUsd: 250, customerCapUsd: 200, period: { start: "2026-11-01T00:00:00.000Z", end: "2026-12-01T00:00:00.000Z" } },
     guardrails: { environment: structuredClone(environmentGuardrails), task: structuredClone(taskGuardrails) } satisfies Record<Level, Record<string, Guardrails>>,
-    disconnected: 0, deleted: [], evals: {},
+    disconnected: 0, deleted: [], evals: {}, drafts: [],
   };
 }

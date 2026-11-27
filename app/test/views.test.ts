@@ -12,7 +12,7 @@ import { runView } from "../views/run.ts";
 import { runsView } from "../views/runs.ts";
 import { tasksView } from "../views/tasks.ts";
 import { evalsView } from "../views/evals.ts";
-import type { EvalView, TaskDetail } from "../api.ts";
+import type { EvalDraft, EvalView, GitHubAccess, Repo, TaskDetail } from "../api.ts";
 
 // The pages render what the cloud app returns, as served by the local fake of its /api/*.
 const fake = createFakeApi();
@@ -211,7 +211,7 @@ test("a result shows the decision the coding agent sent back, or that it waits f
   assert.deepEqual(tinted(tasksView.render({ tasks: freshTasks }, page(me))), ["Ticket router"]);
   const runRows = runsView.render({ runs: await load<Run[]>("/api/runs"), tasks: freshTasks, jobs: [] }, page(me)).__html;
   assert.deepEqual([...runRows.matchAll(/<tr class="switch"><td><a href="\/r\/(\w+)\/">/g)].map((row) => row[1]).sort(), ["b2v5h3", "k7m2q9", "m5d8q2"]);
-  const settings = projectView.render({ project: claims, endpoints: await get<Endpoint[]>("/api/endpoints") }, page(me)).__html;
+  const settings = projectView.render({ project: claims, endpoints: await get<Endpoint[]>("/api/endpoints"), repos: [], github: noGithub }, page(me)).__html;
   assert.doesNotMatch(settings, /Viktor|Langfuse|id="apps"/);
   assert.match(settings, /id="endpoints"/);
 });
@@ -234,16 +234,17 @@ test("a run whose current model could not run reads as failed, offers Run again 
   assert.match(measured, /assess-enrollment: no switch/);
 });
 
-const claims: Project = { id: "default", name: "Claims", createdAt: "2026-10-01T09:00:00Z", tasks: 4, endpoints: 2 };
+const claims: Project = { id: "default", name: "Claims", createdAt: "2026-10-01T09:00:00Z", tasks: 4, endpoints: 2, repos: [] };
+const noGithub: GitHubAccess = { app: "openmeritai", installUrl: "https://github.com/apps/openmeritai/installations/new", signedIn: false, error: null, installations: [] };
 
 test("Project settings hold the project's endpoints; only admins change them, and Coding agents no longer list endpoints", async () => {
   const me = await account();
   const endpoints = await get<Endpoint[]>("/api/endpoints");
-  const shown = projectView.render({ project: claims, endpoints }, page(me)).__html;
+  const shown = projectView.render({ project: claims, endpoints, repos: [], github: noGithub }, page(me)).__html;
   assert.match(shown, /data-action="rename"/);
   assert.match(shown, /id="endpoints"[^]*Key ending 4f2a · you pay[^]*data-action="add"/);
   assert.doesNotMatch(shown, /deleteProject/, "the default project is never deleted");
-  const member = projectView.render({ project: claims, endpoints }, page(await account("member"))).__html;
+  const member = projectView.render({ project: claims, endpoints, repos: [], github: noGithub }, page(await account("member"))).__html;
   assert.doesNotMatch(member, /data-action="(add|remove|rename|deleteProject)"/);
   assert.match(text({ __html: member }), /Only an admin of Sahra Health can add or remove endpoints/);
   const agents = connectionsView.render(null, page(me)).__html;
@@ -274,13 +275,13 @@ test("each call names the open project, a project's endpoints are its own, and o
 
   const me = await account();
   const enrollment = listed[1]!;
-  assert.match(projectView.render({ project: enrollment, endpoints: [] }, page(me)).__html, /data-action="deleteProject">Delete project/);
-  assert.match(projectView.render({ project: { ...enrollment, tasks: 2 }, endpoints: [] }, page(me)).__html, /data-action="deleteProject" disabled/);
+  assert.match(projectView.render({ project: enrollment, endpoints: [], repos: [], github: noGithub }, page(me)).__html, /data-action="deleteProject">Delete project/);
+  assert.match(projectView.render({ project: { ...enrollment, tasks: 2 }, endpoints: [], repos: [], github: noGithub }, page(me)).__html, /data-action="deleteProject" disabled/);
 });
 
 test("Account settings walk through the ChatGPT sign-in and offer it as the case writer only once connected", async () => {
   const me = await account();
-  const base = await get<Subscriptions>("/api/me/subscriptions");
+  const base = { ...await get<Subscriptions>("/api/me/subscriptions"), github: noGithub };
   const fresh = text(accountView.render(base, page(me)));
   assert.match(fresh, /ChatGPT ChatGPT Plus or Pro Not connected Sign in with ChatGPT/);
   assert.doesNotMatch(fresh, /Claude/, "the hosted app offers no Claude sign-in");
@@ -288,9 +289,9 @@ test("Account settings walk through the ChatGPT sign-in and offer it as the case
   assert.match(options, /<option value="chatgpt" disabled>/);
   assert.match(options, /<option value="openmerit" selected>/);
   const [chatgpt] = base.subscriptions as [Subscriptions["subscriptions"][number]];
-  const signingIn: Subscriptions = { writer: "openmerit", subscriptions: [{ ...chatgpt, signIn: { startedAt: "2026-11-24T09:00:00Z", userCode: "KQ7P-M2XW", verificationUri: "https://auth.openai.com/codex/device" } }] };
+  const signingIn: Subscriptions & { github: GitHubAccess } = { github: noGithub, writer: "openmerit", subscriptions: [{ ...chatgpt, signIn: { startedAt: "2026-11-24T09:00:00Z", userCode: "KQ7P-M2XW", verificationUri: "https://auth.openai.com/codex/device" } }] };
   assert.match(text(accountView.render(signingIn, page(me))), /Enter this code: KQ7P-M2XW/);
-  const connected: Subscriptions = { writer: "chatgpt", subscriptions: [{ ...chatgpt, connected: true, connectedAt: "2026-11-24T09:00:00Z" }] };
+  const connected: Subscriptions & { github: GitHubAccess } = { github: noGithub, writer: "chatgpt", subscriptions: [{ ...chatgpt, connected: true, connectedAt: "2026-11-24T09:00:00Z" }] };
   assert.match(accountView.render(connected, page(me)).__html, /<option value="chatgpt" selected>/);
 });
 
@@ -334,11 +335,51 @@ test("a task's Eval tab shows the accepted eval read-only; a revision pauses run
   assert.match(text(drafter.html), /Your coding agent sent Reply drafter with its tools changed[^]*Runs and the watch wait until you accept it\./);
   assert.doesNotMatch(drafter.html.__html, /data-action="discardDraft"/);
   assert.equal((await send("/api/tasks/reply-drafter/eval/draft", "DELETE")).status, 409);
-  const queue = text(evalsView.render({ tasks: (await send<Task[]>("/api/tasks")).body.filter((task) => task.state === "review") }, page(me)));
+  const queue = text(evalsView.render({ drafts: [], tasks: (await send<Task[]>("/api/tasks")).body.filter((task) => task.state === "review") }, page(me)));
   assert.match(queue, /Tasks waiting for their eval Reply drafter/);
 
   // A retired task's eval is read-only, with no revise.
   const retired = tasksView.render({ kind: "task", detail: { ...router.detail, state: "retired" }, eval: accepted.body }, page(me, "task=ticket-router&tab=eval")).__html;
   assert.match(retired, /<fieldset disabled>/);
   assert.doesNotMatch(retired, /data-action="retire"|data-action="revise"/);
+});
+
+test("a project adds GitHub repositories by URL, token or the member's GitHub connection, and its review's drafts approve into tasks not run yet", async () => {
+  const me = await account();
+  const call = createFakeApi();
+  const send = async <T>(path: string, method = "GET", body?: unknown): Promise<{ status: number; body: T }> => {
+    const answer = await call(new Request(`https://openmerit.ai${path}`, { method, headers: { authorization: "Bearer preview-populated", ...(body === undefined ? {} : { "content-type": "application/json" }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }));
+    return { status: answer.status, body: await answer.json() as T };
+  };
+  const repos = (await send<Repo[]>("/api/repos")).body, github = (await send<GitHubAccess>("/api/github")).body;
+  const settings = projectView.render({ project: claims, endpoints: [], repos, github }, page(me));
+  const shown = text(settings);
+  assert.match(shown, /sahra-health\/claims-api[^]*Private · token ending 9c1e[^]*Review again/);
+  assert.match(shown, /From your GitHub connection[^]*sahra-health\/claims-api Private In Claims sahra-health\/billing-worker Private Add/);
+  assert.match(settings.__html, /data-action="addRepo"/);
+  const member = text(projectView.render({ project: claims, endpoints: [], repos, github }, page(await account("member"))));
+  assert.match(member, /Only an admin of Sahra Health can add, review or remove repositories/);
+  assert.doesNotMatch(member, /From your GitHub connection/);
+  // Without a GitHub connection, the project points to Account settings, which connects it.
+  assert.match(text(projectView.render({ project: claims, endpoints: [], repos, github: noGithub }, page(me))), /Connect GitHub on Account settings/);
+  const subscriptions = await send<Subscriptions>("/api/me/subscriptions");
+  assert.match(text(accountView.render({ ...subscriptions.body, github: noGithub }, page(me))), /GitHub Connect GitHub to add repositories[^]*Not connected Connect GitHub/);
+  assert.match(text(accountView.render({ ...subscriptions.body, github }, page(me))), /sahra-health Every repository|sahra-health 3 repositories: sahra-health\/claims-api/);
+  // The GitHub App's Setup URL, /connections/, goes on to Account settings.
+  const went: string[] = [];
+  await connectionsView.load({ ...page(me), params: new URLSearchParams("installation_id=41&setup_action=install"), go: (url: string) => went.push(url) } as unknown as Parameters<typeof connectionsView.load>[0]);
+  assert.deepEqual(went, ["/account/?installation_id=41&setup_action=install"]);
+  assert.equal((await send<Repo>("/api/repos", "POST", { url: "https://github.com/sahra-health/billing-worker", via: "github" })).status, 201);
+
+  // The review's drafts wait in Review evals; approving one adds the task, not run yet, with no accepted eval.
+  const drafts = (await send<EvalDraft[]>("/api/eval-drafts")).body;
+  const queue = text(evalsView.render({ drafts, tasks: [] }, page(me)));
+  assert.match(queue, /From repository reviews Claim summary writer Denial letter checker[^]*Approve and add task/);
+  const approved = await send<{ taskId: string }>(`/api/eval-drafts/${drafts[0]!.id}/approve`, "POST", { spec: { criteria: ["States the amount"] }, cases: drafts[0]!.cases });
+  assert.equal(approved.status, 201);
+  const task = (await send<Task[]>("/api/tasks")).body.find((item) => item.id === approved.body.taskId)!;
+  assert.deepEqual([task.name, task.status, task.lastRunAt], ["Claim summary writer", "new", null]);
+  assert.equal((await send<EvalView>(`/api/tasks/${task.id}/eval`)).body.accepted, null, "approval accepts no eval: the first run grades one");
+  assert.equal((await send(`/api/eval-drafts/${drafts[1]!.id}`, "DELETE")).status, 200);
+  assert.deepEqual((await send<EvalDraft[]>("/api/eval-drafts")).body, []);
 });

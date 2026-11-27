@@ -14,6 +14,7 @@
 !openmerit-core/src/connectors/eval-command.ts
 !openmerit-core/src/job
 !openmerit-core/src/harness
+!openmerit-core/src/review
 !openmerit-core/src/state/config.ts
 !openmerit-core/src/state/paths.ts
 !openmerit-core/data/catalogue.json

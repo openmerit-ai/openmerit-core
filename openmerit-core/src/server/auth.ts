@@ -35,6 +35,12 @@ export interface Auth {
   email(userId: string): Promise<string | null>;
   /** The user's name and primary email address, which no token carries; null when Clerk cannot be reached or has no such user. */
   person(userId: string): Promise<{ name: string | null; email: string | null } | null>;
+  /**
+   * The user's GitHub access token from their GitHub sign-in in Clerk, which Clerk renews when it expires; null
+   * when they have none. With Clerk's GitHub connection set up as the OpenMerit GitHub App, it reaches only the
+   * repositories that both the user and an installation of the app reach, with the app's read-only permissions.
+   */
+  githubToken(userId: string): Promise<string | null>;
 }
 
 export const NO_ORGANIZATION = "This token names no Clerk organization. OpenMerit accounts are organizations: sign in again and choose an organization, or create one at app.openmerit.ai.";
@@ -110,6 +116,14 @@ export class ClerkAuth implements Auth {
     } catch { return null; }
   }
 
+  async githubToken(userId: string): Promise<string | null> {
+    // Clerk answers an error, not an empty list, for a user with no GitHub account.
+    try {
+      const tokens = await createClerkClient({ secretKey: this.config.secretKey }).users.getUserOauthAccessToken(userId, "github");
+      return tokens.data[0]?.token || null;
+    } catch { return null; }
+  }
+
   async api(request: Request): Promise<AuthResult> {
     const token = bearer(request);
     if (!token) return unauthenticated("Sign in to OpenMerit: this request has no session token.");
@@ -168,6 +182,8 @@ export class LocalAuth implements Auth {
   }
   async email(): Promise<string | null> { return null; }
   async person(): Promise<{ name: string | null; email: string | null } | null> { return null; }
+  /** A self-hosted server has no GitHub sign-in: public repositories and fine-grained tokens only. */
+  async githubToken(): Promise<string | null> { return null; }
 
   /** A new one-time sign-in code for the web app, which works for ten minutes. */
   link(): string {
@@ -233,5 +249,11 @@ export class TestAuth implements Auth {
   async person(userId: string): Promise<{ name: string | null; email: string | null } | null> {
     const name = /^user_(\w+)$/.exec(userId)?.[1];
     return name ? { name: `User ${name.toUpperCase()}`, email: `${name}@example.test` } : null;
+  }
+  /** The users signed in with GitHub, and their tokens: a JSON object in the file TEST_GITHUB_TOKENS names, read on each call so a test can unlink one. */
+  async githubToken(userId: string): Promise<string | null> {
+    const file = process.env.TEST_GITHUB_TOKENS;
+    if (!file || !existsSync(file)) return null;
+    return (JSON.parse(readFileSync(file, "utf8")) as Record<string, string>)[userId] ?? null;
   }
 }
