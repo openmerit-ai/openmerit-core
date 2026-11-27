@@ -67,7 +67,22 @@ const unauthenticated = (error: string): AuthResult => ({ ok: false, status: 401
 
 export class ClerkAuth implements Auth {
   private readonly config: ClerkConfig;
+  /** Organizations' display names by ID, kept an hour: tokens carry only the slug. */
+  private readonly names = new Map<string, { name: string | null; at: number }>();
   constructor(config: ClerkConfig) { this.config = config; }
+
+  /** The identity with its organization's display name from Clerk in place of the token's slug; the slug when Clerk cannot say. */
+  private async named(result: AuthResult): Promise<AuthResult> {
+    if (!result.ok) return result;
+    const id = result.identity.accountId;
+    let cached = this.names.get(id);
+    if (!cached || Date.now() - cached.at > 3_600_000) {
+      const name = await createClerkClient({ secretKey: this.config.secretKey }).organizations.getOrganization({ organizationId: id }).then(org => org.name || null, () => null);
+      cached = { name: name ?? cached?.name ?? null, at: Date.now() };
+      this.names.set(id, cached);
+    }
+    return cached.name ? { ok: true, identity: { ...result.identity, accountName: cached.name } } : result;
+  }
 
   async mcp(request: Request): Promise<AuthResult> {
     const token = bearer(request);
@@ -79,7 +94,7 @@ export class ClerkAuth implements Auth {
     // Clerk checked the signature, the expiry and the audience. Opaque `oat_` tokens carry no claims, so no organization.
     let claims: Claims = {};
     try { claims = decodeJwt(token).payload as unknown as Claims; } catch { /* opaque token */ }
-    return identity(verified.data && "subject" in verified.data ? verified.data.subject : null, claims);
+    return this.named(identity(verified.data && "subject" in verified.data ? verified.data.subject : null, claims));
   }
 
   async email(userId: string): Promise<string | null> {
@@ -101,7 +116,7 @@ export class ClerkAuth implements Auth {
     try {
       claims = await verifyToken(token, { secretKey: this.config.secretKey, authorizedParties: this.config.authorizedParties, ...(this.config.jwtKey ? { jwtKey: this.config.jwtKey } : {}) });
     } catch { return unauthenticated("The session token was refused."); }
-    return identity(text(claims.sub), claims);
+    return this.named(identity(text(claims.sub), claims));
   }
 }
 

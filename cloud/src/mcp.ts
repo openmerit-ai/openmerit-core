@@ -306,7 +306,11 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
     if (grades.length) {
       const row = await account.job(view.jobId);
       return hold({ method: "POST", path: `/api/runs/${view.jobId}/answers`, body: { answers }, checks: "person", title: `Grades for ${view.task}`,
-        items: grades.map(question => `${question.prompt.replace(/: does it look right\?$/, "")}: ${String((answers as Answers)[question.id])}`) });
+        items: grades.map(question => {
+          const [grade = "", ...note] = String((answers as Answers)[question.id]).split(":");
+          const label = question.options?.find(option => option.value === grade.trim())?.label ?? grade;
+          return `${question.prompt.replace(/: does it look right\?$/, "")}: ${label}${note.length ? ` (${note.join(":").trim()})` : ""}`;
+        }) });
     }
     const handle = client.job.get([view.jobId]);
     await handle.send("answers", { answers: answers as Answers, by: identity.userId });
@@ -417,7 +421,7 @@ async function decide(view: JobView, value: unknown, decision: Decision | null, 
 async function sessionBrief(deps: McpDeps, identity: Identity): Promise<string[]> {
   const account = deps.client.account.getOrCreate([identity.accountId]);
   const [info, pending, tasks, decisions] = await Promise.all([account.info(), account.pendingConfirmations(), account.tasks(), account.taskDecisions()]);
-  const name = info.name ?? identity.accountName;
+  const name = identity.accountName ?? info.name;
   const lines = [deps.config.mode === "hosted" ? `You act in the OpenMerit organization ${name ? `${name} (${identity.accountId})` : identity.accountId}. Tell the user, so they confirm in the same organization.` : "You act on this self-hosted OpenMerit server, for its one user."];
   for (const item of pending) lines.push(`Waiting for the user to confirm: ${item.title}, at ${confirmUrl(deps.config, item.id)} (expires ${item.expiresAt.slice(0, 16).replace("T", " ")} UTC).`);
   for (const task of tasks) {
