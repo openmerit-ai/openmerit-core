@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- In the cloud app, the confirm page and the MCP session name the organization by its name, such as OpenMerit QA, instead of its slug, and the confirm page lists each grade as "Looks good" or "Doesn't look right" with the person's note, instead of `bad:note`. On a phone, the web app's sidebar folds to its icon rail, so a run's page is readable at 390 pixels; it filled more than half the screen.
 - **The hosted model catalogue refreshes daily** from OpenRouter and Epoch, instead of only when the app is deployed, so new models and price changes reach searches and wake watched tasks the next day.
 - **A coding agent's session starts with what waits for the user.** The cloud MCP server's `initialize` names the organization the agent acts in and lists requests waiting for the user's confirmation and picks no one has decided on yet.
 - **The install no longer bundles Claude Code.** Connecting Claude Code now runs the `claude` you installed (or `OPENMERIT_CLAUDE_BIN`), and `openmerit connect claude-code` installs the bridge into `~/.openmerit/claude-bridge/` on first use, without the Claude Agent SDK's own 330 MB copy. A machine without Claude Code is told to install it. Connections to Codex or an API key are unaffected.
