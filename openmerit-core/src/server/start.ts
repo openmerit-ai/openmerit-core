@@ -64,15 +64,15 @@ export async function startJob(client: AppClient, start: { accountId: string; en
   const account = client.account.getOrCreate([input.accountId]);
   const keyRefusal = await modelKeyRefusal();
   if (keyRefusal) return { ok: false, error: keyRefusal };
-  // A task whose prompt, tools or output changed since its eval was accepted waits for a person to review the eval.
+  // A task whose prompt, tools or output changed since its eval was accepted reopens it: a run grades the draft with a person, and the watch waits for that.
   const examples = (await writeCases({ bundle: input.bundle, complete: async () => "", count: 0 })).cases;
-  const gate = await account.evalGate({ taskId, bundle: input.bundle, examples });
+  const gate = await account.evalGate({ taskId, bundle: input.bundle, examples, kind: input.kind });
   if (!gate.ok) return gate;
   await settleOrphans(client, input.accountId);
   const started = await account.startJob({ jobId, taskId, kind: input.kind, askedBy: input.askedBy ?? null });
   if (!started.ok) return started;
   try {
-    return await launch(client, input, { jobId, taskId });
+    return await launch(client, input, { jobId, taskId, reopened: gate.reopened === true });
   } catch (error) {
     // The account recorded the job but its actor may not exist: left queued, it would never run, would hold one of the
     // account's concurrent jobs and would block deleting its task. A job whose actor did start keeps going, and one
@@ -108,7 +108,7 @@ export async function settleOrphans(client: AppClient, accountId: string, taskId
   return settled;
 }
 
-async function launch(client: AppClient, input: { accountId: string; environment: string; agent: string | null; bundle: TaskBundle; kind: "run" | "watch"; trigger: JobTrigger; userId: string | null }, ids: { jobId: string; taskId: string }): Promise<StartResult> {
+async function launch(client: AppClient, input: { accountId: string; environment: string; agent: string | null; bundle: TaskBundle; kind: "run" | "watch"; trigger: JobTrigger; userId: string | null }, ids: { jobId: string; taskId: string; reopened: boolean }): Promise<StartResult> {
   const { jobId, taskId } = ids;
   const account = client.account.getOrCreate([input.accountId]);
   const task = client.task.getOrCreate([input.accountId, taskId], { createWithInput: { accountId: input.accountId, taskId, environment: input.environment, name: input.bundle.task } });
@@ -126,8 +126,8 @@ async function launch(client: AppClient, input: { accountId: string; environment
   const estimate = estimateJob(pool, input.bundle, {
     repeats: Math.max(1, guardrails.effective.repeats ?? DEFAULT_REPEATS), budgetUsd: guardrails.effective.budgetUsd ?? config.limits.defaultJobBudgetUsd,
     costPerCall: model => callCost(index.find(model), input.bundle), judge: input.bundle.output.kind === "text" || input.bundle.guardrails?.length ? config.models.judge : null,
-    // As the job decides: a person grades a first run's answers, before any eval is accepted.
-    grading: input.kind === "run" && !accepted && !!config.openrouter.apiKey,
+    // As the job decides: a person grades a first run's answers, before any eval is accepted, and a changed task's draft.
+    grading: input.kind === "run" && (!accepted || ids.reopened) && !!config.openrouter.apiKey,
   });
   await task.recordJob({ jobId, bundle: input.bundle, agent: input.agent, kind: input.kind });
   await client.job.create([jobId], { input: { accountId: input.accountId, taskId, environment: input.environment, agent: input.agent, bundle: input.bundle, kind: input.kind, trigger: input.trigger, userId: input.userId, provisional, createdAt: new Date().toISOString() } });

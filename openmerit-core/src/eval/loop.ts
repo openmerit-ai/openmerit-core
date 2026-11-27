@@ -237,14 +237,23 @@ export function feedbackOf(artifact: RunArtifact, grades: readonly SampleGrade[]
 const REVISE_SYSTEM = [
   "You are OpenMerit Harness revising a task's eval after a person graded some of its answers. The eval checks answers against the task's criteria (what makes an answer right) and guardrails (what it must never do).",
   "Where the person and the eval disagree, the eval is wrong: change, add or remove criteria and guardrails so the eval would agree with the person. Keep those the grades do not question, word for word and in order. Never change anything in the repository.",
+  "Write each criterion and guardrail as one testable sentence about one thing, so a failed check means one thing.",
 ].join("\n");
 
+/** The cases a round's grades dispute: those where the person and the eval disagree. */
+export const disputedCases = (artifact: RunArtifact, grades: readonly SampleGrade[]) => {
+  const byId = new Map(grades.map(grade => [grade.sampleId, grade]));
+  return [...new Set(artifact.samples.filter(sample => byId.has(sample.id) && disagrees(sample, byId.get(sample.id)!)).map(sample => sample.caseId))];
+};
+
 /**
- * A new eval from a round's grades: the reviser rewrites the criteria and guardrails where the person
- * and the eval disagreed, then the case writer writes the cases again with the person's notes. The
- * prompt, tools and output stay the spec's: they describe the code, which the grades do not change.
+ * A new eval from a round's grades. The reviser rewrites the criteria and guardrails where the person and the
+ * eval disagreed. Only the written cases the grades dispute (`disputed`) are written again, with the person's
+ * notes, under new IDs; every other case keeps its ID and content, so a host can keep its results when the
+ * criteria did not change. The bundle's examples are the coding agent's and stay. The prompt, tools and
+ * output stay the spec's: they describe the code, which the grades do not change.
  */
-export async function reviseEval(value: GeneratedEval, feedback: string, harness: Harness, signal?: AbortSignal): Promise<GeneratedEval> {
+export async function reviseEval(value: GeneratedEval, feedback: string, harness: Harness, signal?: AbortSignal, disputed?: readonly string[]): Promise<GeneratedEval> {
   const { bundle } = value;
   const list = (items: readonly string[] | undefined) => (items ?? []).map((item, index) => `${index + 1}. ${item}`).join("\n") || "(none)";
   const reply = await harness.json<{ criteria: string[]; guardrails: string[] }>({
@@ -257,8 +266,21 @@ export async function reviseEval(value: GeneratedEval, feedback: string, harness
     return kept.length || !fallback?.length ? kept : [...fallback];
   };
   const revised: TaskBundle = { ...bundle, criteria: clean(reply.criteria, bundle.criteria), guardrails: clean(reply.guardrails, bundle.guardrails) };
-  const written = await writeCases({ bundle: revised, complete: harnessWriter(harness, revised.output.kind === "json", signal), count: GENERATED_CASES, guidance: feedback });
-  const cases: Case[] = written.cases.filter(item => Object.keys(item.input).length && (item.expected !== undefined || revised.output.kind === "text"));
-  if (!cases.length) throw new Error("The case writer wrote no usable case for the revised eval.");
+  const usable = (item: Case) => Object.keys(item.input).length > 0 && (item.expected !== undefined || revised.output.kind === "text");
+  const replace = new Set(disputed ?? value.cases.filter(item => item.origin !== "example").map(item => item.id));
+  const kept = value.cases.filter(item => item.origin === "example" || !replace.has(item.id));
+  const count = value.cases.filter(item => item.origin !== "example" && replace.has(item.id)).length;
+  if (!count) return { bundle: revised, cases: kept };
+  // The writer's examples are the cases kept, so it neither repeats them nor is asked for more than it replaces.
+  const written = await writeCases({ bundle: { ...revised, examples: kept.map(item => ({ input: item.input, ...(item.expected === undefined ? {} : { expected: item.expected }) })) }, complete: harnessWriter(harness, revised.output.kind === "json", signal), count, guidance: feedback });
+  const used = new Set(value.cases.map(item => item.id));
+  let next = 0;
+  const fresh = written.cases.filter(item => item.origin === "written" && usable(item)).map(item => {
+    while (used.has(`written-${++next}`));
+    used.add(`written-${next}`);
+    return { ...item, id: `written-${next}` };
+  });
+  const cases = [...kept, ...fresh];
+  if (!cases.some(usable)) throw new Error("The case writer wrote no usable case for the revised eval.");
   return { bundle: revised, cases };
 }

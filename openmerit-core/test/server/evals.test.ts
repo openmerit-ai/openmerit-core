@@ -14,7 +14,7 @@ describe("evals", () => {
   before(async () => { models = await fakeModels(); app = await startApp({ models }); });
   after(async () => { await stop(app); await models.close(); });
 
-  test("runs measure on the accepted eval unchanged; a revision or a changed task pauses them until someone accepts the next version", async () => {
+  test("runs measure on the accepted eval unchanged; a revision pauses them until someone accepts it, and a changed task's next run grades its draft into the next version", async () => {
     const me = caller(app, "test:user_e:org_evals:admin");
     await subscribe(app, "org_evals");
     const result = (jobId: string) => () => me.tool("openmerit_result", { job_id: jobId });
@@ -83,25 +83,31 @@ describe("evals", () => {
     const unchanged = (await me.api<EvalView>(evalUrl)).body;
     assert.deepEqual([unchanged.accepted!.version, unchanged.accepted!.cases.length, unchanged.accepted!.runs], [2, edited.length, 1], "a run does not change the accepted eval");
 
-    // The task changes: the agent sends a different prompt. The eval reopens with the new example, and runs wait for review.
+    // The task changes: the agent sends a different prompt. The eval reopens with the new example, and the run the agent
+    // started grades that draft with the person before it searches; accepting it makes version 3 on the changed prompt.
     const changed = { ...withExample, prompt: { system: "You route support tickets for the EU team.", messages: [{ role: "user", content: "Ticket: {{ticket}}" }] } };
-    const refused = await me.tool("openmerit_recommend", { bundle: changed, environment: "acme/app" });
-    assert.equal(refused.isError, true);
-    assert.match(refused.text, /The task changed since its eval was accepted \(its prompt\)/);
+    const reopening = await me.tool("openmerit_recommend", { bundle: changed, environment: "acme/app" });
+    assert.equal(reopening.isError, false, reopening.text);
+    assert.match(reopening.text, /Before it searches, you grade answers/, "its estimate counts the grading trial");
     const reopened = (await me.api<EvalView>(evalUrl)).body;
     assert.deepEqual([reopened.draft!.reason, reopened.draft!.changed, reopened.accepted!.version], ["task_changed", ["prompt"], 2]);
     assert.ok(reopened.draft!.cases.some(item => item.input.ticket === "A ticket nobody has seen"), "the changed task's new example joins the draft");
-    assert.match((await me.tool("openmerit_tasks", {})).text, /eval classifier \[[^\]]+\][^\n]*, review, [^\n]*a draft waits for review/);
     assert.equal((await me.api(`${evalUrl}/draft`, { method: "DELETE" })).status, 409, "a changed task's draft cannot be discarded");
-    assert.equal((await me.api<{ started: string | null; reason: string }>(`/api/tasks/${task!.id}/run`, { method: "POST" })).status, 409);
-    // Accepting it makes version 3 and moves the task onto the changed bundle, so a run by task_id measures the new prompt.
-    assert.equal((await me.api<EvalView>(`${evalUrl}/accept`, { method: "POST", body: "{}" })).body.accepted!.version, 3);
-    const third = await me.tool("openmerit_recommend", { task_id: task!.id });
-    assert.ok(!third.isError, third.text);
-    const thirdDone = await waitFor(result(third.data.job_id as string), value => finished(value) || value.data.status === "needs_input");
-    assert.equal(thirdDone.data.status, "done", thirdDone.text);
-    assert.equal((await me.api<{ evalVersion: number }>(`/api/runs/${String(third.data.job_id)}`)).body.evalVersion, 3);
+    const grading = await waitFor(result(reopening.data.job_id as string), value => finished(value) || value.data.phase === "grading");
+    assert.equal(grading.data.phase, "grading", grading.text);
+    assert.match(grading.text, /The task changed since eval version 2 was accepted, so this run grades its draft with you/);
+    const reopenedDone = await untilDone(me, reopening.data.job_id as string);
+    assert.equal(reopenedDone.data.status, "done", reopenedDone.text);
+    const third = (await me.api<EvalView>(evalUrl)).body;
+    assert.deepEqual([third.accepted!.version, third.accepted!.source, third.draft], [3, "grading", null]);
+    assert.equal((await me.api<{ evalVersion: number }>(`/api/runs/${String(reopening.data.job_id)}`)).body.evalVersion, 3);
+    assert.equal((await me.api<{ state: string }[]>("/api/tasks")).body[0]!.state, "watching");
     assert.equal((await me.api<{ bundle: { prompt: { system: string } } }>(`/api/tasks/${task!.id}`)).body.bundle.prompt.system, "You route support tickets for the EU team.", "the run used the changed prompt");
+    // The next run on the changed prompt measures on version 3 and asks nothing.
+    const fourth = await me.tool("openmerit_recommend", { bundle: changed, environment: "acme/app" });
+    const fourthDone = await waitFor(result(fourth.data.job_id as string), value => finished(value) || value.data.status === "needs_input");
+    assert.equal(fourthDone.data.status, "done", fourthDone.text);
+    assert.equal((await me.api<{ evalVersion: number }>(`/api/runs/${String(fourth.data.job_id)}`)).body.evalVersion, 3);
 
     // Deleting the task deletes its eval.
     const deleted = await me.api(`/api/tasks/${task!.id}`, { method: "DELETE" });

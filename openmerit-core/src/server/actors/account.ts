@@ -17,7 +17,7 @@ type Row = Record<string, unknown>;
 
 // The eval and budget names the task job (openmerit-core/src/job/workflow.ts) shares with this actor.
 export { JOB_BUDGET, type EvalBar, type EvalSource, type EvalSpec } from "../../job/workflow.ts";
-import { JOB_BUDGET, type EvalBar, type EvalSource, type EvalSpec } from "../../job/workflow.ts";
+import { JOB_BUDGET, type EvalBar, type EvalGrade, type EvalSource, type EvalSpec } from "../../job/workflow.ts";
 
 /** Bumped when the schema changes in a way old accounts cannot keep: their tables are dropped. */
 const SCHEMA_VERSION = 2;
@@ -55,6 +55,9 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS confirmations (id TEXT PRIMARY KEY, nonce TEXT NOT NULL, method TEXT NOT NULL, path TEXT NOT NULL, body TEXT NOT NULL,
     checks TEXT NOT NULL, title TEXT NOT NULL, items TEXT NOT NULL, requested_by TEXT NOT NULL, requested_via TEXT, status TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
     decided_by TEXT, decided_at INTEGER, result TEXT)`,
+  // The answers a person graded when they accepted a task's eval, as version holds it: each answer's case, model, text and tool
+  // calls, and their verdict. A run on that version has the judge grade them again, and says when it disagrees with the person.
+  `CREATE TABLE IF NOT EXISTS eval_grades (task_id TEXT PRIMARY KEY, version INTEGER NOT NULL, grades TEXT NOT NULL)`,
   // A task's own eval command, which a self-hosted server runs to measure it, as a person confirmed it (api.ts).
   `CREATE TABLE IF NOT EXISTS eval_commands (task_id TEXT PRIMARY KEY, spec TEXT NOT NULL, confirmed_by TEXT NOT NULL, confirmed_at INTEGER NOT NULL)`,
 ];
@@ -432,6 +435,7 @@ export const account = actor({
       await tx.execute(`DELETE FROM tasks WHERE id = ?`, input.taskId);
       // Its eval and eval command go with it.
       await tx.execute(`DELETE FROM evals WHERE task_id = ?`, input.taskId);
+      await tx.execute(`DELETE FROM eval_grades WHERE task_id = ?`, input.taskId);
       await tx.execute(`DELETE FROM eval_commands WHERE task_id = ?`, input.taskId);
       await tx.execute(`INSERT INTO deletions (task_id, name, environment, user_id, jobs, deleted_at) VALUES (?, ?, ?, ?, ?, ?)`, input.taskId, String(task.name), String(task.environment), input.userId, Number(jobs?.n ?? 0), now);
       return { jobs: Number(jobs?.n ?? 0) };
@@ -557,10 +561,11 @@ export const account = actor({
     /**
      * Whether a job may start on this bundle. A task with no eval yet, or whose bundle has the prompt, tools and
      * output its eval was accepted for, may. A bundle that differs reopens the eval as a draft: the accepted spec
-     * and cases with the bundle's new examples, which a person reviews before runs and the watch resume. While a
-     * draft is open no job starts; a bundle that changed again replaces the draft's.
+     * and cases with the bundle's new examples. A run a person starts (`run`) grades the changed task's draft with them,
+     * as a first run grades a new eval (`reopened`); the watch waits until it is accepted. A draft someone opened to
+     * revise holds every job until they accept or discard it. A bundle that changed again replaces the draft's.
      */
-    evalGate: async (c, input: { taskId: string; bundle: TaskBundle; examples: Case[] }): Promise<{ ok: true } | { ok: false; error: string }> => c.db.transaction(async tx => {
+    evalGate: async (c, input: { taskId: string; bundle: TaskBundle; examples: Case[]; kind?: "run" | "watch" }): Promise<{ ok: true; reopened?: boolean } | { ok: false; error: string }> => c.db.transaction(async tx => {
       const [row] = await tx.execute(`SELECT * FROM evals WHERE task_id = ?`, input.taskId);
       if (!row) return { ok: true };
       const accepted = JSON.parse(String(row.shape)) as Record<TaskPart, string>, sent = shapeOf(input.bundle);
@@ -573,8 +578,10 @@ export const account = actor({
         const added = input.examples.filter(item => !known.has(JSON.stringify(item.input))).map(item => ids.has(item.id) ? { ...item, id: `${item.id}-new` } : item);
         await tx.execute(`UPDATE evals SET draft_reason = 'task_changed', draft_changed = ?, draft_spec = COALESCE(draft_spec, spec), draft_cases = ?, draft_bundle = ?, draft_by = NULL, draft_at = ? WHERE task_id = ?`,
           JSON.stringify(changed), JSON.stringify([...base, ...added]), JSON.stringify(input.bundle), Date.now(), input.taskId);
+        if (input.kind === "run") return { ok: true, reopened: true };
         return { ok: false, error: `The task changed since its eval was accepted (its ${changed.join(", ")}), so its eval may no longer fit. Tell the user to review the eval at ${url}: runs and the watch resume once they accept it.` };
       }
+      if (row.draft_reason === "task_changed" && input.kind === "run") return { ok: true, reopened: true };
       if (row.draft_reason) return { ok: false, error: `This task's eval waits for review at ${url}${row.draft_reason === "task_changed" ? " because the task changed" : ""}. Tell the user: runs and the watch resume once they accept it.` };
       return { ok: true };
     }, { name: "eval_gate" }),
@@ -589,6 +596,39 @@ export const account = actor({
         input.taskId, JSON.stringify(input.spec), JSON.stringify(input.cases), JSON.stringify(shapeOf(input.bundle)), input.source, input.by, Date.now(), input.bar === "criteria" ? "criteria" : null);
       const [row] = await c.db.execute(`SELECT version FROM evals WHERE task_id = ?`, input.taskId);
       return Number(row?.version ?? 1);
+    },
+
+    /** A changed task's draft, which a run a person started grades before any search; null when the task has none. */
+    changedDraftFor: async (c, taskId: string): Promise<{ version: number; spec: EvalSpec; cases: Case[]; bar: EvalBar } | null> => {
+      const [row] = await c.db.execute(`SELECT version, draft_spec, draft_cases, bar FROM evals WHERE task_id = ? AND draft_reason = 'task_changed'`, taskId);
+      return row ? { version: Number(row.version), spec: JSON.parse(String(row.draft_spec)) as EvalSpec, cases: JSON.parse(String(row.draft_cases)) as Case[], bar: row.bar === "criteria" ? "criteria" : "current" } : null;
+    },
+
+    /**
+     * Accepts a changed task's draft as the next version, as a run graded it: its spec and cases, the bar the person
+     * graded to, and the changed bundle's shape. Returns the version the job ran on: the one a draft accepted
+     * meanwhile, in the app, made, when it is gone.
+     */
+    acceptReopenedEval: async (c, input: { taskId: string; spec: EvalSpec; cases: Case[]; by: string | null; bar: EvalBar; source: EvalSource }): Promise<number> => c.db.transaction(async tx => {
+      const [row] = await tx.execute(`SELECT * FROM evals WHERE task_id = ?`, input.taskId);
+      if (row?.draft_reason !== "task_changed") return Number(row?.version ?? 1);
+      const bundle = JSON.parse(String(row.draft_bundle)) as TaskBundle;
+      const version = Number(row.version) + 1;
+      await tx.execute(`UPDATE evals SET version = ?, spec = ?, cases = ?, shape = ?, source = ?, accepted_by = ?, accepted_at = ?, bar = ?,
+        draft_reason = NULL, draft_changed = NULL, draft_spec = NULL, draft_cases = NULL, draft_bundle = NULL, draft_by = NULL, draft_at = NULL WHERE task_id = ?`,
+        version, JSON.stringify(input.spec), JSON.stringify(input.cases), JSON.stringify(shapeOf(bundle)), input.source, input.by, Date.now(), input.bar === "criteria" ? "criteria" : null, input.taskId);
+      return version;
+    }, { name: "accept_reopened_eval" }),
+
+    /** Keeps the answers a person graded with the version they accepted, replacing any an earlier version kept. */
+    saveEvalGrades: async (c, input: { taskId: string; version: number; grades: EvalGrade[] }): Promise<void> => {
+      await c.db.execute(`INSERT INTO eval_grades (task_id, version, grades) VALUES (?, ?, ?) ON CONFLICT (task_id) DO UPDATE SET version = excluded.version, grades = excluded.grades`, input.taskId, input.version, JSON.stringify(input.grades));
+    },
+
+    /** The graded answers kept with a version of the task's eval; null when that version kept none. */
+    evalGrades: async (c, input: { taskId: string; version: number }): Promise<EvalGrade[] | null> => {
+      const [row] = await c.db.execute(`SELECT grades FROM eval_grades WHERE task_id = ? AND version = ?`, input.taskId, input.version);
+      return row ? JSON.parse(String(row.grades)) as EvalGrade[] : null;
     },
 
     /** Reopens an accepted eval for a person to revise. Runs and the watch wait until a draft is accepted or discarded. */
