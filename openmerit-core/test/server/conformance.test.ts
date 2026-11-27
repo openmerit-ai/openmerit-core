@@ -11,16 +11,16 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { loadCatalogue } from "../../openmerit-core/src/catalogue/catalogue.ts";
-import type { Harness, JsonRequest } from "../../openmerit-core/src/harness/harness.ts";
-import { startRun } from "../../openmerit-core/src/local.ts";
-import { advance, type Answer, type Context, type Question, type Step } from "../../openmerit-core/src/scout/workflow.ts";
-import { updateGlobalConfig, updateRepoConfig } from "../../openmerit-core/src/state/config.ts";
-import { State } from "../../openmerit-core/src/state/db.ts";
-import { findRepo } from "../../openmerit-core/src/state/paths.ts";
+import { loadCatalogue } from "../../src/catalogue/catalogue.ts";
+import type { Harness, JsonRequest } from "../../src/harness/harness.ts";
+import { startRun } from "../../src/local.ts";
+import { advance, type Answer, type Context, type Question, type Step } from "../../src/scout/workflow.ts";
+import { updateGlobalConfig, updateRepoConfig } from "../../src/state/config.ts";
+import { State } from "../../src/state/db.ts";
+import { findRepo } from "../../src/state/paths.ts";
 import { caller, catalogue, chatAnswer, costOf, startApp, stop, subscribe, waitFor, type FakeModels } from "./helpers.ts";
 
-const fixture = new URL("../../openmerit-core/test/fixtures/support-app/", import.meta.url).pathname;
+const fixture = new URL("../fixtures/support-app/", import.meta.url).pathname;
 const tickets = readFileSync(join(fixture, "data/tickets.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line) as { id: string; ticket: string; queue: string });
 const CURRENT = "openai/gpt-4.1-mini";
 /** The ticket the current model misses once, so it is never a screening item, and the near misses always miss. */

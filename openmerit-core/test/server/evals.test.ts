@@ -4,7 +4,7 @@
 // reads the accepted version, and deleting the task deletes the eval.
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
-import type { EvalView, JobRow } from "../src/actors/account.ts";
+import type { EvalView, JobRow } from "../../src/server/actors/account.ts";
 import { bundle, caller, fakeModels, startApp, stop, subscribe, untilDone, waitFor, type App, type FakeModels } from "./helpers.ts";
 
 interface Case { id: string; input: Record<string, string>; expected?: unknown; origin: string; approved?: boolean }

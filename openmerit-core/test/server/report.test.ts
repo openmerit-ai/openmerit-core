@@ -2,10 +2,10 @@
 // pick's endpoint calls the model, and a ref without one gets an instruction instead.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { catalogueIndex } from "../src/engine.ts";
-import type { Option } from "../../openmerit-core/src/job/pool.ts";
-import { proposeEdit } from "../../openmerit-core/src/job/report.ts";
-import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
+import { catalogueIndex } from "../../src/server/engine.ts";
+import type { Option } from "../../src/job/pool.ts";
+import { proposeEdit } from "../../src/job/report.ts";
+import type { TaskBundle } from "../../src/ranking/index.ts";
 import { catalogue } from "./helpers.ts";
 
 const { find } = catalogueIndex(catalogue);

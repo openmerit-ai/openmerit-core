@@ -51,14 +51,14 @@ jobs:
       - run: npm ci
       - run: npm run check
 
-  # The cloud app behind openmerit.ai/mcp: its own lockfile, typecheck, and tests against a local
-  # Rivet engine with fake sign-in, billing and models (no paid calls), then its Docker image.
+  # The server behind openmerit.ai/mcp (openmerit-core/src/server): typecheck and its tests against a local
+  # Rivet engine with fake sign-in, billing and models (no paid calls), then the hosted Docker image.
   cloud:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
       run:
-        working-directory: cloud
+        working-directory: openmerit-core
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -68,15 +68,16 @@ jobs:
           cache-dependency-path: |
             cloud/package-lock.json
             openmerit-core/package-lock.json
-      # The app imports openmerit-core's engine and ranking from source, which resolve their packages (such as ajv) there.
       - run: npm ci
-        working-directory: openmerit-core
-      - run: npm ci
-      - run: npm run check
+      - run: npm run typecheck
+      - run: npm run test:server
+      # The deploy script.
+      - run: npm ci && npm run check
+        working-directory: cloud
       - run: docker build -f cloud/Dockerfile -t openmerit-cloud:ci .
         working-directory: .
-      # The image holds only the openmerit-core sources the app imports: load every module it serves from.
-      - run: docker run --rm openmerit-cloud:ci node --input-type=module -e "await import('./src/app.ts')"
+      # The image holds only the openmerit-core sources the server imports: load every module it serves from.
+      - run: docker run --rm openmerit-cloud:ci node --input-type=module -e "await import('./app.ts')"
         working-directory: .
 
   # The openmerit npm package: its own lockfile, typecheck, tests and build. No model calls.

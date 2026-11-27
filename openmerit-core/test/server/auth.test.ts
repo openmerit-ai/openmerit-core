@@ -7,10 +7,10 @@ import { mkdtempSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { createHandler } from "../src/app.ts";
-import { ClerkAuth, LocalAuth, localToken, type Auth } from "../src/auth.ts";
-import { loadConfig } from "../src/config.ts";
-import type { AppClient } from "../src/registry.ts";
+import { createHandler } from "../../src/server/app.ts";
+import { ClerkAuth, LocalAuth, localToken, type Auth } from "../../src/server/auth.ts";
+import { loadConfig } from "../../src/server/config.ts";
+import type { AppClient } from "../../src/server/registry.ts";
 
 const { publicKey, privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const APP = "https://app.openmerit.test";

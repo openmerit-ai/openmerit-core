@@ -68,8 +68,8 @@ async function deploy(): Promise<void> {
   // The commit the origin must report once the rollout is serving: a new build's own, or the receipt's for an uploaded build.
   const expected = build ? receiptFor(build)?.commit ?? null : commit;
   if (!flag("--yes")) await confirm(`Deploy to ${CLUSTER}?`);
-  // The image carries its commit in src/build.json (gitignored), which /health reports.
-  const stamp = join(root, "cloud", "src", "build.json");
+  // The image carries its commit in openmerit-core/src/server/build.json (gitignored), which /health reports.
+  const stamp = join(root, "openmerit-core", "src", "server", "build.json");
   if (!build) writeFileSync(stamp, `${JSON.stringify({ commit })}\n`);
   const result = spawnSync(rivet, deployArgs(commit, build), { cwd: root, encoding: "utf8", stdio: ["inherit", "pipe", "inherit"] });
   rmSync(stamp, { force: true });

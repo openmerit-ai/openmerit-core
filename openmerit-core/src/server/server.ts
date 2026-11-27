@@ -6,8 +6,8 @@ import { startApp } from "./app.ts";
 import { ClerkAuth, LocalAuth, localToken } from "./auth.ts";
 import { StripeBilling } from "./billing.ts";
 import { loadConfig } from "./config.ts";
-import { fetchCatalogue } from "../../openmerit-core/src/catalogue/build.ts";
-import { loadCatalogue } from "../../openmerit-core/src/catalogue/catalogue.ts";
+import { fetchCatalogue } from "../catalogue/build.ts";
+import { loadCatalogue } from "../catalogue/catalogue.ts";
 
 const config = loadConfig();
 
