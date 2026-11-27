@@ -106,11 +106,3 @@ export function rankCandidates(models: readonly RunnableModel[], rows: readonly 
 export function rank(candidates: readonly Candidate[]): Candidate[] {
   return [...candidates].sort((a, b) => a.eci - b.eci || a.model.localeCompare(b.model));
 }
-
-/** OpenRouter's public model list says which models accept tool calls. No key is needed. */
-export async function openRouterToolSupport(request: typeof fetch = fetch): Promise<Map<string, boolean>> {
-  const response = await request("https://openrouter.ai/api/v1/models", { signal: AbortSignal.timeout(30_000) });
-  if (!response.ok) throw new Error(`OpenRouter models HTTP ${response.status}`);
-  const body = await response.json() as { data?: { id: string; supported_parameters?: string[] }[] };
-  return new Map((body.data ?? []).map(model => [`openrouter/${model.id}`, (model.supported_parameters ?? []).includes("tools")]));
-}

@@ -103,9 +103,8 @@ jobs:
       - run: npm run build
 
   # The packed openmerit tarball installed globally with an empty npm cache, as users get it, on
-  # Linux x64 and arm64: connect, setup, scout, history and MCP against a local fake model endpoint.
-  # On Linux arm64 also the daemon test, which SIGKILLs the daemon at every question: the
-  # openmerit-core job runs it on Linux x64. No model calls. Macs are not tested for now: GitHub's
+  # Linux x64 and arm64: the self-hosted server, the CLI's tool commands and MCP against a local fake
+  # OpenRouter. No model calls. Macs are not tested for now: GitHub's
   # macOS runners stopped picking up jobs and blocked merges and deploys. Keep these jobs on GitHub-hosted runners:
   # the repository is public, so pull requests from forks run this workflow.
   openmerit-packed:
@@ -118,7 +117,6 @@ jobs:
             runner: ubuntu-latest
           - platform: linux-arm64
             runner: ubuntu-24.04-arm
-            daemon: true
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     defaults:
@@ -139,5 +137,3 @@ jobs:
       - run: node -e 'const p = `${process.platform}-${process.arch}`; if (p !== process.argv[1]) throw new Error(`expected ${process.argv[1]}, got ${p}`)' '${{ matrix.platform }}'
       - run: npm ci
       - run: node scripts/smoke-packed.ts
-      - if: matrix.daemon
-        run: node --test test/daemon.test.ts

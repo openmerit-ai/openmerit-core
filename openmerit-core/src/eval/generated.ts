@@ -1,61 +1,29 @@
-// The eval OpenMerit generates for a task when Scout reviews it: the task spec the review prompt wrote
-// (bundle.json) and the cases written from it (cases.json), saved in `.openmerit/evals/<task>/`. It runs
-// under the eval contract like any eval: once per model and item set, with every model call sent to
-// OPENAI_BASE_URL, and per-item pass or fail as its result. Scout runs it in-process; `openmerit eval
-// <dir>` runs it from a shell. Each case's tools answer with their mocked results, never real ones.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { CandidateUnavailable, MemoryLedger } from "../engine/index.ts";
+// The cases OpenMerit writes for a task from its spec, on the harness: the case writer's reply shape and
+// its mocked tool results. The grading loop (loop.ts) writes an eval again with it from a person's notes.
 import type { Harness } from "../harness/harness.ts";
-import { createClient, type EndpointConfig } from "../ranking/clients.ts";
-import { writeCases, type Complete } from "../ranking/cases.ts";
-import { graderFor } from "../ranking/graders.ts";
-import { createMeasure } from "../ranking/measure.ts";
-import { caseKind, type Case, type TaskBundle } from "../ranking/types.ts";
-import type { CaseAnswer } from "./loop.ts";
-import type { EvalOutcome } from "./runner.ts";
-import { toolResultsOf, type ToolResultReply } from "../review/index.ts";
+import type { Complete } from "../ranking/cases.ts";
+import type { Case, TaskBundle } from "../ranking/types.ts";
 
 export interface GeneratedEval { bundle: TaskBundle; cases: Case[] }
 
 /** Cases the harness writes for a task, besides the examples it found. */
 export const GENERATED_CASES = 12;
 
-/** Where a task's generated eval lives, relative to the project root. */
-export const generatedDir = (task: string) => `.openmerit/evals/${task.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "task"}`;
+const parseJson = (text: string): unknown => { try { return text.trim() ? JSON.parse(text) : undefined; } catch { return undefined; } };
+const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 
-/** What `eval.json` says about a saved Eval: its version, the bar it measures against, and when a person accepted it. */
-export interface EvalVersion { version: number; bar: "current" | "criteria"; acceptedAt: string }
+/** A tool result the harness writes: `whenJson` holds the arguments it answers, or is empty for any call. */
+export interface ToolResultReply { name: string; whenJson: string; resultJson: string }
 
-/**
- * The note the coding agent writes beside an eval app.openmerit.ai owns, a task's eval in the cloud,
- * with the cloud's version in `eval.json`. The cloud is its source of truth: Scout runs such a copy as
- * it is, never grades or revises it, and never writes over it.
- */
-export const MANAGED_NOTE = "MANAGED.md";
-export const isManaged = (root: string, dir: string) => existsSync(join(resolve(root, dir), MANAGED_NOTE));
-
-/** Saves an Eval a person accepted: the spec, the cases and `eval.json`. */
-export function saveGeneratedEval(root: string, dir: string, value: GeneratedEval, version?: EvalVersion): void {
-  if (isManaged(root, dir)) return;
-  const path = resolve(root, dir);
-  mkdirSync(path, { recursive: true });
-  writeFileSync(join(path, "bundle.json"), `${JSON.stringify(value.bundle, null, 2)}\n`);
-  writeFileSync(join(path, "cases.json"), `${JSON.stringify(value.cases, null, 2)}\n`);
-  if (version) writeFileSync(join(path, "eval.json"), `${JSON.stringify(version, null, 2)}\n`);
-}
-
-/** A saved Eval's version; one saved before versions were kept is version 1 against the current model. */
-export function loadEvalVersion(root: string, dir: string): EvalVersion {
-  const path = join(resolve(root, dir), "eval.json");
-  const saved = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) as Partial<EvalVersion> : {};
-  return { version: Number.isInteger(saved.version) && saved.version! >= 1 ? saved.version! : 1, bar: saved.bar === "criteria" ? "criteria" : "current", acceptedAt: typeof saved.acceptedAt === "string" ? saved.acceptedAt : "" };
-}
-
-export function loadGeneratedEval(root: string, dir: string): GeneratedEval {
-  const path = resolve(root, dir);
-  if (!existsSync(join(path, "bundle.json")) || !existsSync(join(path, "cases.json"))) throw new Error(`${dir} has no bundle.json and cases.json: it is not an eval OpenMerit generated.`);
-  return { bundle: JSON.parse(readFileSync(join(path, "bundle.json"), "utf8")) as TaskBundle, cases: JSON.parse(readFileSync(join(path, "cases.json"), "utf8")) as Case[] };
+/** Tool results by tool name, as openmerit/ranking takes them: one result, or a list of `{ when?, result }` matched on the call's arguments. */
+export function toolResultsOf(items: readonly ToolResultReply[] | undefined, tools: ReadonlySet<string> | null = null): Record<string, unknown> {
+  const byTool = new Map<string, { when?: Record<string, unknown>; result: unknown }[]>();
+  for (const item of items ?? []) {
+    if (!item.name || (tools && !tools.has(item.name))) continue;
+    const when = parseJson(item.whenJson ?? ""), result = parseJson(item.resultJson) ?? item.resultJson;
+    byTool.set(item.name, [...byTool.get(item.name) ?? [], { ...(isObject(when) && Object.keys(when).length ? { when } : {}), result }]);
+  }
+  return Object.fromEntries([...byTool].map(([name, entries]) => [name, entries.length === 1 && !entries[0]!.when ? entries[0]!.result : entries]));
 }
 
 const CASES_SCHEMA = {
@@ -81,60 +49,3 @@ export function harnessWriter(harness: Harness, json: boolean, signal?: AbortSig
     })) });
   };
 }
-
-/** Writes a task's cases from its spec on the harness: its examples first, then GENERATED_CASES more. */
-export async function generateEval(bundle: TaskBundle, harness: Harness, signal?: AbortSignal): Promise<GeneratedEval> {
-  const written = await writeCases({ bundle, complete: harnessWriter(harness, bundle.output.kind === "json", signal), count: GENERATED_CASES });
-  // A case needs an input, and an expected answer unless a judge grades it; a prompt without placeholders has nothing to vary.
-  return { bundle, cases: written.cases.filter(item => Object.keys(item.input).length && (item.expected !== undefined || bundle.output.kind === "text")) };
-}
-
-/** What the eval needs to run one model: the endpoint under test (the proxy) and, for judged answers, the judge's. */
-export interface GeneratedRun {
-  model: string; baseUrl: string; apiKey: string;
-  items: readonly string[] | null;
-  judge?: { model: string; baseUrl: string; apiKey: string };
-  signal?: AbortSignal;
-}
-
-/** What a generated eval keeps of one model's run beyond pass or fail: why each failed item failed, the checks it failed, and each answer for grading. */
-/** `errored`: the failed items whose model call failed, rather than answered wrongly. */
-/** `ungradable`: the items no grader could grade, such as when the judge's provider filtered the case; they count for no model. */
-export interface GeneratedOutcome { reasons: Record<string, string>; checks: Record<string, string[]>; answers: CaseAnswer[]; errored: string[]; ungradable: string[] }
-
-/** Runs a generated eval for one model, with the eval contract's result: pass or fail per item, and why a failed item failed. */
-export async function runGeneratedEval(value: GeneratedEval, input: GeneratedRun): Promise<EvalOutcome & GeneratedOutcome> {
-  const started = Date.now();
-  const endpoints: EndpointConfig[] = [{ id: "candidate", kind: "openai-compatible", baseUrl: input.baseUrl, apiKey: input.apiKey, funding: "customer" }];
-  if (input.judge) endpoints.push({ id: "judge", kind: "openai-compatible", baseUrl: input.judge.baseUrl, apiKey: input.judge.apiKey, funding: "customer" });
-  // The proxy meters and caps spend; this ledger only keys the calls of one run.
-  const client = createClient(endpoints, { model: () => null, retries: false });
-  const grader = graderFor(value.bundle, input.judge ? { judge: { client, endpoint: "judge", model: input.judge.model } } : {});
-  const ids = input.items?.length ? [...input.items] : value.cases.map(item => item.id);
-  try {
-    // Each answer is kept for a person to grade; the Pi transcript is not.
-    const byId = new Map(value.cases.map(item => [item.id, item]));
-    const answers: CaseAnswer[] = [];
-    const onCase = (result: { caseId: string; pass: boolean; reason?: string; failedChecks?: string[] }, ran: { output: string | null; toolCalls?: readonly { name: string; arguments: string }[] } | null) => {
-      const item = byId.get(result.caseId);
-      if (item) answers.push({ caseId: item.id, kind: caseKind(item), input: item.input, output: ran?.output ?? "", toolCalls: (ran?.toolCalls ?? []).map(call => ({ name: call.name, arguments: call.arguments })), pass: result.pass, failedChecks: result.failedChecks ?? [], ...(result.reason ? { reason: result.reason } : {}) });
-    };
-    const measure = createMeasure({ bundle: value.bundle, cases: value.cases, client, grader, ledger: new MemoryLedger(), key: "eval", onCase, ...(input.signal ? { signal: input.signal } : {}) });
-    const result = await measure({ model: input.model, endpoint: "candidate" }, ids);
-    return {
-      ok: true, exitCode: 0, durationMs: Date.now() - started,
-      items: result.results.map(item => ({ id: item.caseId, pass: item.pass })),
-      reasons: Object.fromEntries(result.results.flatMap(item => (item.pass || !item.reason ? [] : [[item.caseId, item.reason]]))),
-      checks: Object.fromEntries(result.results.flatMap(item => (item.failedChecks?.length ? [[item.caseId, item.failedChecks]] : []))),
-      answers: ids.flatMap(id => answers.filter(answer => answer.caseId === id)),
-      errored: result.results.filter(item => !item.pass && item.failure === "error").map(item => item.caseId),
-      ungradable: result.results.filter(item => item.failure === "ungradable").map(item => item.caseId),
-    };
-  } catch (error) {
-    const unavailable = error instanceof CandidateUnavailable;
-    return { ok: false, exitCode: 1, durationMs: Date.now() - started, items: null, reasons: {}, checks: {}, answers: [], errored: [], ungradable: [], error: unavailable ? `the endpoint refused ${input.model}: ${error.message}` : (error as Error).message };
-  }
-}
-
-/** The prefix of the repository's own eval items when they run beside a generated eval. */
-export const REPO_ITEM = "repo:";

@@ -16,16 +16,16 @@ Every check below runs against local fakes: no secret, no paid model call, no Cl
 
 | Change in | While iterating | Before you finish |
 |---|---|---|
-| `openmerit-core/` | `npm run typecheck` (7 s), `npm run test:fast` (25 s) | `npm run check` (100 s), `npm run build` (6 s) |
+| `openmerit-core/` | `npm run typecheck` (7 s), `npm test` (5 s) | `npm run check` (15 s), `npm run build` (6 s); `npm run test:server` (6 min) after a change in `src/server`, `src/job`, `src/ranking` or `src/engine` |
 | the server, `openmerit-core/src/server/` | `npm run typecheck` in `openmerit-core/` (7 s) | `npm run test:server` in `openmerit-core/` (6 min: tests on a local Rivet engine with fake sign-in, Stripe and models) |
 | `playground/` | | `npm run check` (12 s) |
 | `cloud/` (the hosted deploy) | | `npm run check` (5 s) |
 | website, `docs/`, `scripts/`, `demo/` | `npm run check:docs` (2 s) | `npm run verify` (15 s); `npm run check:worker-types` (18 s) after a Wrangler configuration change |
-| packaging, the CLI or the daemon in `openmerit-core/` | | also `node scripts/smoke-packed.ts` (60 s): packs and installs the tarball globally, then runs connect, setup, scout, history and MCP against a local fake |
+| packaging, the CLI or the server launcher in `openmerit-core/` | | also `node scripts/smoke-packed.ts` (60 s): packs and installs the tarball globally, then runs `server start`, whoami, a job up to its first question and `openmerit mcp` against a local fake OpenRouter |
 | several of these | | `npm run check:all` at the root runs every CI job (3.5 min) |
 
-- `test:fast` skips the openmerit-core daemon test, which kills the daemon at each of six questions and waits about 13 s each time for the local Rivet engine to resume the run. It takes 90 s and is not hung.
-- To drive the CLI by hand, run `node src/cli.ts` from `openmerit-core/` with `OPENMERIT_HOME` set to a temporary directory and `OPENMERIT_NO_UPDATE_CHECK=1`. Without a TTY it never prompts: `scout --json` stops at the first question, `--answer <id=value>` answers it, and setup takes `--yes`. `test/daemon.test.ts` shows a full run against a fake harness and endpoint.
+- `test:server` starts a local Rivet engine per test and takes about 6 minutes; it is not hung. Run one at a time: two at once contend for the engine's ports.
+- To drive the CLI by hand, run `node src/cli.ts` from `openmerit-core/` with `OPENMERIT_HOME` set to a temporary directory and `OPENMERIT_NO_UPDATE_CHECK=1`: `server start --port <n>` runs a self-hosted server there, and the tool commands (`recommend`, `result`, `answer` and the rest, with `--json`) call it. `test/server/cloud.test.ts` shows full jobs against a fake OpenRouter.
 - `npm run memo` serves the website and memo locally on port 45834 (no real email).
 
 # Working unattended

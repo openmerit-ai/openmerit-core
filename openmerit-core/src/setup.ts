@@ -1,148 +1,41 @@
-// `openmerit setup`: detect → explicit choice → verify → persist, rerunnable. Global: how OpenMerit
-// Harness is powered, and the MCP registration with Claude Code/Codex. Per repository: candidate
-// endpoints with allowed models, and the default eval budget. Re-running keeps
-// working settings unless the user replaces them, and a failed connection is offered for retry or
-// reconfiguration; nothing switches provider on its own.
+// `openmerit setup`: registers `openmerit mcp` with Claude Code and Codex, through their own `mcp add`
+// commands, and says how to get a server for it: `openmerit login` for openmerit.ai, or `openmerit
+// server start` on this machine. Rerunnable; an existing "openmerit" entry is left alone.
 import { spawnSync } from "node:child_process";
-import { confirm, connect, credential, HARNESS_LABEL } from "./connect.ts";
 import type { Prompter } from "./cli/prompt.ts";
-import {
-  DEFAULT_BUDGET_USD, describeCredential, globalConfigLabel, OPENAI_ENDPOINT, OPENROUTER_ENDPOINT, readRepoConfig, resolveCredential, updateRepoConfig,
-  type Endpoint, type HarnessKind, type HarnessSettings,
-} from "./state/config.ts";
-import type { State } from "./state/db.ts";
-import type { Repo } from "./state/paths.ts";
+import { connection } from "./client.ts";
 
-export interface SetupFlags {
-  harness?: HarnessKind;
-  harnessModel?: string;
-  apiProvider?: string;
-  apiModel?: string;
-  apiKeyEnv?: string;
-  /** Sign in to ChatGPT with a device code (for --harness codex on a server). */
-  deviceCode?: boolean;
-  /** `openrouter:ENV_VAR`, `openai:ENV_VAR` or `<id>=<baseUrl>:ENV_VAR` (OpenAI-compatible). */
-  endpoints?: string[];
-  allowedModels?: string[];
-  budget?: number;
-  registerMcp?: boolean;
-  /** Accept defaults and never prompt. */
-  nonInteractive?: boolean;
+type Env = Record<string, string | undefined>;
+type Client = "claude-code" | "codex";
+const NAME: Record<Client, string> = { "claude-code": "Claude Code", codex: "Codex" };
+const bin = (kind: Client, env: Env) => (kind === "claude-code" ? env.OPENMERIT_CLAUDE_BIN ?? "claude" : env.OPENMERIT_CODEX_BIN ?? "codex");
+
+export interface SetupContext {
+  prompter: Prompter | null;
+  log: (line: string) => void;
+  env: Env;
+  /** The command that starts `openmerit mcp`, as clients should run it. */
+  mcpCommand: string[];
+  flags: { registerMcp?: boolean };
 }
 
-interface SetupContext { repo: Repo; state: State; prompter: Prompter | null; log: (line: string) => void; env: Record<string, string | undefined>; fetch?: typeof fetch; flags: SetupFlags; mcpCommand: string[] }
-
-export async function verifyEndpoint(endpoint: Endpoint, env: Record<string, string | undefined>, fetcher: typeof fetch = fetch): Promise<{ ok: boolean; detail: string }> {
-  const key = resolveCredential(endpoint.apiKey, env);
-  if (!key) return { ok: false, detail: `no key (${describeCredential(endpoint.apiKey)} is empty)` };
-  const url = endpoint.kind === "openrouter" ? `${endpoint.baseUrl.replace(/\/$/, "")}/key` : `${endpoint.baseUrl.replace(/\/$/, "")}/models`;
-  try {
-    const response = await fetcher(url, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(20_000), redirect: "manual" });
-    await response.body?.cancel();
-    return response.ok ? { ok: true, detail: "key accepted" } : { ok: false, detail: `HTTP ${response.status}${response.status === 401 ? " (key rejected or expired)" : ""}` };
-  } catch (error) { return { ok: false, detail: error instanceof Error ? error.message : String(error) }; }
-}
-
-/** Claude Code and Codex CLIs on PATH, which can register OpenMerit's MCP server. */
-function mcpClients(env: Record<string, string | undefined>): ("claude-code" | "codex")[] {
-  return (["claude-code", "codex"] as const).filter(kind => !spawnSync(kind === "claude-code" ? env.OPENMERIT_CLAUDE_BIN ?? "claude" : env.OPENMERIT_CODEX_BIN ?? "codex", ["--version"], { env, stdio: "ignore" }).error);
-}
-
-/** Adds OpenMerit's stdio MCP server to Claude Code and Codex through their own `mcp add` commands; existing entries are left alone. */
-function registerMcp(ctx: SetupContext, kinds: ("claude-code" | "codex")[]) {
-  for (const kind of kinds) {
-    const bin = kind === "claude-code" ? ctx.env.OPENMERIT_CLAUDE_BIN ?? "claude" : ctx.env.OPENMERIT_CODEX_BIN ?? "codex";
-    const get = spawnSync(bin, ["mcp", "get", "openmerit"], { encoding: "utf8", env: ctx.env });
-    if (get.error) continue;
-    if (get.status === 0) { ctx.log(`  ${kind === "claude-code" ? "Claude Code" : "Codex"} already has an "openmerit" MCP server; left unchanged.`); continue; }
-    const args = kind === "claude-code" ? ["mcp", "add", "--scope", "user", "openmerit", "--", ...ctx.mcpCommand] : ["mcp", "add", "openmerit", "--", ...ctx.mcpCommand];
-    const add = spawnSync(bin, args, { encoding: "utf8", env: ctx.env });
-    ctx.log(add.status === 0 ? `  ✓ Registered OpenMerit's MCP server with ${kind === "claude-code" ? "Claude Code" : "Codex"}.` : `  ✗ Could not register with ${kind}: ${(add.stderr || add.stdout).trim().slice(0, 200)}`);
-  }
-}
-
-function parseEndpointFlag(value: string, allowed: Endpoint["allowedModels"]): Endpoint {
-  const known = /^(openrouter|openai):([A-Z_][A-Z0-9_]*)$/.exec(value);
-  if (known) return { ...(known[1] === "openrouter" ? OPENROUTER_ENDPOINT : OPENAI_ENDPOINT), allowedModels: allowed, apiKey: { env: known[2]! } };
-  const custom = /^([a-z0-9-]+)=(https?:\/\/[^\s]+):([A-Z_][A-Z0-9_]*)$/.exec(value);
-  if (!custom) throw new Error(`--endpoint ${value}: use openrouter:ENV_VAR, openai:ENV_VAR or <id>=<baseUrl>:ENV_VAR`);
-  if (allowed === "all") throw new Error("An OpenAI-compatible endpoint needs --allowed-models: the catalogue cannot tell which models it serves.");
-  return { id: custom[1]!, kind: "openai-compatible", baseUrl: custom[2]!, apiKey: { env: custom[3]! }, allowedModels: allowed };
-}
-
-async function setupEndpoints(ctx: SetupContext): Promise<Endpoint[]> {
-  const existing = readRepoConfig(ctx.repo.root).endpoints ?? [];
-  const allowed: Endpoint["allowedModels"] = ctx.flags.allowedModels?.length ? ctx.flags.allowedModels : "all";
-  if (ctx.flags.endpoints?.length) {
-    const next = [...existing];
-    for (const flag of ctx.flags.endpoints) {
-      const endpoint = parseEndpointFlag(flag, allowed);
-      const check = await verifyEndpoint(endpoint, ctx.env, ctx.fetch);
-      if (!check.ok) throw new Error(`Endpoint ${endpoint.id} failed verification: ${check.detail}. Existing endpoints are unchanged.`);
-      ctx.log(`  ✓ ${endpoint.id}: ${check.detail}; allowed models: ${endpoint.allowedModels === "all" ? "all" : endpoint.allowedModels.join(", ")}`);
-      next.splice(0, next.length, ...next.filter(item => item.id !== endpoint.id), { ...endpoint, verifiedAt: new Date().toISOString() });
+/** Registers the MCP server with the clients on PATH; returns the ones that have it now. */
+export async function runSetup(ctx: SetupContext): Promise<Client[]> {
+  const clients = (["claude-code", "codex"] as const).filter(kind => !spawnSync(bin(kind, ctx.env), ["--version"], { env: ctx.env, stdio: "ignore" }).error);
+  const register = clients.length > 0 && (ctx.flags.registerMcp ?? (ctx.prompter ? await ctx.prompter.confirm(`Register OpenMerit's MCP server with ${clients.map(kind => NAME[kind]).join(" and ")}?`, true) : true));
+  const registered: Client[] = [];
+  if (register) {
+    for (const kind of clients) {
+      const get = spawnSync(bin(kind, ctx.env), ["mcp", "get", "openmerit"], { encoding: "utf8", env: ctx.env });
+      if (get.status === 0) { ctx.log(`  ${NAME[kind]} already has an "openmerit" MCP server; left unchanged.`); registered.push(kind); continue; }
+      const args = kind === "claude-code" ? ["mcp", "add", "--scope", "user", "openmerit", "--", ...ctx.mcpCommand] : ["mcp", "add", "openmerit", "--", ...ctx.mcpCommand];
+      const add = spawnSync(bin(kind, ctx.env), args, { encoding: "utf8", env: ctx.env });
+      if (add.status === 0) { ctx.log(`  ✓ Registered OpenMerit's MCP server with ${NAME[kind]}.`); registered.push(kind); }
+      else ctx.log(`  ✗ Could not register with ${NAME[kind]}: ${(add.stderr || add.stdout).trim().slice(0, 200)}`);
     }
-    return next;
-  }
-  const kept: Endpoint[] = [];
-  for (const endpoint of existing) {
-    const check = await verifyEndpoint(endpoint, ctx.env, ctx.fetch);
-    ctx.log(`  ${check.ok ? "✓" : "✗"} Endpoint ${endpoint.id} (${endpoint.baseUrl}): ${check.detail}; allowed models: ${endpoint.allowedModels === "all" ? "all" : endpoint.allowedModels.join(", ")}`);
-    if (check.ok) { kept.push(await confirm(ctx, `Keep ${endpoint.id}?`, true) ? endpoint : await reconfigure(endpoint) ?? endpoint); continue; }
-    const fixed = await reconfigure(endpoint);
-    kept.push(fixed ?? endpoint);
-  }
-  async function reconfigure(endpoint: Endpoint): Promise<Endpoint | null> {
-    if (!ctx.prompter || ctx.flags.nonInteractive || !(await ctx.prompter.confirm(`Enter a new key for ${endpoint.id}?`, true))) return null;
-    for (;;) {
-      const apiKey = await credential(ctx, `${endpoint.id} API key`, [], `endpoint-${endpoint.id}-${ctx.repo.id}`);
-      if (!apiKey) return null;
-      const next = { ...endpoint, apiKey };
-      const check = await verifyEndpoint(next, ctx.env, ctx.fetch);
-      ctx.log(`  ${check.ok ? "✓" : "✗"} ${endpoint.id}: ${check.detail}`);
-      if (check.ok) return { ...next, verifiedAt: new Date().toISOString() };
-      if (!(await ctx.prompter.confirm("Try again?", true))) return null;
-    }
-  }
-  if (!ctx.prompter || ctx.flags.nonInteractive) return kept;
-  if (!kept.some(item => item.kind === "openrouter") && await ctx.prompter.confirm("Add OpenRouter for candidates (all its models eligible)?", !kept.length)) {
-    const apiKey = await credential(ctx, "OpenRouter key", ["OPENROUTER_API_KEY"], `endpoint-openrouter-${ctx.repo.id}`);
-    if (apiKey) kept.push(...await added({ ...OPENROUTER_ENDPOINT, apiKey }, "all"));
-  }
-  if (!kept.some(item => item.kind === "openai") && await ctx.prompter.confirm("Add OpenAI for candidates?", false)) {
-    const apiKey = await credential(ctx, "OpenAI key", ["OPENAI_API_KEY"], `endpoint-openai-${ctx.repo.id}`);
-    if (apiKey) kept.push(...await added({ ...OPENAI_ENDPOINT, apiKey }));
-  }
-  // OpenRouter's question already says every model is eligible; other endpoints ask which.
-  async function added(endpoint: Endpoint, allowed?: string): Promise<Endpoint[]> {
-    const models = allowed ?? await ctx.prompter!.ask(`Allowed models on ${endpoint.id}: "all", or IDs comma-separated`, "all");
-    const next: Endpoint = { ...endpoint, allowedModels: /^all$/i.test(models) ? "all" : models.split(",").map(item => item.trim()).filter(Boolean) };
-    const check = await verifyEndpoint(next, ctx.env, ctx.fetch);
-    ctx.log(`  ${check.ok ? "✓" : "✗"} ${endpoint.id}: ${check.detail}`);
-    return check.ok ? [{ ...next, verifiedAt: new Date().toISOString() }] : (await ctx.prompter!.confirm("Save it anyway, to fix later?", false)) ? [next] : [];
-  }
-  return kept;
-}
-
-export async function runSetup(ctx: SetupContext): Promise<{ harness: HarnessSettings | null; endpoints: Endpoint[]; budgetUsd: number }> {
-  ctx.log("OpenMerit setup\n\n1. OpenMerit Harness (global)");
-  const { harness: kind, harnessModel, apiProvider, apiModel, apiKeyEnv, deviceCode, nonInteractive } = ctx.flags;
-  const harness = await connect({ ...ctx, root: ctx.repo.root, flags: { ...(harnessModel ? { model: harnessModel } : {}), ...(apiProvider ? { apiProvider } : {}), ...(apiModel ? { apiModel } : {}), ...(apiKeyEnv ? { apiKeyEnv } : {}), ...(deviceCode ? { deviceCode } : {}), ...(nonInteractive ? { nonInteractive } : {}) } }, kind);
-  if (!harness) return { harness: null, endpoints: [], budgetUsd: DEFAULT_BUDGET_USD };
-  const agents = mcpClients(ctx.env);
-  if (agents.length && (ctx.flags.registerMcp ?? await confirm(ctx, `Register OpenMerit's MCP server with ${agents.map(kind => (kind === "claude-code" ? "Claude Code" : "Codex")).join(" and ")}?`, true))) registerMcp(ctx, agents);
-  else ctx.log(`  MCP server not registered${agents.length ? "" : ": no claude or codex CLI on PATH"}. To add it to a client, register the stdio command: ${ctx.mcpCommand.join(" ")}`);
-  ctx.log(`\n2. This ${ctx.repo.gitRoot ? "project" : "repository"}: ${ctx.repo.root}`);
-  if (ctx.repo.gitRoot) ctx.log(`  A project in the Git repository ${ctx.repo.gitRoot}: settings go to its own .openmerit/, and Scout scans only this directory. Run setup from ${ctx.repo.gitRoot} to review the whole repository instead.`);
-  const endpoints = await setupEndpoints(ctx);
-  if (!endpoints.length) ctx.log("  No candidate endpoints: Scout needs at least one to evaluate models. Run setup again to add one.");
-  const current = readRepoConfig(ctx.repo.root).budget?.defaultUsd ?? DEFAULT_BUDGET_USD;
-  let budgetUsd = ctx.flags.budget ?? current;
-  if (ctx.flags.budget === undefined && ctx.prompter && !ctx.flags.nonInteractive) {
-    const answer = Number(await ctx.prompter.ask("Default eval budget per Scout run, USD", String(current)));
-    if (Number.isFinite(answer) && answer > 0) budgetUsd = answer;
-  }
-  updateRepoConfig(ctx.repo.root, { endpoints, budget: { defaultUsd: budgetUsd } });
-  ctx.log(`\nSaved. Harness: ${HARNESS_LABEL[harness.kind]}. Endpoints: ${endpoints.map(item => item.id).join(", ") || "none"}. Eval budget: $${budgetUsd.toFixed(2)} per run.\nSettings: ${globalConfigLabel(ctx.env)} (global) and .openmerit/config.json (this repository; credential references only). Next: openmerit scout`);
-  return { harness, endpoints, budgetUsd };
+  } else ctx.log(`  MCP server not registered${clients.length ? "" : ": no claude or codex CLI on PATH"}. To add it to another client, register the stdio command: ${ctx.mcpCommand.join(" ")}`);
+  const conn = connection(ctx.env);
+  ctx.log(conn ? `\nThe MCP server and the CLI use ${conn.server}${conn.mode === "self-hosted" ? " (self-hosted)" : ""}.`
+    : "\nNext, give them a server: `openmerit login` to use openmerit.ai, or `openmerit server start` to run one on this machine.");
+  return registered;
 }

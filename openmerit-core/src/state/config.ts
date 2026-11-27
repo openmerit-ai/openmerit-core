@@ -1,7 +1,6 @@
-// Settings. Global (~/.openmerit/config.json): how OpenMerit Harness is powered. Per repository
-// (<repo>/.openmerit/config.json): candidate endpoints, allowed models, evals and the eval
-// budget, with credential references only. Secret values live in ~/.openmerit/secrets.json (0600),
-// outside every repository. Writes keep keys OpenMerit does not know about.
+// Settings in ~/.openmerit/config.json: how OpenMerit Harness is powered, with credential references
+// only. Secret values live in ~/.openmerit/secrets.json (0600). Writes keep keys OpenMerit does not
+// know about.
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -29,52 +28,6 @@ export interface GlobalConfig {
   [key: string]: unknown;
 }
 
-export type EndpointKind = "openrouter" | "openai" | "openai-compatible";
-
-export interface Endpoint {
-  id: string;
-  kind: EndpointKind;
-  /** OpenAI-compatible API root, such as https://openrouter.ai/api/v1. */
-  baseUrl: string;
-  apiKey: CredentialRef;
-  /** "all" for every catalogue model the endpoint serves, or explicit model IDs (catalogue or endpoint IDs). */
-  allowedModels: "all" | string[];
-  verifiedAt?: string;
-}
-
-/** How OpenMerit runs a task's existing eval for one model. See README "Eval contract". */
-export interface EvalSpec {
-  command: string;
-  /** For a generated Eval: the share of cases (0 to 1) a model must pass each criterion on to meet the task's criteria; 0.9 when unset. */
-  criteriaPassRate?: number;
-  cwd?: string;
-  /** Extra variables for the eval; `{{model}}` and `{{items}}` are filled in. */
-  env?: Record<string, string>;
-  /** Helper files the harness wrote (and the user approved) to run the existing eval. */
-  helpers?: string[];
-  /** The eval's own acceptance threshold: the minimum pass rate, 0 to 1. */
-  threshold?: number;
-  description?: string;
-  /** For an eval OpenMerit generated: its directory, `.openmerit/evals/<task>`, with bundle.json and cases.json. */
-  generated?: string;
-  /** The repository's own eval, run beside a generated one as extra evidence; its items are prefixed `repo:`. */
-  repoEval?: EvalSpec;
-}
-
-export interface RepoConfig {
-  endpoints?: Endpoint[];
-  budget?: { defaultUsd: number };
-  evals?: Record<string, EvalSpec>;
-  /** Glob patterns, relative to the repository root, of files or directories Scout's scan skips. */
-  scan?: { exclude?: string[] };
-  /** Runs of every item for the current model and each finalist; default 3. */
-  repeats?: number;
-  [key: string]: unknown;
-}
-
-export const DEFAULT_BUDGET_USD = 10;
-export const DEFAULT_REPEATS = 3;
-
 function readJson<T>(path: string): T | null {
   if (!existsSync(path)) return null;
   const value: unknown = JSON.parse(readFileSync(path, "utf8"));
@@ -93,22 +46,14 @@ function writeJson(path: string, value: unknown, mode = 0o644) {
 export const globalConfigPath = (env?: Record<string, string | undefined>) => join(openmeritHome(env), "config.json");
 /** The global settings file as messages show it: the default home abbreviated, an OPENMERIT_HOME one in full. */
 export const globalConfigLabel = (env: Record<string, string | undefined> = process.env) => (env.OPENMERIT_HOME ? globalConfigPath(env) : "~/.openmerit/config.json");
-export const repoConfigPath = (root: string) => join(root, ".openmerit", "config.json");
 const secretsPath = (env?: Record<string, string | undefined>) => join(openmeritHome(env), "secrets.json");
 
 export const readGlobalConfig = (env?: Record<string, string | undefined>) => readJson<GlobalConfig>(globalConfigPath(env)) ?? {};
-export const readRepoConfig = (root: string) => readJson<RepoConfig>(repoConfigPath(root)) ?? {};
 
 /** Merges `patch` into the stored object, keeping every other key. */
 export function updateGlobalConfig(patch: Partial<GlobalConfig>, env?: Record<string, string | undefined>) {
   const next = { ...readGlobalConfig(env), ...patch };
   writeJson(globalConfigPath(env), next);
-  return next;
-}
-
-export function updateRepoConfig(root: string, patch: Partial<RepoConfig>) {
-  const next = { ...readRepoConfig(root), ...patch };
-  writeJson(repoConfigPath(root), next);
   return next;
 }
 
@@ -124,9 +69,3 @@ export function resolveCredential(ref: CredentialRef | undefined, env: Record<st
   if ("env" in ref) return env[ref.env]?.trim() || null;
   return readJson<Record<string, string>>(secretsPath(env))?.[ref.secret] ?? null;
 }
-
-export const describeCredential = (ref: CredentialRef) => ("env" in ref ? `$${ref.env}` : "stored in ~/.openmerit/secrets.json");
-
-/** Default candidate pool: OpenRouter with every model eligible. */
-export const OPENROUTER_ENDPOINT: Omit<Endpoint, "apiKey"> = { id: "openrouter", kind: "openrouter", baseUrl: "https://openrouter.ai/api/v1", allowedModels: "all" };
-export const OPENAI_ENDPOINT: Omit<Endpoint, "apiKey"> = { id: "openai", kind: "openai", baseUrl: "https://api.openai.com/v1", allowedModels: "all" };

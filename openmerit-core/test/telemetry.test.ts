@@ -43,9 +43,9 @@ test("a CLI command sends one event with metadata only, and the opt-outs send no
   const posthog = await fakePostHog();
   const home = mkdtempSync(join(tmpdir(), "openmerit-telemetry-"));
   const repo = mkdtempSync(join(tmpdir(), "openmerit-telemetry-repo-"));
-  execFileSync("git", ["init", "-q"], { cwd: repo });
-  const history = (extra: Record<string, string> = {}) => new Promise<{ code: number | null; stdout: string; stderr: string }>(resolve => {
-    const child = spawn(process.execPath, [cli, "history", "--json"], { cwd: repo, env: telemetryEnv(home, posthog.host, extra), stdio: ["ignore", "pipe", "pipe"] });
+  // `openmerit server status`: a command that needs no server and prints one line.
+  const status = (extra: Record<string, string> = {}) => new Promise<{ code: number | null; stdout: string; stderr: string }>(resolve => {
+    const child = spawn(process.execPath, [cli, "server", "status"], { cwd: repo, env: telemetryEnv(home, posthog.host, extra), stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", chunk => { stdout += chunk; });
@@ -53,9 +53,9 @@ test("a CLI command sends one event with metadata only, and the opt-outs send no
     child.on("close", code => resolve({ code, stdout, stderr }));
   });
   try {
-    const first = await history();
+    const first = await status();
     assert.equal(first.code, 0);
-    assert.equal(first.stdout, "[]\n", "stdout is the command's output only");
+    assert.equal(first.stdout, "not running\n", "stdout is the command's output only");
     assert.match(first.stderr, /anonymous usage data[\s\S]*OPENMERIT_TELEMETRY=0 or DO_NOT_TRACK=1/, "the first run that sends says so");
     assert.ok(existsSync(join(home, "telemetry.json")));
     assert.deepEqual(posthog.paths, ["POST /i/v0/e/"]);
@@ -65,17 +65,17 @@ test("a CLI command sends one event with metadata only, and the opt-outs send no
     assert.equal(event!.api_key, "phc_test");
     assert.equal(event!.event, "cli_command_run");
     assert.deepEqual(Object.keys(event!.properties).sort(), ["$process_person_profile", "arch", "command", "duration_ms", "interface", "node_version", "ok", "os", "surface", "version"]);
-    assert.deepEqual({ ...event!.properties, duration_ms: 0 }, { command: "history", surface: "cli", ok: true, duration_ms: 0, version: packageVersion(), os: process.platform, arch: process.arch, node_version: process.versions.node, interface: "cli", $process_person_profile: false });
+    assert.deepEqual({ ...event!.properties, duration_ms: 0 }, { command: "server", surface: "cli", ok: true, duration_ms: 0, version: packageVersion(), os: process.platform, arch: process.arch, node_version: process.versions.node, interface: "cli", $process_person_profile: false });
     assert.equal(typeof event!.properties.duration_ms, "number");
 
-    const second = await history();
+    const second = await status();
     assert.equal(second.stdout, first.stdout);
     assert.doesNotMatch(second.stderr, /anonymous usage data/, "the notice is shown once");
     assert.equal(posthog.events.length, 2);
     assert.equal(posthog.events[1]!.distinct_id, event!.distinct_id, "the install ID is kept");
 
     for (const optOut of [{ DO_NOT_TRACK: "1" }, { OPENMERIT_TELEMETRY: "0" }, { OPENMERIT_TELEMETRY: "false" }, { OPENMERIT_TELEMETRY: "off" }, { CI: "true" }]) {
-      const quiet = await history(optOut);
+      const quiet = await status(optOut);
       assert.equal(quiet.code, 0);
       assert.equal(quiet.stdout, first.stdout);
     }

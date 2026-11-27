@@ -1,1 +1,0 @@
-Fictional support app used by OpenMerit's tests: a ticket classifier and a reply drafter on `gpt-4.1-mini`, and an escalation router on `gpt-5.4`. `npm run eval:classify` measures the classifier: one pass/fail per ticket in `data/tickets.jsonl`, limited to `OPENMERIT_ITEMS` when set.
