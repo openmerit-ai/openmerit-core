@@ -4,6 +4,11 @@
 // and measured again. Once they agree on every sample, the person has accepted the eval, and it is
 // saved as the task's Eval, versioned.
 //
+// The grades grow with the task: each is kept once, by case, model and answer, and a person is never
+// asked about an answer they already graded. Each round the judge grades the kept answers again, so a
+// disagreement with any of them counts; one disputed case, not on the current model's own answer, is
+// tolerated: the eval is accepted and that case is left out of measurement until a later run rewrites it.
+//
 // Grade-first (`gradeFirst`, the CLI): the answers come from a trial run, the current model's and one
 // cheaper model's, and the search runs only on the accepted eval. Otherwise (the cloud app, until it
 // moves to this order) the answers come from a search, and a regenerated eval is searched again.
@@ -53,6 +58,8 @@ export interface LoopState {
   /** The version a person accepted and the host saves, or 0 while none is. */
   savedVersion: number;
   bar: "current" | "criteria";
+  /** The one case the accepted eval and a person's grade still disagree on, left out of measurement for every model. */
+  disputed?: string[];
   /** The cases whose current-model answer a person graded Wrong answer, which made the criteria the bar, and the round they did. */
   barSet?: { round: number; cases: string[] };
   /** `trial`: a grade-first loop's trial run is next; `searching`: a search is, before grading. */
@@ -67,11 +74,14 @@ export interface LoopState {
 export type LoopEvent =
   | { type: "searched"; artifact: Omit<RunArtifact, "round" | "evalVersion"> }
   | { type: "tried"; artifact: Omit<RunArtifact, "round" | "evalVersion"> }
-  | { type: "graded"; grades: readonly SampleGrade[] }
+  /** `kept`: the kept grades of earlier rounds and runs that the eval, as the judge grades them again, disagrees with. */
+  | { type: "graded"; grades: readonly SampleGrade[]; kept?: readonly { caseId: string; current: boolean }[] }
   | { type: "regenerated" };
 
 /** Answers shown per model: failed ones first, then passed ones, spread over kinds of case. */
 export const SAMPLES_PER_MODEL = 6;
+/** Answers shown per model once the task has kept grades: only new answers, a few at a time. */
+export const LATER_PER_MODEL = 2;
 
 /** A loop measuring `evalVersion` (1 for a new eval, a saved Eval's own version to reuse it) against `bar`; `gradeFirst` grades a trial run before any search. */
 export function startLoop(evalVersion = 1, bar: LoopState["bar"] = "current", gradeFirst = false): LoopState {
@@ -138,9 +148,16 @@ export function advanceLoop(state: LoopState, event: LoopEvent): LoopState {
       const bar = state.bar === "criteria" || wrong.length ? "criteria" : "current";
       const barSet = state.barSet ?? (wrong.length ? { round: state.round, cases: wrong } : undefined);
       const history = [...state.history, { round: state.round, evalVersion: state.evalVersion, bar: state.bar, grades: graded }];
-      const next = { ...state, bar, history, ...(barSet ? { barSet } : {}) } as const;
-      if (samples.some(sample => disagrees(sample, grades.get(sample.id)!))) return { ...next, status: "regenerating" };
-      // Agreement on every sample accepts this eval. After a search, a new bar still needs the search run against it; grading first, no search has run yet.
+      const next: LoopState = { ...state, bar, history, ...(barSet ? { barSet } : {}) };
+      const disputes = [
+        ...samples.filter(sample => disagrees(sample, grades.get(sample.id)!)).map(sample => ({ caseId: sample.caseId, current: sample.role === "current" })),
+        ...event.kept ?? [],
+      ];
+      const disputed = [...new Set(disputes.map(dispute => dispute.caseId))];
+      // One disputed case is tolerated, unless it is the current model's own answer, which sets the bar.
+      if (disputed.length > 1 || disputes.some(dispute => dispute.current)) return { ...next, status: "regenerating" };
+      next.disputed = disputed;
+      // Agreement on every sample but at most one case accepts this eval. After a search, a new bar still needs the search run against it; grading first, no search has run yet.
       if (bar !== state.bar && !state.gradeFirst) return { ...next, status: "searching", round: state.round + 1, artifact: null, savedVersion: state.evalVersion };
       return { ...next, status: "accepted", savedVersion: state.evalVersion };
     }
@@ -159,30 +176,45 @@ const text = (value: unknown, length = 4000) => {
 /**
  * Up to `perModel` answers of each model for a person to grade, redacted: failed answers first, then
  * passed ones, taking kinds of case in turn so each kind shows. `models` are the current model's and
- * the candidate's answers, by model ID.
+ * the candidate's answers, by model ID. `skip` leaves out answers already graded; `first` comes before
+ * the rest, such as answers on cases the eval just rewrote.
  */
-export function pickSamples(models: readonly { model: string; role: Sample["role"]; answers: readonly CaseAnswer[] }[], perModel = SAMPLES_PER_MODEL): Sample[] {
+export function pickSamples(models: readonly { model: string; role: Sample["role"]; answers: readonly CaseAnswer[] }[], perModel = SAMPLES_PER_MODEL, options: { skip?: (sample: Sample) => boolean; first?: (sample: Sample) => boolean } = {}): Sample[] {
+  const spread = (list: readonly Sample[]) => {
+    const byKind = new Map<string, Sample[]>();
+    for (const sample of list) byKind.set(sample.kind, [...byKind.get(sample.kind) ?? [], sample]);
+    const queues = [...byKind.values()], out: Sample[] = [];
+    while (queues.some(queue => queue.length)) for (const queue of queues) { const next = queue.shift(); if (next) out.push(next); }
+    return out;
+  };
+  const choose = (list: readonly Sample[], count: number) => {
+    const failed = spread(list.filter(sample => !sample.pass)), passed = spread(list.filter(sample => sample.pass));
+    // Half and half when both have enough, so a person sees what the eval failed and what it passed.
+    const half = Math.ceil(count / 2), fail = Math.min(failed.length, Math.max(half, count - passed.length));
+    return [...failed.slice(0, fail), ...passed.slice(0, Math.max(0, count - fail))];
+  };
   const samples: Sample[] = [];
   for (const { model, role, answers } of models) {
-    const spread = (list: readonly CaseAnswer[]) => {
-      const byKind = new Map<string, CaseAnswer[]>();
-      for (const answer of list) byKind.set(answer.kind, [...byKind.get(answer.kind) ?? [], answer]);
-      const queues = [...byKind.values()], out: CaseAnswer[] = [];
-      while (queues.some(queue => queue.length)) for (const queue of queues) { const next = queue.shift(); if (next) out.push(next); }
-      return out;
-    };
-    const failed = spread(answers.filter(answer => !answer.pass)), passed = spread(answers.filter(answer => answer.pass));
-    // Half and half when both have enough, so a person sees what the eval failed and what it passed.
-    const half = Math.ceil(perModel / 2), fail = Math.min(failed.length, Math.max(half, perModel - passed.length));
-    for (const answer of [...failed.slice(0, fail), ...passed.slice(0, perModel - fail)]) {
-      samples.push({
-        id: `${role}:${answer.caseId}`, caseId: answer.caseId, kind: answer.kind, model, role, input: text(answer.input), output: text(answer.output),
-        toolCalls: answer.toolCalls.map(call => ({ name: call.name, arguments: text(call.arguments, 1000) })), pass: answer.pass, failedChecks: answer.failedChecks,
-        ...(answer.reason ? { reason: redact(answer.reason) } : {}),
-      });
-    }
+    const all = answers.map((answer): Sample => ({
+      id: `${role}:${answer.caseId}`, caseId: answer.caseId, kind: answer.kind, model, role, input: text(answer.input), output: text(answer.output),
+      toolCalls: answer.toolCalls.map(call => ({ name: call.name, arguments: text(call.arguments, 1000) })), pass: answer.pass, failedChecks: answer.failedChecks,
+      ...(answer.reason ? { reason: redact(answer.reason) } : {}),
+    })).filter(sample => !options.skip?.(sample));
+    const first = options.first ? choose(all.filter(options.first), perModel) : [];
+    samples.push(...first, ...choose(all.filter(sample => !first.includes(sample) && !options.first?.(sample)), perModel - first.length));
   }
   return samples;
+}
+
+/**
+ * What makes two answers the same, for the kept grades: JSON compared with its keys sorted and without
+ * whitespace, any other text exactly, and the tool calls the same way.
+ */
+export function answerKey(answer: Pick<Sample, "output" | "toolCalls">): string {
+  const sorted = (value: unknown): unknown => Array.isArray(value) ? value.map(sorted)
+    : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, sorted(item)])) : value;
+  const norm = (raw: string) => { try { return JSON.stringify(sorted(JSON.parse(raw))); } catch { return raw; } };
+  return JSON.stringify([norm(answer.output), answer.toolCalls.map(call => [call.name, norm(call.arguments)])]);
 }
 
 /** Rounds of the grading loop one run takes before it stops asking for grades. */

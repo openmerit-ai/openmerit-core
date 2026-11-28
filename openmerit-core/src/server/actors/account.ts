@@ -20,6 +20,7 @@ type Row = Record<string, unknown>;
 // The project, eval and budget names the task job (openmerit-core/src/job/workflow.ts) shares with this actor.
 export { DEFAULT_PROJECT, JOB_BUDGET, type EvalBar, type EvalSource, type EvalSpec } from "../../job/workflow.ts";
 import { DEFAULT_PROJECT, JOB_BUDGET, type EvalBar, type EvalGrade, type EvalSource, type EvalSpec } from "../../job/workflow.ts";
+import { answerKey } from "../../eval/loop.ts";
 
 /**
  * An account's projects group its tasks, runs, guardrails and model endpoints; the plan, members and spend stay the
@@ -82,9 +83,11 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS confirmations (id TEXT PRIMARY KEY, nonce TEXT NOT NULL, project_id TEXT NOT NULL DEFAULT 'default', method TEXT NOT NULL, path TEXT NOT NULL, body TEXT NOT NULL,
     checks TEXT NOT NULL, title TEXT NOT NULL, items TEXT NOT NULL, requested_by TEXT NOT NULL, requested_via TEXT, status TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
     decided_by TEXT, decided_at INTEGER, result TEXT)`,
-  // The answers a person graded when they accepted a task's eval, as version holds it: each answer's case, model, text and tool
-  // calls, and their verdict. A run on that version has the judge grade them again, and says when it disagrees with the person.
-  `CREATE TABLE IF NOT EXISTS eval_grades (task_id TEXT PRIMARY KEY, version INTEGER NOT NULL, grades TEXT NOT NULL)`,
+  // Every answer a person graded for a task, across rounds, runs and eval versions: one row per case (by its input), model and
+  // answer (loop.ts answerKey), so nobody is asked about the same answer twice. grade is the EvalGrade, with the verdict and note.
+  // Each run has the judge grade them again; a case's grades are retired when it is rewritten, and when an accepted eval no longer has it.
+  `CREATE TABLE IF NOT EXISTS task_grades (task_id TEXT NOT NULL, case_key TEXT NOT NULL, model TEXT NOT NULL, answer_key TEXT NOT NULL, grade TEXT NOT NULL, at INTEGER NOT NULL,
+    PRIMARY KEY (task_id, case_key, model, answer_key))`,
   // A task's own eval command, which a self-hosted server runs to measure it, as a person confirmed it (api.ts).
   `CREATE TABLE IF NOT EXISTS eval_commands (task_id TEXT PRIMARY KEY, spec TEXT NOT NULL, confirmed_by TEXT NOT NULL, confirmed_at INTEGER NOT NULL)`,
   // GitHub repositories a project reads: each belongs to one project. sealed_token is a fine-grained token, encrypted; github_user the member whose GitHub sign-in reads it.
@@ -217,6 +220,8 @@ export const account = actor({
       await database.execute(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     }
     for (const statement of SCHEMA) await database.execute(statement);
+    // Grades were kept per eval version before they grew per task (task_grades). There were no customers, so they are dropped.
+    await database.execute(`DROP TABLE IF EXISTS eval_grades`);
     // Accounts stored before projects came back: everything they hold moves into the default project, and nothing is dropped.
     for (const table of PROJECT_TABLES) {
       const columns = await database.execute(`PRAGMA table_info(${table})`);
@@ -621,7 +626,7 @@ export const account = actor({
       await tx.execute(`DELETE FROM tasks WHERE id = ?`, input.taskId);
       // Its eval and eval command go with it.
       await tx.execute(`DELETE FROM evals WHERE task_id = ?`, input.taskId);
-      await tx.execute(`DELETE FROM eval_grades WHERE task_id = ?`, input.taskId);
+      await tx.execute(`DELETE FROM task_grades WHERE task_id = ?`, input.taskId);
       await tx.execute(`DELETE FROM eval_commands WHERE task_id = ?`, input.taskId);
       await tx.execute(`UPDATE eval_drafts SET bundle = '{}', cases = '[]' WHERE task_id = ?`, input.taskId);
       await tx.execute(`INSERT INTO deletions (project_id, task_id, name, environment, user_id, jobs, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, String(task.project_id), input.taskId, String(task.name), String(task.environment), input.userId, Number(jobs?.n ?? 0), now);
@@ -807,16 +812,34 @@ export const account = actor({
       return version;
     }, { name: "accept_reopened_eval" }),
 
-    /** Keeps the answers a person graded with the version they accepted, replacing any an earlier version kept. */
-    saveEvalGrades: async (c, input: { taskId: string; version: number; grades: EvalGrade[] }): Promise<void> => {
-      await c.db.execute(`INSERT INTO eval_grades (task_id, version, grades) VALUES (?, ?, ?) ON CONFLICT (task_id) DO UPDATE SET version = excluded.version, grades = excluded.grades`, input.taskId, input.version, JSON.stringify(input.grades));
+    /** Adds answers a person graded to the task's grades; a grade of the same answer replaces the earlier one. */
+    addTaskGrades: async (c, input: { taskId: string; grades: EvalGrade[] }): Promise<void> => {
+      for (const grade of input.grades) {
+        await c.db.execute(`INSERT INTO task_grades (task_id, case_key, model, answer_key, grade, at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (task_id, case_key, model, answer_key) DO UPDATE SET grade = excluded.grade, at = excluded.at`,
+          input.taskId, grade.caseKey, grade.model, answerKey(grade), JSON.stringify(grade), Date.now());
+      }
     },
 
-    /** The graded answers kept with a version of the task's eval; null when that version kept none. */
-    evalGrades: async (c, input: { taskId: string; version: number }): Promise<EvalGrade[] | null> => {
-      const [row] = await c.db.execute(`SELECT grades FROM eval_grades WHERE task_id = ? AND version = ?`, input.taskId, input.version);
-      return row ? JSON.parse(String(row.grades)) as EvalGrade[] : null;
+    /** Every answer a person graded for the task, oldest first. */
+    taskGrades: async (c, taskId: string): Promise<EvalGrade[]> =>
+      (await c.db.execute(`SELECT grade FROM task_grades WHERE task_id = ? ORDER BY at, rowid`, taskId)).map(row => JSON.parse(String(row.grade)) as EvalGrade),
+
+    /** Drops the grades of cases, such as cases the eval rewrote or no longer has. */
+    retireTaskGrades: async (c, input: { taskId: string; caseKeys: string[] }): Promise<void> => {
+      for (const key of new Set(input.caseKeys)) await c.db.execute(`DELETE FROM task_grades WHERE task_id = ? AND case_key = ?`, input.taskId, key);
     },
+
+    /**
+     * Accepts an accepted eval as a run rewrote it, from a case a person's kept grade disputed, as the next version.
+     * Returns the version the job ran on: a draft opened or a version accepted meanwhile leaves the eval as it is.
+     */
+    acceptRewrittenEval: async (c, input: { taskId: string; from: number; spec: EvalSpec; cases: Case[]; by: string | null; bar: EvalBar }): Promise<number> => c.db.transaction(async tx => {
+      const [row] = await tx.execute(`UPDATE evals SET version = version + 1, spec = ?, cases = ?, source = 'grading', accepted_by = ?, accepted_at = ?, bar = ? WHERE task_id = ? AND version = ? AND draft_reason IS NULL RETURNING version`,
+        JSON.stringify(input.spec), JSON.stringify(input.cases), input.by, Date.now(), input.bar === "criteria" ? "criteria" : null, input.taskId, input.from);
+      if (row) return Number(row.version);
+      const [current] = await tx.execute(`SELECT version FROM evals WHERE task_id = ?`, input.taskId);
+      return Number(current?.version ?? input.from);
+    }, { name: "accept_rewritten_eval" }),
 
     /** Reopens an accepted eval for a person to revise. Runs and the watch wait until a draft is accepted or discarded. */
     reviseEval: async (c, input: { taskId: string; by: string }): Promise<boolean> =>

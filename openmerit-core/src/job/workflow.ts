@@ -25,7 +25,7 @@ import { evalEvidence } from "../connectors/eval-command.ts";
 import { EvalProxy, retryable } from "../eval/proxy.ts";
 import { runEval } from "../eval/runner.ts";
 import type { Harness } from "../harness/harness.ts";
-import { advanceLoop, completeHarness, criteriaOf, disputedCases, feedbackOf, gradeQuestions, MAX_ROUNDS, pickSamples, readGrade, reviseEval, startLoop, type CaseAnswer, type LoopState, type Sample, type SampleGrade } from "../eval/loop.ts";
+import { advanceLoop, answerKey, completeHarness, criteriaOf, disputedCases, feedbackOf, gradeQuestions, LATER_PER_MODEL, MAX_ROUNDS, pickSamples, readGrade, reviseEval, SAMPLES_PER_MODEL, startLoop, type CaseAnswer, type LoopState, type Sample, type SampleGrade } from "../eval/loop.ts";
 import { buildPool, OPENROUTER, regionNotice, type EndpointInfo, type Option, type Pool, type Provisional } from "./pool.ts";
 import { paybackCalls, proposeEdit, renderMarkdown, type AgentEvalSummary, type Fix, type JobResult, type MeasuredModel } from "./report.ts";
 
@@ -46,8 +46,11 @@ export type EvalSource = "openmerit" | "chatgpt" | "harness" | "examples" | "app
 export type EvalBar = "current" | "criteria";
 /** Answers of the pick a person who just accepted the eval checks before it is recommended. */
 const SPOT_CHECK = 4;
-/** An answer a person graded when they accepted an eval: its case, the model, what it answered, and their verdict. */
-export interface EvalGrade { caseId: string; model: string; output: string; toolCalls: { name: string; arguments: string }[]; verdict: "good" | "bad"; note?: string }
+/**
+ * An answer a person graded, kept with the task across rounds, runs and eval versions: its case (caseKey, by its input, and the
+ * case's ID when it was graded), the model and its role then, what it answered, the verdict and note, and who graded it.
+ */
+export interface EvalGrade { caseKey: string; caseId: string; model: string; role: Sample["role"]; output: string; toolCalls: { name: string; arguments: string }[]; verdict: "good" | "bad"; note?: string; by: string | null }
 export const specOf = (bundle: TaskBundle): EvalSpec => Object.fromEntries((["description", "input", "steps", "criteria", "guardrails"] as const).filter(key => bundle[key] !== undefined).map(key => [key, bundle[key]])) as EvalSpec;
 
 /** The project of tasks and jobs recorded before projects, and of a coding agent's call that names none. */
@@ -181,8 +184,12 @@ export interface JobAccount {
   changedDraftFor(taskId: string): Promise<{ version: number; spec: EvalSpec; cases: Case[]; bar: EvalBar } | null>;
   /** Accepts a changed task's draft, as a run graded it, as the next version; returns the version the job ran on. */
   acceptReopenedEval(input: { taskId: string; spec: EvalSpec; cases: Case[]; by: string | null; bar: EvalBar; source: EvalSource }): Promise<number>;
-  saveEvalGrades(input: { taskId: string; version: number; grades: EvalGrade[] }): Promise<void>;
-  evalGrades(input: { taskId: string; version: number }): Promise<EvalGrade[] | null>;
+  /** Accepts an accepted eval, as a run rewrote its disputed cases, as the next version; returns the version the job ran on. */
+  acceptRewrittenEval(input: { taskId: string; from: number; spec: EvalSpec; cases: Case[]; by: string | null; bar: EvalBar }): Promise<number>;
+  /** The task's kept grades, adding to them, and retiring those of cases, by caseKey. */
+  taskGrades(taskId: string): Promise<EvalGrade[]>;
+  addTaskGrades(input: { taskId: string; grades: EvalGrade[] }): Promise<void>;
+  retireTaskGrades(input: { taskId: string; caseKeys: string[] }): Promise<void>;
   setJobEval(input: { jobId: string; version: number }): Promise<void>;
   /** Endpoints with their keys, which the job keeps in memory only. */
   endpointSecrets(projectId?: string): Promise<EndpointConfig[]>;
@@ -553,14 +560,15 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
     const gradingVersion = await ctx.getVersion("grading-loop", 3);
     // Its recorded step says whether it was grading.
     const gradedAfterSearch = gradingVersion === 2 && await ctx.step("grading", async () => false);
-    const grade = gradingVersion === 3 && gradeFirst && usable.some(item => item.origin === "written");
+    // A later run a person started grades too when a kept grade disputes one of the accepted eval's written cases: it writes them again first (redo).
+    let grade = gradingVersion === 3 && gradeFirst && usable.some(item => item.origin === "written"), redo = false;
     /** Accepts a first run's eval as version 1, as the job measures it, and records the version the job ran on. */
     const acceptFirst = (name: string, source: EvalSource, bar: EvalBar, by: string | null) => ctx.step({
       name, timeout: 60_000,
       run: async s => {
         const account = host.account(s, s.state.input.accountId);
         const who = by ?? s.state.input.userId ?? null;
-        const version = written.version ?? (written.reopens !== undefined
+        const version = redo && written.version !== null ? await account.acceptRewrittenEval({ taskId, from: written.version, spec: specOf(bundle), cases, by: who, bar }) : written.version ?? (written.reopens !== undefined
           ? await account.acceptReopenedEval({ taskId, spec: specOf(bundle), cases, source, by: who, bar })
           : await account.acceptFirstEval({ taskId, bundle: sent, spec: specOf(bundle), cases, source, by: who, bar }));
         await account.setJobEval({ jobId, version });
@@ -784,32 +792,85 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
       // A changed task's draft is accepted only by a person grading it.
       if (written.reopens !== undefined && !grade) throw new JobStop("stopped", null, `The task changed since eval version ${written.reopens} was accepted, and this run cannot grade its draft. Review and accept the draft in the app.`,
         { kind: "open", label: "Review eval", path: `/tasks/?task=${encodeURIComponent(taskId)}&tab=eval` });
-      // A saved eval's kept grades: the judge grades the answers a person graded again, and a disagreement flags the eval for review.
-      if (written.version !== null && !command) {
-        const version = written.version;
-        await ctx.step({
-          name: "regrade", timeout: 0, maxRetries: INTERRUPTIONS,
+      /** A kept grade the eval disagrees with, as the judge grades its answer again: as a sample and its grade, for feedbackOf. */
+      type KeptDispute = { sample: Sample; grade: SampleGrade };
+      const caseKeyOf = (caseId: string) => { const item = usable.find(each => each.id === caseId); return item ? caseKey(item.input) : null; };
+      const gradeKey = (key: string, model: string, answer: Pick<Sample, "output" | "toolCalls">) => JSON.stringify([key, model, answerKey(answer)]);
+      const sampleKey = (sample: Sample) => { const key = caseKeyOf(sample.caseId); return key ? gradeKey(key, sample.model, sample) : null; };
+      const isExample = (caseId: string) => usable.some(item => item.id === caseId && item.origin === "example");
+      /** The kept grades' answers, by case, model and answer, so nobody is asked about one twice. */
+      let knownKeys = new Set<string>();
+      /** Kept grades the eval disagrees with on written cases, which count toward the round's disputes; and cases left out for every model. */
+      let keptDisputes: KeptDispute[] = [], excluded = new Set<string>();
+      /** Written cases the last revision wrote, whose answers are asked about first. */
+      let rewritten = new Set<string>();
+      /**
+       * The task's kept grades, graded again on the eval as it is now: the judge grades each answer of a case the eval still has, unless
+       * `answers`, this round's, holds the same answer, which keeps its grade. A disputed example cannot be written again, so it stays out.
+       */
+      const judgeKept = async (name: string, answers: readonly Sample[]) => {
+        const judged = await ctx.step({
+          name, timeout: 0, maxRetries: INTERRUPTIONS,
           run: async s => {
             const account = host.account(s, s.state.input.accountId);
-            const kept = await account.evalGrades({ taskId, version });
-            if (!kept?.length) return;
-            const { grader } = await grading(account);
-            const byId = new Map(usable.map(item => [item.id, item]));
-            const disagree: string[] = [];
-            for (const [index, item] of kept.entries()) {
-              const caseItem = byId.get(item.caseId);
+            const byKey = new Map(usable.map(item => [caseKey(item.input), item]));
+            const same = new Map(answers.flatMap(answer => { const key = sampleKey(answer); return key ? [[key, answer] as const] : []; }));
+            let grader: Awaited<ReturnType<typeof grading>>["grader"] | null = null;
+            const known: string[] = [], disputes: KeptDispute[] = [];
+            for (const [index, kept] of (await account.taskGrades(taskId)).entries()) {
+              const caseItem = byKey.get(kept.caseKey);
               if (!caseItem) continue;
-              try {
-                const graded = await grader.grade({ bundle, caseItem, output: item.output, toolCalls: item.toolCalls.map((call, at) => ({ id: `call_${at}`, ...call })), ledger: jobLedger(account, jobId), key: `${jobId}/regrade/${index}`, signal: s.abortSignal });
-                if (graded.pass !== (item.verdict === "good")) disagree.push(`${item.caseId} (${item.model})`);
-              } catch (error) { if (s.abortSignal.aborted) throw error; }
+              const key = gradeKey(kept.caseKey, kept.model, kept);
+              known.push(key);
+              let verdict = same.get(key) as { pass: boolean; reason?: string } | undefined;
+              if (!verdict) {
+                try {
+                  grader ??= (await grading(account)).grader;
+                  verdict = await grader.grade({ bundle, caseItem, output: kept.output, toolCalls: kept.toolCalls.map((call, at) => ({ id: `call_${at}`, ...call })), ledger: jobLedger(account, jobId), key: `${jobId}/${name}/${index}`, signal: s.abortSignal });
+                } catch (error) { if (s.abortSignal.aborted) throw error; continue; }
+              }
+              if (verdict.pass === (kept.verdict === "good")) continue;
+              const sampleId = `kept:${caseItem.id}:${kept.model}:${index}`;
+              disputes.push({
+                sample: { id: sampleId, caseId: caseItem.id, kind: kinds[caseItem.id] ?? "case", model: kept.model, role: kept.role, input: show(caseItem.input), output: kept.output, toolCalls: kept.toolCalls, pass: verdict.pass, failedChecks: [], ...(verdict.reason ? { reason: redact(verdict.reason) } : {}) },
+                grade: { sampleId, verdict: kept.verdict, ...(kept.note ? { note: kept.note } : {}) },
+              });
             }
-            if (!disagree.length) return;
-            const notice = `The eval now grades ${disagree.length} of the ${kept.length} answers you graded when you accepted version ${version} differently from you: ${disagree.join(", ")}. Review the eval: the run measured on it as it is.`;
-            s.state.notices.push(notice);
-            s.state.fixes = [...(s.state.fixes ?? []), { kind: "open", label: "Review eval", path: `/tasks/?task=${encodeURIComponent(taskId)}&tab=eval`, notice }];
+            return { known, disputes };
           },
         });
+        knownKeys = new Set(judged.known);
+        for (const dispute of judged.disputes) if (isExample(dispute.sample.caseId)) excluded.add(dispute.sample.caseId);
+        keptDisputes = judged.disputes.filter(dispute => !isExample(dispute.sample.caseId));
+        return judged.disputes;
+      };
+      /** Adds a round's grades to the task's: nobody is asked about these answers again. */
+      const keepGrades = (name: string, samples: readonly Sample[], grades: readonly SampleGrade[], by: string | null) => {
+        const kept = samples.flatMap((sample, index): EvalGrade[] => {
+          const key = caseKeyOf(sample.caseId), grade = grades[index]!;
+          return key ? [{ caseKey: key, caseId: sample.caseId, model: sample.model, role: sample.role, output: sample.output, toolCalls: sample.toolCalls, verdict: grade.verdict, ...(grade.note ? { note: grade.note } : {}), by }] : [];
+        });
+        for (const sample of samples) { const key = sampleKey(sample); if (key) knownKeys.add(key); }
+        return ctx.step(name, async s => host.account(s, s.state.input.accountId).addTaskGrades({ taskId, grades: kept }));
+      };
+      const described = (disputes: readonly KeptDispute[]) => disputes.map(dispute => `${dispute.sample.caseId} (${dispute.sample.model})`).join(", ");
+      // A saved eval: the judge grades the kept answers again first. A dispute on a written case is written again from the person's note when
+      // a person started the run, who then grades only the new answers; otherwise, and for an example, that case is left out for every model.
+      if (written.version !== null && !command) {
+        const version = written.version;
+        const disputes = await judgeKept("regrade", []);
+        if (disputes.length) {
+          const canGrade = gradingVersion === 3 && await ctx.step("regrade-run", async s => s.state.input.kind === "run" && !!host.settings().config.openrouter.apiKey);
+          if (canGrade && keptDisputes.length) { grade = true; redo = true; }
+          else for (const dispute of keptDisputes) excluded.add(dispute.sample.caseId);
+          const rewriting = redo ? keptDisputes : [];
+          await ctx.step("regrade-notice", async s => {
+            const out = disputes.filter(dispute => excluded.has(dispute.sample.caseId));
+            s.state.notices.push(`The eval grades ${disputes.length} of the answers you graded differently from you: ${described(disputes)}.`
+              + (rewriting.length ? ` This run writes ${rewriting.length === 1 ? "that case" : "those cases"} of eval version ${version} again from your notes, and asks you about the new answers before it searches.` : "")
+              + (out.length ? ` ${[...new Set(out.map(dispute => dispute.sample.caseId))].join(", ")} ${out.length === 1 ? "is" : "are"} left out of measurement for every model${out.some(dispute => !isExample(dispute.sample.caseId)) ? "; the next run you start writes the written ones again from your notes" : ""}${out.some(dispute => isExample(dispute.sample.caseId)) ? "; the coding agent's examples stay out until you revise the eval in the app" : ""}.` : ""));
+          });
+        }
       }
 
       /**
@@ -920,12 +981,13 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
           trialRuns.set(option.key, result); answers = result.answers ?? [];
           return result.results.some(item => !item.pass && passed.has(item.caseId));
         });
-        return pickSamples([
-          { model: current.model, role: "current", answers: runs[0]?.answers ?? [] },
+        return [
+          { model: current.model, role: "current" as const, answers: runs[0]?.answers ?? [] },
           ...(picked ? [{ model: picked.model, role: "trial" as const, answers }] : []),
-        ]);
+        ];
       };
-      let loop: LoopState = startLoop(1, acceptedBar, true);
+      // A redo starts by writing the disputed cases again, as round 0's revision.
+      let loop: LoopState = redo ? { ...startLoop(written.version ?? 1, acceptedBar, true), round: 0, status: "regenerating" } : startLoop(1, acceptedBar, true);
       let widened = acceptedBar === "criteria";
       /** Asks a person to grade the loop's samples, and returns their grades, in the samples' order, and who sent them. */
       const askGrades = async (suffix: string) => {
@@ -961,7 +1023,10 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
         return { grades: questions.map((question, index): SampleGrade => ({ sampleId: samples[index]!.id, ...graded.grades[question.id]! })), by: graded.by };
       };
       /** Writes the eval again from a round's grades: only the cases they dispute change, then the loop runs the trial again. */
-      const revise = async (artifact: NonNullable<LoopState["artifact"]>, grades: SampleGrade[], round: number, suffix: string) => {
+      const revise = async (graded: NonNullable<LoopState["artifact"]>, gradedBy: SampleGrade[], round: number, suffix: string) => {
+        // The kept grades the eval disagrees with are disputes too, with the notes they were given.
+        const artifact = { ...graded, samples: [...graded.samples, ...keptDisputes.map(dispute => dispute.sample)] };
+        const grades = [...gradedBy, ...keptDisputes.map(dispute => dispute.grade)];
         if (round >= MAX_ROUNDS) throw new JobStop("done", "not_accepted", `After ${MAX_ROUNDS} rounds of grading, the eval still disagrees with your grades, so it is not accepted and no model is recommended. Run the task again to start over.`, { kind: "rerun" });
         const disputed = disputedCases(artifact, grades);
         const from = { bundle, cases, usable };
@@ -1000,31 +1065,44 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
           },
         });
         if ("error" in revised) throw new JobStop("failed", "failed", `Writing the eval again from your grades failed: ${revised.error}`, { kind: "rerun" });
+        const before = cases, after = new Set(revised.cases.map(item => item.id));
         bundle = { ...sent, ...revised.spec }; cases = revised.cases;
+        rewritten = new Set(cases.filter(item => !before.some(each => each.id === item.id)).map(item => item.id));
+        // The replaced cases' grades are retired: a rewrite can ask the same input again, which its old grade would dispute again.
+        const retired = before.filter(item => !after.has(item.id)).map(item => caseKey(item.input));
+        if (retired.length) await ctx.step(`retire${suffix}`, async s => host.account(s, s.state.input.accountId).retireTaskGrades({ taskId, caseKeys: retired }));
         ({ invalid, usable, caseIds, kinds, counts } = casesOf(cases));
         loop = advanceLoop(loop, { type: "regenerated" });
       };
-      /** The answers a person agreed with when the eval was accepted, which it keeps; `by` is who graded them. */
-      let keptGrades: EvalGrade[] = [], acceptedBy: string | null = null, unsampled = false;
-      const toKept = (samples: readonly Sample[], grades: readonly SampleGrade[]): EvalGrade[] => samples.map((sample, index) => ({
-        caseId: sample.caseId, model: sample.model, output: sample.output, toolCalls: sample.toolCalls, verdict: grades[index]!.verdict, ...(grades[index]!.note ? { note: grades[index]!.note } : {}),
-      }));
+      /** Who graded the round that accepted the eval. */
+      let acceptedBy: string | null = null, unsampled = false;
+      /** The kept grades the eval disagrees with, as advanceLoop counts them: on the current model's answer, none is tolerated. */
+      const keptEvent = () => keptDisputes.map(dispute => ({ caseId: dispute.sample.caseId, current: dispute.sample.model === current.model }));
       let evaluated: Awaited<ReturnType<typeof rank>>;
       for (;;) {
         while (grade && loop.status !== "accepted") {
+          if (loop.status === "regenerating") await revise({ round: 0, evalVersion: loop.evalVersion, samples: [] }, [], 0, "-r0");
           const round = loop.round, suffix = round === 1 ? "" : `-r${round}`;
-          const samples = await trial();
-          // No answer to grade: the eval is accepted as a first run's is without grading.
-          if (!samples.length) { unsampled = true; break; }
+          const answers = await trial();
+          // The kept grades first, graded again on this eval; then only answers nobody graded, a few at a time once some are kept.
+          await judgeKept(`kept-r${round}`, pickSamples(answers, Infinity));
+          const samples = pickSamples(answers, knownKeys.size ? LATER_PER_MODEL : SAMPLES_PER_MODEL, {
+            skip: sample => excluded.has(sample.caseId) || knownKeys.has(sampleKey(sample) ?? ""), first: sample => rewritten.has(sample.caseId),
+          });
+          // No answer to grade and none kept: the eval is accepted as a first run's is without grading.
+          if (!samples.length && !knownKeys.size) { unsampled = true; break; }
           loop = advanceLoop(loop, { type: "tried", artifact: { samples } });
-          const { grades, by } = await askGrades(suffix);
+          const { grades, by } = samples.length ? await askGrades(suffix) : { grades: [], by: null };
+          if (samples.length) await keepGrades(`graded-r${round}`, samples, grades, by);
           const artifact = loop.artifact!;
-          loop = advanceLoop(loop, { type: "graded", grades });
-          if (loop.status === "accepted") { keptGrades = toKept(samples, grades); acceptedBy = by; }
+          loop = advanceLoop(loop, { type: "graded", grades, kept: keptEvent() });
+          if (loop.status === "accepted") acceptedBy = by ?? acceptedBy;
           else await revise(artifact, grades, round, suffix);
         }
-        // The search, on the eval a person accepted: on the wide pool once the bar is the criteria.
+        // The search, on the eval a person accepted: on the wide pool once the bar is the criteria. A disputed case is left out for every model.
         if (loop.bar === "criteria" && !widened) { models = await poolStep("models-criteria", true); pool = models.pool as Pool; widened = true; }
+        const out = new Set([...loop.disputed ?? [], ...excluded]);
+        caseIds = caseIds.filter(id => !out.has(id));
         evaluated = await rank(loop.round, loop.bar);
         // The spot-check: a person who just accepted this eval sees a few of the pick's answers before it is recommended. One that
         // looks wrong means the eval let a weaker model pass: it is disputed, as a trial's would be, and the eval is fixed and searched again.
@@ -1032,13 +1110,15 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
         const pick = taskResult(evaluated, describe, describe(current), rules).pick;
         const answers = pick ? finalAnswers.get(optionOf(pick).key) : undefined;
         if (!pick || !answers?.length) break;
+        const samples = pickSamples([{ model: pick.model, role: "candidate", answers }], SPOT_CHECK, { skip: sample => knownKeys.has(sampleKey(sample) ?? "") });
+        if (!samples.length) break;
         const round = loop.round + 1, suffix = `-r${round}`;
-        const samples = pickSamples([{ model: pick.model, role: "candidate", answers }], SPOT_CHECK);
         loop = { ...loop, round, status: "grading", artifact: { round, evalVersion: loop.evalVersion, samples } };
         const { grades, by } = await askGrades(suffix);
+        await keepGrades(`graded-r${round}`, samples, grades, by);
         const artifact = loop.artifact!;
-        loop = advanceLoop(loop, { type: "graded", grades });
-        if (loop.status === "accepted") { keptGrades = [...keptGrades, ...toKept(samples, grades)]; acceptedBy = by ?? acceptedBy; break; }
+        loop = advanceLoop(loop, { type: "graded", grades, kept: keptEvent() });
+        if (loop.status === "accepted") { acceptedBy = by ?? acceptedBy; break; }
         await revise(artifact, grades, round, suffix);
         progress = newProgress<Option>(); failedCases.clear(); finalAnswers.clear();
       }
@@ -1046,12 +1126,15 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
         const suffix = loop.round === 1 ? "" : `-r${loop.round}`;
         evalVersion = unsampled ? await acceptFirst(`eval${suffix}`, written.source, loop.bar, null) : await acceptFirst(`accept${suffix}`, "grading", loop.bar, acceptedBy);
         if (!unsampled) {
-          const accepted = { version: evalVersion, barSet: loop.barSet ?? null, grades: keptGrades };
+          const accepted = { version: evalVersion, barSet: loop.barSet ?? null, disputed: loop.disputed ?? [], examples: [...excluded].filter(isExample), caseKeys: cases.map(item => caseKey(item.input)) };
           await ctx.step(`accepted${suffix}`, async s => {
             const set = accepted.barSet;
-            s.state.notices.push(`You accepted the eval as version ${accepted.version}.${set ? ` In round ${set.round} you graded the current model's answer${set.cases.length === 1 ? "" : "s"} to ${set.cases.join(", ")} as wrong, so models are measured against the eval's checks instead of against the current model's score, and the cheapest that meets them is recommended even when it costs more.` : ""}`);
-            // The grades stay with this version: later runs grade the same answers again, and say when the eval disagrees with you.
-            await host.account(s, s.state.input.accountId).saveEvalGrades({ taskId, version: accepted.version, grades: accepted.grades });
+            s.state.notices.push(`You accepted the eval as version ${accepted.version}.${set ? ` In round ${set.round} you graded the current model's answer${set.cases.length === 1 ? "" : "s"} to ${set.cases.join(", ")} as wrong, so models are measured against the eval's checks instead of against the current model's score, and the cheapest that meets them is recommended even when it costs more.` : ""}`
+              + (accepted.disputed.length ? ` It still grades an answer to ${accepted.disputed.join(", ")} differently from you, so that case is left out of measurement for every model; the next run you start writes it again from your note.` : "")
+              + (accepted.examples.length ? ` It grades an answer to the coding agent's example${accepted.examples.length === 1 ? "" : "s"} ${accepted.examples.join(", ")} differently from you, so ${accepted.examples.length === 1 ? "it is" : "they are"} left out of measurement for every model until you revise the eval in the app.` : ""));
+            // The grades stay with the task: later runs grade the same answers again and ask only about new ones. Cases the eval no longer has take theirs with them.
+            const account = host.account(s, s.state.input.accountId), keep = new Set(accepted.caseKeys);
+            await account.retireTaskGrades({ taskId, caseKeys: (await account.taskGrades(taskId)).map(item => item.caseKey).filter(key => !keep.has(key)) });
           });
         }
       }
