@@ -29,6 +29,12 @@ export function costOf(model: string): number {
 }
 
 /** One call the fake answered. `ticket` is the ticket it classified, or `writer:<n>` for a request to write n cases. */
+/** Clerk settings that sign people in through the test sign-in. */
+export const CLERK = { CLERK_SECRET_KEY: "sk_test_fake", CLERK_PUBLISHABLE_KEY: `pk_test_${Buffer.from("clerk.openmerit.test$").toString("base64")}` };
+export type Data = Record<string, unknown>;
+export type Result = { status: string; pick: { model: string; passes: number; total: number; savingPerCallUsd: number | null; paybackCalls: number | null } | null; edit: { edits: { before: string; after: string }[] }; reportUrl: string; spend: { openmeritUsd: number; customerUsd: number } };
+export const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
+
 /** `cost`, when set, overrides what a call to that model reports it cost. */
 /** `keyStatus`, when set, is what GET /key answers instead of 200, such as 401 for an expired key. */
 /**
@@ -37,6 +43,8 @@ export function costOf(model: string): number {
  */
 /** `writes: false` makes the case writer answer with no cases. */
 export interface FakeModels { url: string; calls: { model: string; ticket: string; auth: string }[]; onCall: ((index: number) => Promise<void>) | null; cost: ((model: string) => number | undefined) | null; keyStatus?: number; misuse?: (model: string) => boolean; writes?: boolean; close: () => Promise<void> }
+/** The calls the fake answered as the case writer. */
+export const writerCalls = (models: FakeModels) => models.calls.filter(call => call.ticket.startsWith("writer:"));
 
 /**
  * An OpenAI chat completions answer with OpenRouter's usage and cost: streamed as server-sent events
@@ -204,10 +212,9 @@ export function caller(app: App, token: string | null) {
       return { status: response.status, headers: response.headers, body: await response.json() as { result?: { content?: { text: string }[]; structuredContent?: Record<string, unknown>; isError?: boolean; tools?: { name: string }[] } & Record<string, unknown>; error?: { message: string } } };
     },
     tool: async (name: string, args: Record<string, unknown>, extra: Record<string, string> = {}) => {
-      const { body } = await (async () => {
-        const response = await fetch(`${app.url}/mcp`, { method: "POST", headers: headers(extra), body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method: "tools/call", params: { name, arguments: args } }) });
-        return { body: await response.json() as { result: { content: { text: string }[]; structuredContent: Record<string, unknown>; isError?: boolean } } };
-      })();
+      const response = await fetch(`${app.url}/mcp`, { method: "POST", headers: headers(extra), body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method: "tools/call", params: { name, arguments: args } }) });
+      const body = await response.json() as { result?: { content: { text: string }[]; structuredContent: Record<string, unknown>; isError?: boolean }; error?: unknown };
+      if (!body.result) throw new Error(`${name} answered ${response.status} without a result: ${JSON.stringify(body)}`);
       return { text: body.result.content[0]!.text, data: body.result.structuredContent, isError: body.result.isError === true };
     },
   };

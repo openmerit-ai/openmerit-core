@@ -58,7 +58,7 @@
     "build": "rm -rf dist && tsc -p tsconfig.build.json && tsc -p tsconfig.build-server.json && node scripts/rewrite-declaration-imports.ts && node ../scripts/build-app.ts --out dist/web && chmod +x dist/cli.js",
     "typecheck": "tsc -p tsconfig.json",
     "test": "OPENMERIT_TELEMETRY=0 node --test --test-concurrency=3 \"src/**/*.test.ts\" \"test/*.test.ts\"",
-    "test:server": "node --test --test-concurrency=1 \"test/server/*.test.ts\"",
+    "test:server": "node --test --test-concurrency=3 --test-timeout=180000 \"test/server/*.test.ts\"",
     "check": "npm run typecheck && npm test",
     "prepack": "npm run build",
     "openmerit": "node src/cli.ts",

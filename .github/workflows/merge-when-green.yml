@@ -9,6 +9,7 @@ on:
 
 permissions:
   actions: write
+  checks: write
   contents: write
   pull-requests: write
 
@@ -34,8 +35,30 @@ jobs:
           # --match-head-commit refuses the merge if commits arrived after this CI run.
           gh pr merge "$PR" --squash --delete-branch --match-head-commit "$HEAD_SHA"
           echo "merged=true" >> "$GITHUB_OUTPUT"
-      - name: Run CI on main
-        # Pushes made with GITHUB_TOKEN start no workflows, and scripts/deploy.ts needs
-        # a verify result on the main commit.
+      - name: Reuse this run's results on main, or run CI there
+        # Pushes made with GITHUB_TOKEN start no workflows, and scripts/deploy.ts needs check runs on the
+        # main commit. When the squash commit holds exactly the tree this run tested (main did not move
+        # while it ran), this run's job results stand for it. Otherwise CI runs on main.
         if: steps.merge.outputs.merged == 'true'
-        run: gh workflow run ci.yml --ref main
+        env:
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          commit=$(gh pr view "$PR" --json mergeCommit --jq .mergeCommit.oid)
+          merged=$(gh api "repos/$GH_REPO/git/commits/$commit" --jq .tree.sha)
+          tested=""
+          if gh run download "$RUN_ID" --name tested-tree --dir "$RUNNER_TEMP/tested"; then tested=$(cat "$RUNNER_TEMP/tested/tested-tree"); fi
+          copy_results() {
+            gh api "repos/$GH_REPO/actions/runs/$RUN_ID/jobs?per_page=100" --jq '.jobs[] | [.name, .conclusion, .html_url] | @tsv' |
+              while IFS=$'\t' read -r name conclusion url; do
+                gh api "repos/$GH_REPO/check-runs" -f name="$name" -f head_sha="$commit" -f status=completed -f conclusion="$conclusion" -f details_url="$url" \
+                  -f "output[title]=$conclusion on #$PR" -f "output[summary]=$commit has the tree that [#$PR's CI run]($RUN_URL) tested ($merged), so its result stands for this commit." > /dev/null || exit 1
+                echo "$name: $conclusion"
+              done
+          }
+          if [[ "$tested" =~ ^[0-9a-f]{40}$ && "$tested" == "$merged" ]] && copy_results; then
+            echo "$commit holds the tree #$PR's CI tested: its job results stand for it."
+          else
+            echo "Running CI on main: #$PR's results do not carry over (main's tree $merged, tested ${tested:-none recorded})."
+            gh workflow run ci.yml --ref main
+          fi

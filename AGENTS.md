@@ -16,15 +16,15 @@ Every check below runs against local fakes: no secret, no paid model call, no Cl
 
 | Change in | While iterating | Before you finish |
 |---|---|---|
-| `openmerit-core/` | `npm run typecheck` (7 s), `npm test` (5 s) | `npm run check` (15 s), `npm run build` (6 s); `npm run test:server` (6 min) after a change in `src/server`, `src/job`, `src/ranking` or `src/engine` |
-| the server, `openmerit-core/src/server/` | `npm run typecheck` in `openmerit-core/` (7 s) | `npm run test:server` in `openmerit-core/` (6 min: tests on a local Rivet engine with fake sign-in, Stripe and models) |
+| `openmerit-core/` | `npm run typecheck` (7 s), `npm test` (5 s) | `npm run check` (15 s), `npm run build` (6 s); `npm run test:server` (2.5 min) after a change in `src/server`, `src/job`, `src/ranking` or `src/engine` |
+| the server, `openmerit-core/src/server/` | `npm run typecheck` in `openmerit-core/` (7 s) | `npm run test:server` in `openmerit-core/` (2.5 min: tests on a local Rivet engine with fake sign-in, Stripe and models) |
 | `playground/` | | `npm run check` (12 s) |
 | `cloud/` (the hosted deploy) | | `npm run check` (5 s) |
 | website, `docs/`, `scripts/`, `demo/` | `npm run check:docs` (2 s) | `npm run verify` (15 s); `npm run check:worker-types` (18 s) after a Wrangler configuration change |
 | packaging, the CLI or the server launcher in `openmerit-core/` | | also `node scripts/smoke-packed.ts` (60 s): packs and installs the tarball globally, then runs `server start`, whoami, a job up to its first question and `openmerit mcp` against a local fake OpenRouter |
 | several of these | | `npm run check:all` at the root runs every CI job (3.5 min) |
 
-- `test:server` starts a local Rivet engine per test and takes about 6 minutes; it is not hung. Run one at a time: two at once contend for the engine's ports.
+- `test:server` starts a local Rivet engine per test and runs three test files at a time, each engine on its own free ports; it takes about 2.5 minutes on a 2-CPU orb and is not hung. CI gives it a 5-minute budget: when it grows past that, split the slowest file (`--test-concurrency` runs files, not tests, in parallel) or speed up its tests rather than raise the budget.
 - To drive the CLI by hand, run `node src/cli.ts` from `openmerit-core/` with `OPENMERIT_HOME` set to a temporary directory and `OPENMERIT_NO_UPDATE_CHECK=1`: `server start --port <n>` runs a self-hosted server there, and the tool commands (`recommend`, `result`, `answer` and the rest, with `--json`) call it. `test/server/cloud.test.ts` shows full jobs against a fake OpenRouter.
 - `npm run memo` serves the website and memo locally on port 45834 (no real email).
 
@@ -38,7 +38,7 @@ Every check below runs against local fakes: no secret, no paid model call, no Cl
 
 # Landing changes
 
-Land changes on `main` through a pull request opened with `--label merge-when-green`. `.github/workflows/merge-when-green.yml` squash-merges it once every CI job passes on its latest commit, then runs CI on `main`, which `scripts/deploy.ts` requires. GitHub auto-merge and branch protection are unavailable for this private repository on GitHub Free, so nothing blocks direct pushes; the workflow skips pull requests that are not based on `main`, so retarget and rebase stacked pull requests after their parent merges. When the label is added after CI passed, rerun CI with `gh run rerun <run-id>`.
+Land changes on `main` through a pull request opened with `--label merge-when-green`. `.github/workflows/merge-when-green.yml` squash-merges it once every CI job passes on its latest commit. `scripts/deploy.ts` needs those results on the `main` commit: when the squash commit holds exactly the tree the pull request's run tested (main did not move meanwhile), the workflow copies that run's job results to it as check runs; otherwise it runs CI on `main`. Pull requests that change `.github/workflows/` cannot be merged by the workflow's token, so merge those with `gh pr merge --squash` once CI is green and run `gh workflow run ci.yml --ref main`. GitHub auto-merge and branch protection are unavailable for this private repository on GitHub Free, so nothing blocks direct pushes; the workflow skips pull requests that are not based on `main`, so retarget and rebase stacked pull requests after their parent merges. When the label is added after CI passed, rerun CI with `gh run rerun <run-id>`.
 
 # TypeScript
 

@@ -221,7 +221,7 @@ Removing `~/.openmerit` deletes the CLI's sign-in, the harness connection and Ch
 ```sh
 npm ci
 npm run check            # strict typecheck and the CLI's tests (fakes only; no paid calls)
-npm run test:server      # the server's tests, each on a local Rivet engine (about 6 minutes)
+npm run test:server      # the server's tests, each on a local Rivet engine (about 2.5 minutes)
 npm run build:catalogue  # maintainers: regenerate data/catalogue.json from OpenRouter and Epoch
 npm run build && npm pack
 ```
