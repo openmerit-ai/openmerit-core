@@ -48,7 +48,7 @@ export function describeJob(view: JobView, decision: Decision | null = null): st
     if (result.edit.instructions) lines.push(result.edit.instructions);
     if (decision) lines.push(decisionLine(decision));
     else lines.push(`Ask the user before applying the edit${result.approval ? `: "${result.approval.prompt}" (${result.approval.detail})` : ""}. Apply it if they say yes, then send their answer with openmerit_answer, job_id "${view.jobId}" and answers {"${result.approval?.id ?? "configure"}": true}, or false if they decline.`);
-  } else if (result) lines.push(`No switch proposed (${result.status}). ${reasonFor(result, result.baseline?.model ?? "the current model")}`);
+  } else if (result) lines.push(`No switch proposed (${result.status}). ${reasonFor(result, result.baseline?.model ?? null)}`);
   if (result?.baseline) lines.push(`Current model ${result.baseline.model}: ${result.baseline.passes}/${result.baseline.total} cases passed, ${perCall(result.baseline.costPerCallUsd)} per call, ${result.baseline.latencyMs === null ? "latency unknown" : `${result.baseline.latencyMs} ms`}.`);
   if (result?.failedCases?.length) lines.push(`Cases it failed, with the grader's reason${(result.baselineByKind?.length ?? 0) > 1 ? ` (passed by kind: ${result.baselineByKind!.map(rate => `${rate.kind} ${rate.passes}/${rate.total}`).join(", ")})` : ""}:`, ...result.failedCases.map(item => `- ${item.caseId} (${item.kind}): ${item.reason}`));
   const misses = result && nearMissLine(result);

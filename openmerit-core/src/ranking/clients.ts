@@ -53,7 +53,7 @@ export interface ModelClient {
   /** Pi's model for `model` on one of the client's endpoints, as Pi's agent loop takes it. Throws for an unknown endpoint. */
   model(endpoint: string, model: string): Model<Api>;
   /** One call with a Pi context. Throws BudgetRefused, before sending, when the ledger refuses the reservation. */
-  /** `jsonSchema`: the answer must match it, sent as OpenAI's `response_format` (Anthropic's API has none, so it is not sent there). */
+  /** `jsonSchema`: the answer must match it, sent as OpenAI's `response_format` (Anthropic's API has none, so it is not sent there). Never strict: OpenAI models behind OpenRouter otherwise reject any schema whose `required` omits a property. */
   call(request: { endpoint: string; model: string; context: Context; maxTokens?: number; jsonSchema?: object }, meter: Meter): Promise<ModelCall>;
   /** One call with a provider-neutral request, such as the case writer's or the judge's. Throws BudgetRefused like `call`. */
   complete(request: CompletionRequest, meter: Meter): Promise<Completion>;
@@ -191,7 +191,7 @@ export function createClient(endpoints: readonly EndpointConfig[], options: { fe
         onPayload: async payload => {
           const body = {
             ...(payload as Record<string, unknown>), ...(endpoint.kind === "openrouter" ? { usage: { include: true } } : {}),
-            ...(request.jsonSchema && endpoint.kind !== "anthropic" ? { response_format: { type: "json_schema", json_schema: { name: "answer", schema: request.jsonSchema } } } : {}),
+            ...(request.jsonSchema && endpoint.kind !== "anthropic" ? { response_format: { type: "json_schema", json_schema: { name: "answer", strict: false, schema: request.jsonSchema } } } : {}),
           };
           sentBytes = Buffer.byteLength(JSON.stringify(body));
           expectedUsd = expectedCost(price, body, sentBytes).usd;

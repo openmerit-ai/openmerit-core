@@ -442,14 +442,14 @@ test("results carry pass or fail only, never the candidate's output", async () =
   assert.equal(hedged.results[0]!.pass, false, "an answer naming two labels does not pass for either");
 });
 
-test("a JSON task asks for its schema as response_format on OpenAI-style endpoints, not on Anthropic's, and a label task does not", async () => {
+test("a JSON task asks for its schema as response_format on OpenAI-style endpoints, not on Anthropic's, never strict, and a label task does not", async () => {
   const schema = { type: "object", required: ["queue"], properties: { queue: { type: "string" } } };
   const jsonBundle: TaskBundle = { ...bundle, output: { kind: "json", schema } };
   for (const endpoint of ["openrouter", "acme", "anthropic"]) await createMeasure({ bundle: jsonBundle, cases, client: client(), grader: jsonSchema(), ledger: memoryLedger(), key: `json-${endpoint}` })({ model: "wordy", endpoint }, ["c1"]);
   await createMeasure({ bundle, cases, client: client(), grader: labelMatch(), ledger: memoryLedger(), key: "label" })({ model: "wordy", endpoint: "openrouter" }, ["c1"]);
   assert.deepEqual(seen.map(request => [request.path.split("/")[1], (request.body as { response_format?: unknown }).response_format ?? null]), [
-    ["openrouter", { type: "json_schema", json_schema: { name: "answer", schema } }],
-    ["acme", { type: "json_schema", json_schema: { name: "answer", schema } }],
+    ["openrouter", { type: "json_schema", json_schema: { name: "answer", strict: false, schema } }],
+    ["acme", { type: "json_schema", json_schema: { name: "answer", strict: false, schema } }],
     ["anthropic", null],
     ["openrouter", null],
   ]);
