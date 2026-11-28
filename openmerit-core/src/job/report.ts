@@ -96,7 +96,7 @@ export function proposeEdit(bundle: TaskBundle, pick: Option, baselineEndpoint: 
 export function explain(result: JobResult): { reason: string; top: (MeasuredModel & { cheaperThanCurrent: boolean | null })[]; nearMisses: (MeasuredModel & { cheaperThanCurrent: boolean | null })[] } {
   const baseline = result.baseline;
   const cheaper = (item: MeasuredModel) => ({ ...item, cheaperThanCurrent: baseline?.costPerCallUsd == null || item.costPerCallUsd === null ? null : item.costPerCallUsd < baseline.costPerCallUsd });
-  return { reason: reasonFor(result, baseline?.model ?? "the current model"), top: result.top.map(cheaper), nearMisses: (result.nearMisses ?? []).map(cheaper) };
+  return { reason: reasonFor(result, baseline?.model ?? null), top: result.top.map(cheaper), nearMisses: (result.nearMisses ?? []).map(cheaper) };
 }
 
 /** The near misses in one sentence, or null when there are none. */
@@ -118,20 +118,22 @@ const paybackText = (calls: number) => calls >= 1e6 ? `${(calls / 1e6).toPrecisi
 const rate = (passes: number, total: number) => (total ? `${passes}/${total} (${Math.round((passes / total) * 100)}%)` : "none");
 
 /** One line saying what the run concluded and why, for the report and for the coding agent. */
-export function reasonFor(result: JobResult, current: string): string {
+export function reasonFor(result: JobResult, current: string | null): string {
+  // Without a measured baseline the caller may not know the model's ID.
+  const named = current ? `\`${current}\`` : "the current model", Named = named[0]!.toUpperCase() + named.slice(1);
   const pick = result.pick;
-  if (pick) return `Switch from \`${current}\` to \`${pick.model}\` on ${pick.endpoint}: it passed ${rate(pick.passes, pick.total)} of the cases at ${usd(pick.costPerCallUsd)} a call${pick.savingPerCallUsd !== null ? pick.savingPerCallUsd < 0 ? `, ${usd(-pick.savingPerCallUsd)} more than now` : `, ${usd(pick.savingPerCallUsd)} less than now` : ""}.${paybackLine(result) ? ` ${paybackLine(result)}` : ""}${result.grading?.summary ? ` ${result.grading.summary}` : ""}`;
+  if (pick) return `Switch from ${named} to \`${pick.model}\` on ${pick.endpoint}: it passed ${rate(pick.passes, pick.total)} of the cases at ${usd(pick.costPerCallUsd)} a call${pick.savingPerCallUsd !== null ? pick.savingPerCallUsd < 0 ? `, ${usd(-pick.savingPerCallUsd)} more than now` : `, ${usd(pick.savingPerCallUsd)} less than now` : ""}.${paybackLine(result) ? ` ${paybackLine(result)}` : ""}${result.grading?.summary ? ` ${result.grading.summary}` : ""}`;
   if (result.status === "keep_current") {
-    if (result.grading?.bar === "criteria" && result.grading.summary) return `Keep \`${current}\`: ${result.grading.summary}`;
+    if (result.grading?.bar === "criteria" && result.grading.summary) return `Keep ${named}: ${result.grading.summary}`;
     const best = result.top[0];
     const baseline = result.baseline;
     return best && baseline
-      ? `Keep \`${current}\`: ${best.model} passed ${best.passes}/${best.total} but costs ${usd(best.costPerCallUsd)} per call against ${usd(baseline.costPerCallUsd)}, and no measured model was both as accurate and cheaper.`
-      : `Keep \`${current}\`: no cheaper model passed as many cases${baseline ? ` as its ${baseline.passes}/${baseline.total}` : ""}.`;
+      ? `Keep ${named}: ${best.model} passed ${best.passes}/${best.total} but costs ${usd(best.costPerCallUsd)} per call against ${usd(baseline.costPerCallUsd)}, and no measured model was both as accurate and cheaper.`
+      : `Keep ${named}: no cheaper model passed as many cases${baseline ? ` as its ${baseline.passes}/${baseline.total}` : ""}.`;
   }
   return {
-    baseline_failed: `\`${current}\` could not be measured, or passed too few cases to compare against; the notes say which.`,
-    below_floor: `\`${current}\` passed under 80% of its own eval, so the eval cannot tell models apart and no model is recommended. Its failed cases say why.`,
+    baseline_failed: `${Named} could not be measured, or passed too few cases to compare against; the notes say which.`,
+    below_floor: `${Named} passed under 80% of its own eval, so the eval cannot tell models apart and no model is recommended. Its failed cases say why.`,
     no_cases: "No case has a known correct answer, so nothing was measured.",
     no_candidates: "No allowed model is cheaper than the current one.",
     agent_eval_failed: "Every qualified switch failed the agent's eval, so none is proposed.",
