@@ -103,6 +103,42 @@ export function buildPool(input: { catalogue: Catalogue; endpoints: readonly End
   return { baseline, ranked, unplaced, notices };
 }
 
+/**
+ * The models a catalogue refresh could bring into a search: new ones, ones that got an ECI, and ones whose list price
+ * fell. A price rise or a dropped model only makes a past result more true, so it starts nothing.
+ */
+export function catalogueChanges(before: Catalogue, after: Catalogue): string[] {
+  const old = new Map(before.models.map(model => [model.id, model]));
+  return after.models.filter(model => {
+    const was = old.get(model.id);
+    if (!was) return true;
+    if (was.eci === null && model.eci !== null) return true;
+    const [price, wasPrice] = [blendedPrice(model), blendedPrice(was)];
+    return price !== null && (wasPrice === null || price < wasPrice);
+  }).map(model => model.id);
+}
+
+/**
+ * The changed models that could beat what a watched task has now: in the pool a job would search, with the same
+ * endpoints, guardrails and needs; rated at least as capable as the current model (ECI), when the catalogue rates it;
+ * and cheaper per token than its pick, or than its current model when it has none. `wide` is the criteria bar's pool,
+ * which has no price ceiling but the pick's.
+ */
+export function couldBeat(input: { catalogue: Catalogue; endpoints: readonly EndpointInfo[]; bundle: TaskBundle; guardrails: Guardrails; wide: boolean; pick: string | null; changed: readonly string[] }): string[] {
+  const changed = new Set(input.changed);
+  if (!changed.size) return [];
+  const index = catalogueIndex(input.catalogue);
+  const floor = index.find(input.bundle.current.model)?.eci ?? null;
+  const pick = input.pick ? index.find(input.pick) : null;
+  const ceiling = pick ? blendedPrice(pick) : null;
+  const { ranked, unplaced } = buildPool(input);
+  return [...ranked, ...unplaced]
+    .filter(option => option.inCatalogue && changed.has(option.model) && option.model !== pick?.id
+      && (floor === null || (option.eci !== null && option.eci >= floor))
+      && (ceiling === null || (option.price !== null && option.price < ceiling)))
+    .map(option => option.model);
+}
+
 /** The cheapest pool model the catalogue rates at least as capable as the current one; else the current model. openmerit/engine's rule. */
 export function provisionalPick(catalogue: Catalogue, candidates: Pool, bundle: TaskBundle): Provisional {
   const index = catalogueIndex(catalogue);

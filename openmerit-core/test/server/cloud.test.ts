@@ -200,7 +200,7 @@ test("a job waits on its label check across a restart, then a person grades its 
   const models = await fakeModels();
   const posthog = await fakeCapture();
   const events = (name: string) => posthog.events.filter(event => event.event === name);
-  let app = await startApp({ models, env: { ...CLERK, TEST_CATALOGUE_VERSION: "next", POSTHOG_PROJECT_TOKEN: "phc_test", POSTHOG_HOST: posthog.url } });
+  let app = await startApp({ models, env: { ...CLERK, TEST_CATALOGUE_VERSION: "next", TEST_CATALOGUE_NEW_MODEL: "2", POSTHOG_PROJECT_TOKEN: "phc_test", POSTHOG_HOST: posthog.url } });
   try {
     await subscribe(app, "org_run");
     const customerKey = "sk-customer-key-9876";
@@ -283,7 +283,11 @@ test("a job waits on its label check across a restart, then a person grades its 
     const taskRow = await taskView();
     assert.deepEqual([taskRow.state, taskRow.idleSince, taskRow.watching], ["watching", null, true]);
     const rivet = createClient<Registry>({ endpoint: `http://127.0.0.1:${app.enginePort}`, token: "test-token" });
-    assert.deepEqual(await rivet.catalogue.getOrCreate(["global"]).refresh(), { version: "next", changed: true });
+    // A new day's catalogue with the same models starts nothing; one with a new model as capable and cheaper re-runs the task.
+    assert.deepEqual(await rivet.catalogue.getOrCreate(["global"]).refresh(), { version: "next", changed: true, models: [] });
+    await new Promise(resolve => setTimeout(resolve, 2_000));
+    assert.ok(!(await agent().api<{ kind: string }[]>("/api/runs")).body.some(run => run.kind === "watch"), "no watch job without a model that could beat the pick");
+    assert.deepEqual(await rivet.catalogue.getOrCreate(["global"]).refresh(), { version: "next-2", changed: true, models: ["test/new-cheap"] });
     const runs = await waitFor(() => agent().api<{ id: string; kind: string; status: string }[]>("/api/runs"), value => value.body.some(run => run.kind === "watch" && run.status === "done"))
       .catch(async (error: Error) => { throw new Error(`${error.message}\nTask: ${JSON.stringify((await agent().api(`/api/tasks/${taskRow!.id}`)).body).slice(0, 1500)}`); });
     assert.equal(runs.body.filter(run => run.kind === "watch").length, 1);
@@ -304,11 +308,13 @@ test("a job waits on its label check across a restart, then a person grades its 
     assert.match(tasks.text, /ticket classifier \[[\w-]+\] \(acme\/support\): openai\/gpt-5\.4 → .*, picked, watching/);
 
     // Freezing: the watch guardrail inherits from the environment, a task-level value overrides it, and a frozen task's tick starts nothing.
-    const tick = () => rivet.task.get(["org_run", taskRow.id]).watchTick();
+    const tick = () => rivet.task.get(["org_run", taskRow.id]).watchTick({ models: ["test/new-cheap"] });
     const guardrail = (level: string, id: string, settings: Record<string, unknown>) => agent().api("/api/guardrails", { method: "PUT", body: JSON.stringify({ level, id, settings }) });
     await guardrail("environment", "acme/support", { watch: false });
     assert.deepEqual([(await taskView()).state, (await taskView()).watching], ["frozen", false]);
     assert.deepEqual(await tick(), { started: null, reason: "task is frozen" });
+    // A task armed before watches followed the catalogue still has a daily schedule, which calls without models: it removes it.
+    assert.deepEqual(await rivet.task.get(["org_run", taskRow.id]).watchTick(), { started: null, reason: "the daily check is gone: a catalogue change starts a watch job" });
     await guardrail("task", taskRow.id, { watch: true });
     assert.equal((await taskView()).state, "watching");
     await guardrail("task", taskRow.id, {});
@@ -361,7 +367,7 @@ test("a job waits on its label check across a restart, then a person grades its 
 
 test("the coding agent sends back the user's decision on a result's change: an approval moves the watched task onto the pick, a decline keeps it", async () => {
   const models = await fakeModels();
-  const app = await startApp({ models, env: { ...CLERK, TEST_CATALOGUE_VERSION: "next" } });
+  const app = await startApp({ models, env: { ...CLERK, TEST_CATALOGUE_VERSION: "next", TEST_CATALOGUE_NEW_MODEL: "1" } });
   try {
     await subscribe(app, "org_decide");
     const agent = () => caller(app, "test:user_d:org_decide:admin");
@@ -918,7 +924,8 @@ test("a job whose start fails after the account recorded it is marked failed, an
     assert.deepEqual(await runs(), []);
 
     // A start that fails after the account recorded the job: on a catalogue with no models, picking a provisional model throws.
-    assert.deepEqual(await rivet.catalogue.getOrCreate(["global"]).refresh(), { version: "broken", changed: true });
+    // The refresh saves it, then fails to compare its missing models with the last catalogue's.
+    await assert.rejects(rivet.catalogue.getOrCreate(["global"]).refresh());
     const failed = await agent.tool("openmerit_recommend", { bundle: bundle("reply router"), environment: "acme/support" });
     assert.equal(failed.isError, true);
     assert.match(failed.text, /OpenMerit could not start the job \(.*\)\. Nothing was charged: try again\./);
