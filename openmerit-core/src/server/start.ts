@@ -9,7 +9,7 @@ import { writeCases, type TaskBundle } from "../ranking/index.ts";
 import type { Guardrails } from "./engine.ts";
 import type { AppClient } from "./registry.ts";
 import { DEFAULT_PROJECT, estimateJob, redactBundle, taskIdFor, type JobEstimate, type JobTrigger } from "../job/workflow.ts";
-import { callCost } from "../ranking/index.ts";
+import { callCost, needsJudge } from "../ranking/index.ts";
 import { catalogueIndex, DEFAULT_REPEATS } from "../engine/index.ts";
 
 export { DEFAULT_PROJECT, redactBundle, taskIdFor };
@@ -121,7 +121,7 @@ async function launch(client: AppClient, input: { accountId: string; projectId: 
   const index = catalogueIndex(catalogue);
   const estimate = estimateJob(pool, input.bundle, {
     repeats: Math.max(1, guardrails.effective.repeats ?? DEFAULT_REPEATS), budgetUsd: guardrails.effective.budgetUsd ?? config.limits.defaultJobBudgetUsd,
-    costPerCall: model => callCost(index.find(model), input.bundle), judge: input.bundle.output.kind === "text" || input.bundle.guardrails?.length ? config.models.judge : null,
+    costPerCall: model => callCost(index.find(model), input.bundle), judge: needsJudge(input.bundle) ? config.models.judge : null,
     // As the job decides: a person grades a first run's answers, before any eval is accepted, and a changed task's draft.
     grading: input.kind === "run" && (!accepted || ids.reopened) && !!config.openrouter.apiKey,
   });
