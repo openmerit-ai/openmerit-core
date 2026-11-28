@@ -178,7 +178,7 @@ function populated(): State {
     provisional: { model: "openai/gpt-5-mini", endpoint: "openrouter", reason: "The cheapest catalogue model above the current one's capability index.", estCostPerCallUsd: 0.0006 }, createdAt: "2026-11-18T11:40:00Z", report: null, ...fields,
   });
   return {
-    me: { user: { id: "user_amira" }, account: { id: "org_sahra", name: "Sahra Health" }, role: "admin", plan: { name: "Cloud", status: "active", periodEnd: "2026-12-01T00:00:00Z", includedEvals: 100, usedEvals: 38 } },
+    me: { mode: "hosted", user: { id: "user_amira" }, account: { id: "org_sahra", name: "Sahra Health" }, role: "admin", plan: { name: "Cloud", status: "active", periodEnd: "2026-12-01T00:00:00Z", includedEvals: 100, usedEvals: 38 } },
     tasks, runs,
     reports: {
       k7m2q9: { ...report, decision: approved },
@@ -242,7 +242,7 @@ function scenario(name: string): State {
   if (name === "empty") return emptyState(state.me);
   // An organization the preview just created: nothing in it yet, no plan, and no name in the token
   // (the instance has organization slugs off), so the app names it from Clerk.
-  if (name === "neworg") return emptyState({ user: { id: "user_jordan" }, account: { id: "org_new", name: null }, role: "admin", plan: { name: null, status: "none", periodEnd: null, includedEvals: 0, usedEvals: 0 } });
+  if (name === "neworg") return emptyState({ mode: "hosted", user: { id: "user_jordan" }, account: { id: "org_new", name: null }, role: "admin", plan: { name: null, status: "none", periodEnd: null, includedEvals: 0, usedEvals: 0 } });
   if (name === "noplan") state.me.plan = { name: null, status: "none", periodEnd: null, includedEvals: 0, usedEvals: 0 };
   if (name === "member") state.me.role = "member";
   return state;

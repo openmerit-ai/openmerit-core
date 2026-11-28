@@ -1,7 +1,7 @@
 // Project settings: the project's name, the GitHub repositories whose code OpenMerit reads, the model
 // endpoints it measures on, each the project's own, and deleting the project. The organization's plan,
 // members and coding agents stay on their own pages; the member's GitHub connection is on Account settings.
-import type { Endpoint, GitHubAccess, Project, Repo, TaskSpec } from "../api.ts";
+import type { Endpoint, GitHubAccess, Me, Project, Repo, TaskSpec } from "../api.ts";
 import { ApiError, DEFAULT_PROJECT } from "../api.ts";
 import { ago, html, logo, model, plural, type Html } from "../html.ts";
 import type { View } from "../view.ts";
@@ -83,8 +83,9 @@ function githubPicker({ github, repos, project }: Data, admin: boolean, canAdd: 
 type Data = { project: Project; endpoints: Endpoint[]; repos: Repo[]; github: GitHubAccess };
 
 const REVIEW_POLL_MS = 3000;
-// The cloud app's plan check: repository reviews, like evaluations, need a plan Stripe says is active or trialing.
-const paid = (me: { plan: { status: string } }): boolean => me.plan.status === "active" || me.plan.status === "trialing";
+// The server's plan check: on openmerit.ai repository reviews, like evaluations, need a plan Stripe says is active or
+// trialing; a self-hosted server has no plans.
+const paid = (me: Pick<Me, "mode" | "plan">): boolean => me.mode === "self-hosted" || me.plan.status === "active" || me.plan.status === "trialing";
 let reviewTimer: ReturnType<typeof setTimeout> | undefined;
 
 export const projectView: View<Data> = {

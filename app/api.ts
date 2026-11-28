@@ -17,6 +17,8 @@ export interface Plan {
 }
 
 export interface Me {
+  // Whether openmerit.ai serves the app, or a server someone runs with `openmerit server start`, which needs no plan.
+  mode: "hosted" | "self-hosted";
   user: { id: string };
   // The Clerk organization; its name is null when the organization has no slug.
   account: { id: string; name: string | null };

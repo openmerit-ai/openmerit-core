@@ -378,6 +378,12 @@ test("a project adds GitHub repositories by URL, token or the member's GitHub co
   const member = text(projectView.render({ project: claims, endpoints: [], repos, github }, page(await account("member"))));
   assert.match(member, /Only an admin of Sahra Health can add, review or remove repositories/);
   assert.doesNotMatch(member, /From your GitHub connection/);
+  // Without a plan, openmerit.ai asks for one before a review; a self-hosted server has no plans.
+  const planless = { ...me, plan: { ...me.plan, status: "none" as const } };
+  assert.match(text(projectView.render({ project: claims, endpoints: [], repos, github }, page(planless))), /Reviewing a repository needs an active plan/);
+  const selfHosted = projectView.render({ project: claims, endpoints: [], repos, github }, page({ ...planless, mode: "self-hosted" }));
+  assert.doesNotMatch(selfHosted.__html, /Choose a plan|needs an active plan/);
+  assert.match(selfHosted.__html, /data-action="addRepo"/);
   // Without a GitHub connection, the project points to Account settings, which connects it.
   assert.match(text(projectView.render({ project: claims, endpoints: [], repos, github: noGithub }, page(me))), /Connect GitHub on Account settings/);
   const subscriptions = await send<Subscriptions>("/api/me/subscriptions");
