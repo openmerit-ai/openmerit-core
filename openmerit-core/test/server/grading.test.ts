@@ -263,7 +263,7 @@ test("the coding agent sends back the user's decision on a result's change: an a
   } finally { await stop(app); await models.close(); }
 });
 
-test("a person grades a run's answers: a disagreement writes the eval again, agreement accepts it, and later runs reuse it without asking", async () => {
+test("a person grades a run's answers: a disagreement writes the eval again, agreement accepts it, grades are never asked twice, and a later dispute rewrites only its case", async () => {
   const models = await fakeModels();
   const app = await startApp({ models, env: CLERK });
   try {
@@ -307,6 +307,12 @@ test("a person grades a run's answers: a disagreement writes the eval again, agr
     const again = await waitFor(result, value => value.data.phase === "grading" && (value.data.questions as { id: string }[])[0]!.id.includes("_r2_"), 120_000);
     assert.ok(models.calls.some(call => call.ticket === "reviser"), "the reviser ran on OpenMerit's key");
     assert.ok((again.data.notices as string[]).includes("OpenMerit wrote the eval again from your grades of round 1."), JSON.stringify(again.data.notices));
+    // Round 2 asks only about answers nobody graded, a few at a time, starting with the rewritten case.
+    const answerOf = (detail: string) => detail.replace(/, round \d+/, "");
+    const round2 = again.data.questions as { id: string; detail: string }[];
+    assert.ok(round2.length > 0 && round2.length <= 4, `${round2.length} questions in round 2`);
+    const round1 = new Set(questions.map(question => answerOf(question.detail)));
+    assert.ok(round2.every(question => !round1.has(answerOf(question.detail))), "no answer is asked about twice");
     const spotChecked: { id: string; detail: string }[][] = [];
     const done = await untilDone(agent, jobId, undefined, questions => spotChecked.push(questions));
     assert.equal(done.data.status, "done", done.text);
@@ -323,21 +329,31 @@ test("a person grades a run's answers: a disagreement writes the eval again, agr
     const spot = (asked: { id: string; detail: string }[]) => asked.filter(question => /\(a candidate\)/.test(question.detail));
     assert.ok(spotChecked.some(questions => spot(questions).length > 0 && spot(questions).length <= 4), "a spot-check of the pick's answers");
 
-    // The accepted eval keeps the answers the person graded. One the judge now grades differently is flagged on the next run.
+    // The task keeps every answer the person graded, across rounds; the accepted eval's cases still have theirs.
     const rivet = createClient<Registry>({ endpoint: `http://127.0.0.1:${app.enginePort}`, token: "test-token" });
     const accountActor = rivet.account.getOrCreate(["org_grade"]);
-    const kept = (await accountActor.evalGrades({ taskId: task!.id, version: 1 }))!;
+    const kept = await accountActor.taskGrades(task!.id);
     assert.ok(kept.length > 0 && kept.every(item => item.verdict === "good" || item.verdict === "bad"), JSON.stringify(kept).slice(0, 300));
-    await accountActor.saveEvalGrades({ taskId: task!.id, version: 1, grades: kept.map((item, index) => (index === 0 ? { ...item, verdict: item.verdict === "good" ? "bad" : "good" } : item)) });
 
-    // The next run measures on the accepted eval against its bar, and asks nothing.
+    // A grade the eval now disagrees with, on a written case: the next run a person starts writes that case again and asks only about it.
+    const disputed = kept.find(item => item.caseId.startsWith("written-"))!;
+    await accountActor.addTaskGrades({ taskId: task!.id, grades: [{ ...disputed, verdict: disputed.verdict === "good" ? "bad" : "good", note: "the queue should name the product area" }] });
     const next = await agent.tool("openmerit_recommend", { bundle: bundle("graded classifier", false), environment: "acme/grade" });
-    assert.equal((next.data.estimate as { rounds: number }).rounds, 1, "a run on the accepted eval grades nothing");
     assert.doesNotMatch(next.text, /Before it searches/);
-    const second = await waitFor(() => agent.tool("openmerit_result", { job_id: next.data.job_id }), value => ["done", "failed", "stopped", "needs_input"].includes(String(value.data.status)), 180_000);
+    const asked2: { id: string; detail: string }[][] = [];
+    const second = await untilDone(agent, String(next.data.job_id), undefined, questions => asked2.push(questions));
     assert.equal(second.data.status, "done", second.text);
-    const later = (await agent.api<{ grading: { rounds: number; accepted: boolean; bar: string }; evalVersion: number }>(`/api/runs/${String(next.data.job_id)}`)).body;
-    assert.deepEqual([later.grading.rounds, later.grading.accepted, later.grading.bar, later.evalVersion], [0, true, "criteria", 1]);
-    assert.match(second.text, new RegExp(`The eval now grades 1 of the ${kept.length} answers you graded when you accepted version 1 differently from you: ${kept[0]!.caseId}`));
+    // The current model's example answer the person graded wrong in the first run is disputed too, but an example cannot be rewritten, so it stays out.
+    assert.match(second.text, new RegExp(`The eval grades \\d+ of the answers you graded differently from you: [^\\n]*${disputed.caseId} \\(${disputed.model.replace(/[.]/g, "\\.")}\\)[^\\n]*\\. This run writes that case of eval version 1 again`));
+    const trialQuestions = asked2[0] ?? [];
+    assert.ok(trialQuestions.length > 0 && trialQuestions.length <= 4, `${trialQuestions.length} questions after the rewrite`);
+    assert.ok(trialQuestions.every(question => !kept.some(item => question.detail.includes(`Answer:\n${item.output}\n`) && question.detail.includes(item.model) && question.detail.includes(`case ${item.caseId},`))), "kept answers are not asked again");
+    const later = (await agent.api<{ grading: { accepted: boolean; bar: string }; evalVersion: number }>(`/api/runs/${String(next.data.job_id)}`)).body;
+    assert.deepEqual([later.grading.accepted, later.grading.bar, later.evalVersion], [true, "criteria", 2]);
+    const rewrittenEval = (await agent.api<{ accepted: { version: number; cases: { id: string }[] } }>(`/api/tasks/${task!.id}/eval`)).body.accepted;
+    assert.equal(rewrittenEval.version, 2);
+    assert.ok(!rewrittenEval.cases.some(item => item.id === disputed.caseId), "the disputed case was written again under a new ID");
+    // Its disputed grade went with it, even when the rewrite asked the same input again and the person graded the new answer.
+    assert.ok(!(await accountActor.taskGrades(task!.id)).some(item => item.caseKey === disputed.caseKey && item.model === disputed.model && item.output === disputed.output && item.verdict !== disputed.verdict), "the disputed grade was retired");
   } finally { await stop(app); await models.close(); }
 });

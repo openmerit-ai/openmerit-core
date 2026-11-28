@@ -1,7 +1,7 @@
-// The grading loop's eval revision (eval/loop.ts): a round's grades change only the cases they dispute.
+// The grading loop (eval/loop.ts): revision changes only the disputed cases, one dispute is tolerated, and graded answers are not asked again.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { disputedCases, reviseEval, type RunArtifact, type SampleGrade } from "../src/eval/loop.ts";
+import { advanceLoop, answerKey, disputedCases, pickSamples, reviseEval, startLoop, type RunArtifact, type SampleGrade } from "../src/eval/loop.ts";
 import type { Harness } from "../src/harness/harness.ts";
 import type { Case, TaskBundle } from "../src/ranking/index.ts";
 
@@ -46,4 +46,37 @@ test("revising the eval from one disputed case keeps every other case word for w
   assert.equal(added[0]!.input.ticket, "My card was charged twice and the app crashed");
   assert.ok(!cases.some(item => item.id === added[0]!.id), `a new ID, not ${added[0]!.id}`);
   assert.deepEqual(revised.bundle.criteria, ["The queue is the one the ticket's main problem belongs to."]);
+});
+
+test("one disputed case is tolerated and left out, unless it is the current model's answer or another case is disputed too, kept grades included", () => {
+  const sample = (role: "current" | "trial", caseId: string, pass: boolean) => ({ id: `${role}:${caseId}`, caseId, kind: "typical", model: role === "current" ? "m/current" : "m/cheap", role, input: "", output: "", toolCalls: [], pass, failedChecks: [] });
+  const graded = (samples: ReturnType<typeof sample>[], kept: { caseId: string; current: boolean }[] = []) => {
+    const tried = advanceLoop(startLoop(1, "current", true), { type: "tried", artifact: { samples } });
+    // The person grades every answer right: an answer the eval failed is a disagreement.
+    return advanceLoop(tried, { type: "graded", grades: samples.map(item => ({ sampleId: item.id, verdict: "good" })), kept });
+  };
+  const one = graded([sample("current", "w1", true), sample("trial", "w2", false)]);
+  assert.deepEqual([one.status, one.disputed], ["accepted", ["w2"]]);
+  assert.equal(graded([sample("current", "w1", false), sample("trial", "w2", true)]).status, "regenerating", "never on the current model's own answer");
+  assert.equal(graded([sample("trial", "w2", false), sample("trial", "w3", false)]).status, "regenerating");
+  assert.equal(graded([sample("trial", "w2", false)], [{ caseId: "w4", current: false }]).status, "regenerating", "a kept grade's dispute counts");
+  assert.deepEqual(graded([], [{ caseId: "w4", current: false }]).disputed, ["w4"]);
+  assert.deepEqual(graded([sample("trial", "w2", true)]).disputed, []);
+});
+
+test("answers are the same for the kept grades when their JSON is, whatever the key order and spacing; text must match exactly", () => {
+  const key = (output: string) => answerKey({ output, toolCalls: [] });
+  assert.equal(key('{"b": 1, "a": {"y": [1, 2], "x": null}}'), key('{"a":{"x":null,"y":[1,2]},"b":1}'));
+  assert.notEqual(key('{"a":[1,2]}'), key('{"a":[2,1]}'));
+  assert.notEqual(key("billing"), key("billing "));
+  assert.notEqual(answerKey({ output: "", toolCalls: [{ name: "f", arguments: '{"a":1}' }] }), answerKey({ output: "", toolCalls: [{ name: "f", arguments: '{"a":2}' }] }));
+});
+
+test("sampling skips graded answers and asks about rewritten cases first", () => {
+  const answer = (caseId: string, pass: boolean) => ({ caseId, kind: "typical", input: { q: caseId }, output: caseId, toolCalls: [], pass, failedChecks: [] });
+  const answers = ["w1", "w2", "w3", "w4", "w5"].map((id, index) => answer(id, index % 2 === 0));
+  const picked = pickSamples([{ model: "m", role: "trial", answers }], 2, { skip: item => item.caseId === "w1", first: item => item.caseId === "w5" });
+  assert.equal(picked.length, 2);
+  assert.equal(picked[0]!.caseId, "w5");
+  assert.ok(!picked.some(item => item.caseId === "w1"));
 });
