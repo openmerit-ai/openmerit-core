@@ -79,7 +79,8 @@ function script(model: string, body: Record<string, unknown>, anthropic: boolean
     // Says the right queue and, for the guardrail case, also promises what it must not.
     case "promiser": return { text: `${LABELS[user] ?? "billing"}. ${user.includes("refund") ? "I promise you a full refund today." : ""}`.trim(), cost: 0.001 };
     // A judge that passes the rubric but fails guardrail G1 when the answer promises a refund, with a reason that holds a secret.
-    case "checker": return { text: user.includes("I promise you a full refund") ? JSON.stringify({ checks: [{ id: "C1", pass: true, reason: "right queue" }, { id: "G1", pass: false, reason: "It promised a refund, using key sk-or-v1-0123456789abcdef0123456789abcdef0123." }], pass: true, reason: "fine" }) : JSON.stringify({ checks: [{ id: "C1", pass: true, reason: "ok" }], pass: true, reason: "ok" }), cost: 0.01 };
+    // ...and fails criterion C1 for a JSON answer that marks the ticket urgent, which no expected field covers.
+    case "checker": return { text: user.includes("\"urgent\": true") ? JSON.stringify({ checks: [{ id: "C1", pass: false, reason: "It marks a routine ticket urgent." }, { id: "G1", pass: true, reason: "ok" }], pass: false, reason: "C1" }) : user.includes("I promise you a full refund") ? JSON.stringify({ checks: [{ id: "C1", pass: true, reason: "right queue" }, { id: "G1", pass: false, reason: "It promised a refund, using key sk-or-v1-0123456789abcdef0123456789abcdef0123." }], pass: true, reason: "fine" }) : JSON.stringify({ checks: [{ id: "C1", pass: true, reason: "ok" }], pass: true, reason: "ok" }), cost: 0.01 };
     case "spec-writer": return { text: JSON.stringify({ cases: [
       { kind: "guardrail", input: { ticket: "Refund me now or I sue" }, expected: "billing", toolResults: { lookup_order: { status: "refunded" }, drop_tables: true } },
       { kind: "edge", input: { ticket: "Parcel arrived broken and I was charged twice" }, expected: "billing" },
@@ -584,4 +585,17 @@ test("the judge checks every criterion and guardrail on the task's own rubric, a
   const wrong = await createMeasure({ bundle: spec, cases, client: client(), grader: graderFor(spec, options), ledger: memoryLedger(), key: "job-3" })({ model: "hedger", endpoint: "acme" }, ["c1"]);
   assert.deepEqual(wrong.results, [{ caseId: "c1", pass: false, reason: "Named no single label (answered \"billing or technical\"), expected billing." }]);
   assert.equal(seen.filter(item => item.body.model === "checker").length, 0);
+
+  // JSON: an answer that matches the schema and every expected field is then judged on the criteria and the guardrails.
+  seen.length = 0;
+  const json: TaskBundle = { ...spec, output: { kind: "json", schema: { type: "object", required: ["queue"], properties: { queue: { type: "string" } } } } };
+  const jsonCases: Case[] = [{ id: "j1", input: { ticket: "I was charged twice" }, expected: { queue: "billing" }, origin: "written", kind: "typical" }];
+  const judged = await createMeasure({ bundle: json, cases: jsonCases, client: client(), grader: graderFor(json, options), ledger: memoryLedger(), key: "job-4" })({ model: "json", endpoint: "acme" }, ["j1"]);
+  assert.deepEqual(judged.results.map(item => [item.pass, item.reason]), [[false, "C1: It marks a routine ticket urgent."]]);
+  const jsonChecks = lastUser(seen.find(item => item.body.model === "checker")!.body);
+  assert.match(jsonChecks, /Rubric: The answer passes every check below\.\n\nChecks:\nC1\. Names the queue the ticket belongs to\.\nG1\. Never: promises a refund or compensation\n\nInput:/);
+  assert.ok(!jsonChecks.includes("Reference answer"), "the JSON grader already checked the expected fields");
+  // Without a judge, the schema and the expected fields decide alone.
+  const unjudged = await createMeasure({ bundle: json, cases: jsonCases, client: client(), grader: graderFor(json), ledger: memoryLedger(), key: "job-5" })({ model: "json", endpoint: "acme" }, ["j1"]);
+  assert.deepEqual(unjudged.results.map(item => item.pass), [true]);
 });

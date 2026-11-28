@@ -157,8 +157,11 @@ export interface JudgeOptions {
   model: string;
   /** What a passing answer does, in plain words; by default the task itself (`rubricFor`). */
   rubric?: string;
-  /** Judge only the guardrails, when another grader already decided the rest. */
-  only?: "guardrails";
+  /**
+   * Judge only the checks, when another grader already decided the rest: `guardrails` alone after a label
+   * matched, `checks` (criteria and guardrails) after a JSON answer matched its schema and expected fields.
+   */
+  only?: "guardrails" | "checks";
   maxTokens?: number;
 }
 
@@ -176,9 +179,9 @@ export function rubricFor(bundle: TaskBundle): string {
 }
 
 /** The checks a case's answer is judged on: one per criterion (C1…) and one per guardrail (G1…). */
-export function checksFor(bundle: TaskBundle, only?: "guardrails"): { id: string; text: string }[] {
+export function checksFor(bundle: TaskBundle, only?: JudgeOptions["only"]): { id: string; text: string }[] {
   return [
-    ...(only ? [] : (bundle.criteria ?? []).map((text, index) => ({ id: `C${index + 1}`, text }))),
+    ...(only === "guardrails" ? [] : (bundle.criteria ?? []).map((text, index) => ({ id: `C${index + 1}`, text }))),
     ...(bundle.guardrails ?? []).map((text, index) => ({ id: `G${index + 1}`, text: `Never: ${text}` })),
   ];
 }
@@ -221,7 +224,7 @@ export function judge(options: JudgeOptions): Grader {
       const checks = checksFor(bundle, options.only);
       const prompt = [
         `Task: ${bundle.task}`,
-        `Rubric: ${options.only ? "The answer breaks none of the checks below." : options.rubric ?? rubricFor(bundle)}`,
+        `Rubric: ${options.only === "guardrails" ? "The answer breaks none of the checks below." : options.only === "checks" ? "The answer passes every check below." : options.rubric ?? rubricFor(bundle)}`,
         ...(checks.length ? [`Checks:\n${checks.map(check => `${check.id}. ${check.text}`).join("\n")}`] : []),
         `Input:\n${input}`,
         ...(expected === undefined ? [] : [`Reference answer:\n${typeof expected === "string" ? expected : JSON.stringify(expected)}`]),
@@ -229,7 +232,7 @@ export function judge(options: JudgeOptions): Grader {
       ].join("\n\n");
       const answer = await options.client.complete({
         endpoint: options.endpoint, model: options.model, system: JUDGE_SYSTEM, messages: [{ role: "user", content: prompt }], maxTokens: options.maxTokens ?? 2048,
-      }, { ledger, key: `${key}/judge${options.only ? "-guardrails" : ""}`, ...(signal ? { signal } : {}) });
+      }, { ledger, key: `${key}/judge${options.only ? `-${options.only}` : ""}`, ...(signal ? { signal } : {}) });
       // The judge's provider refused the case itself, as it does for some guardrail cases: asking again gets the same refusal.
       if (!answer.ok && /content_filter/i.test(answer.error ?? "")) throw new Ungradable(`The judge ${options.model}'s provider refused to grade case ${caseItem.id} (content filter)`);
       const verdict = answer.ok ? readVerdict(answer.text, checks) : null;
@@ -389,25 +392,29 @@ export function flow(output: Grader): Grader {
 const outputGrader = (bundle: TaskBundle, judgeOptions?: JudgeOptions): Grader =>
   bundle.output.kind === "label" ? labelMatch() : bundle.output.kind === "json" ? jsonSchema() : judgeOptions ? judge(judgeOptions) : exactMatch();
 
-/** `first`, then, when it passes, the judge on the bundle's guardrails: a right label can still break one. */
-const thenGuardrails = (first: Grader, judgeOptions: JudgeOptions): Grader => ({
+/**
+ * `first`, then, when it passes, the judge on the bundle's checks: a right label can still break a guardrail, and
+ * a JSON answer that matches its schema and the fields a case expects can still miss a criterion.
+ */
+const thenChecks = (first: Grader, judgeOptions: JudgeOptions, only: NonNullable<JudgeOptions["only"]>): Grader => ({
   async grade(input) {
     const decided = await first.grade(input);
     if (!decided.pass) return decided;
-    const checked = await judge({ ...judgeOptions, only: "guardrails" }).grade(input);
+    const checked = await judge({ ...judgeOptions, only }).grade(input);
     return { ...checked, costUsd: decided.costUsd + checked.costUsd, costIsEstimate: decided.costIsEstimate || checked.costIsEstimate };
   },
 });
 
 /**
  * The grader a bundle's output calls for: its labels, its JSON schema, or for text the judge when one
- * is given (on the task's rubric, its criteria and its guardrails), else an exact match. A label or
- * JSON answer that is right is also judged on the guardrails, when the spec has any and a judge is
- * given. Trace cases are graded by parity with their recorded answer.
+ * is given (on the task's rubric, its criteria and its guardrails), else an exact match. When a judge
+ * is given, a label that is right is also judged on the spec's guardrails, and a JSON answer that is
+ * right on its criteria and guardrails. Trace cases are graded by parity with their recorded answer.
  */
 export function graderFor(bundle: TaskBundle, options: { judge?: JudgeOptions } = {}): Grader {
   const base = outputGrader(bundle, options.judge);
-  const output = options.judge && bundle.output.kind !== "text" && bundle.guardrails?.length ? thenGuardrails(base, options.judge) : base;
+  const only = bundle.output.kind === "json" ? "checks" : "guardrails";
+  const output = options.judge && bundle.output.kind !== "text" && checksFor(bundle, only).length ? thenChecks(base, options.judge, only) : base;
   const trace = parity({ text: output });
   // Trace cases are graded by parity with what they recorded, other cases by the output's grader.
   return { grade: input => (input.caseItem.origin === "trace" ? trace : output).grade(input) };
