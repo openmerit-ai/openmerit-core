@@ -1,14 +1,15 @@
 // The task actor, keyed by account and task ID: the latest bundle, the labels the user gave, past
-// results, the agent it belongs to and its watch schedule. The schedule is armed from the first job
-// and checks the catalogue; a tick starts a watch job when the catalogue changed since the last run
-// and the account says the task is watching, not frozen, idle or retired (account.ts `watchState`).
-// Retiring disarms the schedule; the next openmerit_recommend call arms it again.
+// results, the agent it belongs to and its watch. The first job arms the watch, which subscribes the task
+// to the catalogue; when a refresh adds models or makes some cheaper, a tick starts a watch job only
+// when one of them could beat what the task has now (job/pool.ts `couldBeat`) and the account says the
+// task is watching, not frozen, idle or retired (account.ts `watchState`). There is no schedule of its own.
+// Retiring disarms the watch; the next openmerit_recommend call arms it again.
 import { actor } from "rivetkit";
 import type { Case, TaskBundle } from "../../ranking/index.ts";
 import type { JobResult } from "../../job/report.ts";
-import { services } from "../services.ts";
 import type { Registry } from "../registry.ts";
 import { DEFAULT_PROJECT, startJob } from "../start.ts";
+import { couldBeat } from "../../job/pool.ts";
 
 export interface TaskState {
   accountId: string;
@@ -25,7 +26,7 @@ export interface TaskState {
   written?: Case[] | null;
   jobs: string[];
   lastResult: { jobId: string; status: string; pick: string | null; endpoint: string | null; currentModel: string; finishedAt: string } | null;
-  /** Whether the watch schedule and the catalogue subscription are set up. Off before the first job and once retired. */
+  /** Whether the catalogue subscription is set up. Off before the first job and once retired. */
   armed?: boolean;
   /** The catalogue version the last job ran on. */
   catalogueVersion: string | null;
@@ -52,7 +53,6 @@ export const task = actor({
       await save(c);
       const now = Date.now();
       if (input.kind === "run" && !armed(c.state)) {
-        await c.cron.every({ name: WATCH, interval: Math.max(5_000, services().config.watchIntervalMs), action: "watchTick", maxHistory: 20 });
         await c.client<Registry>().catalogue.getOrCreate(["global"]).subscribe({ accountId: c.state.accountId, taskId: c.state.taskId });
         c.state.armed = true;
         await save(c);
@@ -119,29 +119,46 @@ export const task = actor({
       });
     },
 
-    /** Starts a watch job when the task is watching and the catalogue changed since the last run. Runs on the schedule and when the catalogue tells it. */
-    watchTick: async (c): Promise<{ started: string | null; reason: string }> => {
+    /**
+     * Starts a watch job when the task is watching and a catalogue refresh's new or cheaper `models` could beat what it
+     * has now. The catalogue calls it. A call without models is the daily schedule tasks had before: it removes it.
+     */
+    watchTick: async (c, input?: { models: string[] }): Promise<{ started: string | null; reason: string }> => {
+      if (!input) {
+        await c.cron.delete(WATCH).catch(() => false);
+        return { started: null, reason: "the daily check is gone: a catalogue change starts a watch job" };
+      }
       if (!armed(c.state) || !c.state.bundle) return { started: null, reason: "not watching" };
       // The first job sets the catalogue version; until it finishes there is nothing to re-run against.
       if (!c.state.lastResult) return { started: null, reason: "the first run has not finished" };
       const client = c.client<Registry>();
       // Frozen, idle and retired are the account's to decide: it holds the guardrails and the last recommend call.
-      const row = await client.account.getOrCreate([c.state.accountId]).task(c.state.taskId);
+      const account = client.account.getOrCreate([c.state.accountId]);
+      const row = await account.task(c.state.taskId);
       if (row?.state !== "watching") return { started: null, reason: `task is ${row?.state ?? "unknown to the account"}` };
-      const version = await client.catalogue.getOrCreate(["global"]).version();
-      if (version === c.state.catalogueVersion) return { started: null, reason: `catalogue ${version} unchanged` };
-      // The new job runs on this version: later ticks wait for the next one.
+      const catalogue = await client.catalogue.getOrCreate(["global"]).get();
+      if (catalogue.version === c.state.catalogueVersion) return { started: null, reason: `catalogue ${catalogue.version} unchanged` };
+      const projectId = c.state.projectId ?? DEFAULT_PROJECT, bundle = c.state.bundle;
+      const [endpoints, guardrails, accepted] = await Promise.all([
+        account.endpointsForJob(projectId), account.resolveGuardrails({ projectId, environment: c.state.environment, agent: c.state.agent, taskId: c.state.taskId }), account.evalFor(c.state.taskId),
+      ]);
+      // The pick to beat: the last run's, while the task still runs the model that run measured against.
+      const last = c.state.lastResult;
+      const pick = last.pick && last.currentModel === bundle.current.model ? last.pick : null;
+      const beats = couldBeat({ catalogue, endpoints, bundle, guardrails: guardrails.effective, wide: accepted?.bar === "criteria", pick, changed: input.models });
+      // This version is decided either way: the next tick waits for the next catalogue.
       const previous = c.state.catalogueVersion;
-      c.state.catalogueVersion = version;
+      c.state.catalogueVersion = catalogue.version;
       await save(c);
-      const started = await startJob(client, { accountId: c.state.accountId, projectId: c.state.projectId ?? DEFAULT_PROJECT, environment: c.state.environment, agent: c.state.agent, bundle: c.state.bundle, kind: "watch", trigger: "watch", userId: null });
+      if (!beats.length) return { started: null, reason: `no new or cheaper model in its pool is as capable as ${bundle.current.model} and cheaper than ${pick ?? bundle.current.model}` };
+      const started = await startJob(client, { accountId: c.state.accountId, projectId, environment: c.state.environment, agent: c.state.agent, bundle, kind: "watch", trigger: "watch", userId: null });
       if (!started.ok) {
         c.state.catalogueVersion = previous;
         c.state.notices = [`${new Date().toISOString()}: watch job not started: ${started.error}`, ...c.state.notices].slice(0, 20);
         await save(c);
         return { started: null, reason: started.error };
       }
-      return { started: started.jobId, reason: `catalogue ${version} is newer than ${previous ?? "the last run's"}` };
+      return { started: started.jobId, reason: `${beats.join(", ")} could beat ${pick ?? bundle.current.model}` };
     },
 
     /** For deleting the task or its account: stops the schedule and the catalogue's notices, which would otherwise recreate the task. */
