@@ -53,7 +53,7 @@
 <ul>
 <li><strong>Approval:</strong> you see the eval before anything runs: case counts, criteria, guardrails and judge.</li>
 <li><strong>Grading:</strong> before the search, you grade a sample of answers from your current model and a cheaper one. Where you and the eval disagree, the eval is wrong, and OpenMerit rewrites it from your grades. Only the cases you disputed change, and only the eval you accept is used to search. Before a model is recommended, you check a few of its answers.</li>
-<li><strong>Saving:</strong> once you accept it, the eval is saved in your repository under <code>.openmerit/evals/&lt;task&gt;/</code>. Later runs reuse it, and you can edit or delete it like any other file.</li>
+<li><strong>Saving:</strong> once you accept it, OpenMerit keeps the eval, with the answers you graded; nothing is written to your repository. Later runs, including checks of new models, reuse it unchanged. You can revise it in the app, and it reopens for grading when your prompt, tools or output change.</li>
 </ul>
 
 <h2 id="limits">Limits</h2>
