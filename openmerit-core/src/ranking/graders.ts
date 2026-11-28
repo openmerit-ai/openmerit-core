@@ -411,10 +411,15 @@ const thenChecks = (first: Grader, judgeOptions: JudgeOptions, only: NonNullable
  * is given, a label that is right is also judged on the spec's guardrails, and a JSON answer that is
  * right on its criteria and guardrails. Trace cases are graded by parity with their recorded answer.
  */
+const judgedChecks = (bundle: TaskBundle) => checksFor(bundle, bundle.output.kind === "json" ? "checks" : "guardrails");
+
+/** Whether `graderFor` asks a judge on this bundle: always for text, else when its output has checks to judge. */
+export const needsJudge = (bundle: TaskBundle): boolean => bundle.output.kind === "text" || judgedChecks(bundle).length > 0;
+
 export function graderFor(bundle: TaskBundle, options: { judge?: JudgeOptions } = {}): Grader {
   const base = outputGrader(bundle, options.judge);
   const only = bundle.output.kind === "json" ? "checks" : "guardrails";
-  const output = options.judge && bundle.output.kind !== "text" && checksFor(bundle, only).length ? thenChecks(base, options.judge, only) : base;
+  const output = options.judge && bundle.output.kind !== "text" && judgedChecks(bundle).length ? thenChecks(base, options.judge, only) : base;
   const trace = parity({ text: output });
   // Trace cases are graded by parity with what they recorded, other cases by the output's grader.
   return { grade: input => (input.caseItem.origin === "trace" ? trace : output).grade(input) };

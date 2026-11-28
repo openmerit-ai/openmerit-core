@@ -6,7 +6,7 @@ export type { TaskBundle, Case, CaseKind, EndpointKind, Message, ToolCall, Compl
 export { BudgetRefused, createClient, type EndpointConfig, type Meter, type ModelCall, type ModelClient } from "./clients.ts";
 export { runCase, callTokens, callCost, traceRequest, fill, placeholders, DEFAULT_MAX_TURNS, invalidCases, type CaseRun, type CaseFailure, type RefusedCall } from "./runner.ts";
 export { writeCases, completeWith, labelCheck, applyLabelCheck, LABEL_CHECK_QUESTION, WRITTEN_CASES, type Complete, type WrittenCases } from "./cases.ts";
-export { exactMatch, labelMatch, jsonSchema, judge, parity, flow, graderFor, readLabel, rubricFor, checksFor, stepChecksFor, checksBasedOn, readVerdict, oneSentence, isAssistantMessage, Ungradable, type AssistantMessage, type Grader, type Grade, type GradeInput, type JudgeOptions, type StepCheck } from "./graders.ts";
+export { exactMatch, labelMatch, jsonSchema, judge, parity, flow, graderFor, needsJudge, readLabel, rubricFor, checksFor, stepChecksFor, checksBasedOn, readVerdict, oneSentence, isAssistantMessage, Ungradable, type AssistantMessage, type Grader, type Grade, type GradeInput, type JudgeOptions, type StepCheck } from "./graders.ts";
 export { createMeasure, CASE_CONCURRENCY, type Measure, type MeasureResult, type CaseResult } from "./measure.ts";
 // The engine's ledger and the search's unavailable signal, which callers of `createMeasure` need.
 export { CandidateUnavailable, MemoryLedger, type Ledger, type Funding, type Settlement } from "../engine/index.ts";

@@ -8,7 +8,7 @@ import type { AddressInfo } from "node:net";
 import { after, before, beforeEach, test } from "node:test";
 import { loadCatalogue } from "../catalogue/catalogue.ts";
 import {
-  applyLabelCheck, BudgetRefused, CandidateUnavailable, completeWith, createClient, createMeasure, exactMatch, graderFor, jsonSchema, judge,
+  applyLabelCheck, BudgetRefused, CandidateUnavailable, completeWith, createClient, createMeasure, exactMatch, graderFor, needsJudge, jsonSchema, judge,
   labelMatch, LABEL_CHECK_QUESTION, DEFAULT_MAX_TURNS, flow, invalidCases, MemoryLedger, stepChecksFor, checksBasedOn, writeCases, type Case, type EndpointConfig, type Ledger, type TaskBundle,
 } from "./index.ts";
 
@@ -595,6 +595,9 @@ test("the judge checks every criterion and guardrail on the task's own rubric, a
   const jsonChecks = lastUser(seen.find(item => item.body.model === "checker")!.body);
   assert.match(jsonChecks, /Rubric: The answer passes every check below\.\n\nChecks:\nC1\. Names the queue the ticket belongs to\.\nG1\. Never: promises a refund or compensation\n\nInput:/);
   assert.ok(!jsonChecks.includes("Reference answer"), "the JSON grader already checked the expected fields");
+  // A job asks for a judge whenever the output has checks to judge: a JSON task's criteria are enough, a label's are not.
+  const { guardrails: _guardrails, ...unguarded } = json;
+  assert.deepEqual([needsJudge(unguarded), needsJudge({ ...unguarded, criteria: [] }), needsJudge({ ...spec, guardrails: [] })], [true, false, false]);
   // Without a judge, the schema and the expected fields decide alone.
   const unjudged = await createMeasure({ bundle: json, cases: jsonCases, client: client(), grader: graderFor(json), ledger: memoryLedger(), key: "job-5" })({ model: "json", endpoint: "acme" }, ["j1"]);
   assert.deepEqual(unjudged.results.map(item => item.pass), [true]);
