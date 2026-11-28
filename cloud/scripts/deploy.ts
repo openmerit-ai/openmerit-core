@@ -21,7 +21,7 @@ const ORIGIN = (process.env.RIVET_ORIGIN ?? "https://openmeritdr2i.onrivet.dev")
  * CI jobs a commit needs before it is deployed. Other jobs, such as the npm package's macOS runs,
  * must not have failed, but one still queued, running or cancelled does not hold up the cloud app.
  */
-const REQUIRED_CHECKS = ["verify", "cloud"];
+const REQUIRED_CHECKS = ["verify", "cloud", "cloud-image"];
 /** How long a deploy waits for the origin to report the commit it rolled out. */
 const SERVING_WAIT_MS = 5 * 60_000;
 /** Cluster secrets the pool reads, each set from the variable of the same name. The pool reads only those set on the cluster. */

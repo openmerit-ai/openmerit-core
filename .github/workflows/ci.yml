@@ -10,6 +10,12 @@ on:
 permissions:
   contents: read
 
+# A newer push to a pull request cancels its older run. Runs on main are never cancelled: each main
+# commit needs its own result before scripts/deploy.ts deploys it.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -21,6 +27,17 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run verify
+      # The tree this pull request run tested (its merge with main). merge-when-green.yml compares it
+      # with the squash commit and reuses this run's results on main when they match.
+      - if: github.event_name == 'pull_request'
+        run: git rev-parse 'HEAD^{tree}' > tested-tree
+      - if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tested-tree
+          path: tested-tree
+          retention-days: 7
+          overwrite: true
 
   # Separate job so the slow `wrangler types --check` runs in parallel with verify.
   worker-types:
@@ -52,7 +69,7 @@ jobs:
       - run: npm run check
 
   # The server behind openmerit.ai/mcp (openmerit-core/src/server): typecheck and its tests against a local
-  # Rivet engine with fake sign-in, billing and models (no paid calls), then the hosted Docker image.
+  # Rivet engine with fake sign-in, billing and models (no paid calls). The test files run three at a time.
   cloud:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -71,6 +88,26 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run test:server
+        # They take about 2 minutes. Past this budget, split or speed up the slow tests rather than raise it.
+        timeout-minutes: 5
+
+  # The hosted deploy (cloud/): its deploy script and the Docker image, in parallel with the server's tests.
+  cloud-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: openmerit-core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: npm
+          cache-dependency-path: |
+            cloud/package-lock.json
+            openmerit-core/package-lock.json
+      - run: npm ci
       # The deploy script.
       - run: npm ci && npm run check
         working-directory: cloud

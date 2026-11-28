@@ -98,6 +98,8 @@ async function fakeGitHub(repos: Record<string, FakeRepo>, root: string, install
       PATH: process.env.PATH ?? "", GIT_PROJECT_ROOT: root, GIT_HTTP_EXPORT_ALL: "1", PATH_INFO: `/${git[1]}.git${git[2]}`, QUERY_STRING: url.search.slice(1), REQUEST_METHOD: req.method ?? "GET",
       CONTENT_TYPE: String(req.headers["content-type"] ?? ""), CONTENT_LENGTH: String(body.length), GIT_PROTOCOL: String(req.headers["git-protocol"] ?? ""), HTTP_CONTENT_ENCODING: String(req.headers["content-encoding"] ?? ""),
     } });
+    // git can exit before it reads the request, as when the client gave up on a clone; its answer still comes on stdout.
+    cgi.stdin.on("error", () => {});
     cgi.stdin.end(body);
     const out: Buffer[] = [];
     cgi.stdout.on("data", chunk => out.push(chunk as Buffer));
